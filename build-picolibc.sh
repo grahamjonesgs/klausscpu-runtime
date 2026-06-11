@@ -9,10 +9,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-BUILD_DIR="$(git -C ../../../.. rev-parse --show-toplevel)/build"
-LLVM_BIN="$BUILD_DIR/bin"
+# Toolchain lives in the separate klausscpu-llvm fork; point KLAUSSCPU_LLVM_BIN
+# at <klausscpu-llvm>/build/bin.  See README.md.
+LLVM_BIN="${KLAUSSCPU_LLVM_BIN:?set KLAUSSCPU_LLVM_BIN to <klausscpu-llvm>/build/bin (the built toolchain). See README.md}"
 
-# Add our build/bin to PATH so meson finds clang, llvm-ar, etc.
+# Add the toolchain bin to PATH so meson finds clang, llvm-ar, etc.
 export PATH="$LLVM_BIN:$PATH"
 
 PICOLIBC_SRC="$(pwd)/picolibc-src"

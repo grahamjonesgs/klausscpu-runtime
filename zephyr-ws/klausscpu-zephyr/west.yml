@@ -1,0 +1,34 @@
+# west manifest for the KlaussCPU Zephyr workspace.
+#
+# T2 "star" topology: this module is the manifest repo; it imports upstream
+# Zephyr at the pinned baseline (v3.7.0) and only the external modules the
+# KlaussCPU port actually needs.  Initialise with:
+#
+#     cd zephyr-ws
+#     west init -l klausscpu-zephyr
+#     west update                     # fetches zephyr/ + modules/fs/fatfs
+#
+# Then re-apply the two vendored Zephyr patches (see README.md "Vendored Zephyr
+# patches").  klausscpu-zephyr itself is supplied to the build via
+# -DEXTRA_ZEPHYR_MODULES, alongside the wolfSSL/wolfSSH sources — it is not
+# fetched by west.
+#
+# Both zephyr/ and modules/ are gitignored (fetched, not committed).
+
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v3.7.0
+      import:
+        # Minimal-libc custom target: the only external module the ssh_shell app
+        # needs is FatFs (CONFIG_FAT_FILESYSTEM_ELM → modules/fs/fatfs).  All
+        # networking / shell / LLEXT / filesystem core lives in the main zephyr
+        # tree; wolfSSL/wolfSSH come via EXTRA_ZEPHYR_MODULES, not west.
+        # Add module names here if a build reports one missing.
+        name-allowlist:
+          - fatfs

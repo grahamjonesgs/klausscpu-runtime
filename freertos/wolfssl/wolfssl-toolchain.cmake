@@ -16,20 +16,25 @@ set(CMAKE_CXX_COMPILER_WORKS 1 CACHE BOOL "" FORCE)
 set(CMAKE_SYSTEM_NAME      Generic)
 set(CMAKE_SYSTEM_PROCESSOR klausscpu)
 
-# ── Path computation from the toolchain file's own location ──────────────────
-# This file lives at: runtime/freertos/wolfssl/wolfssl-toolchain.cmake
-# Walk up to find the repo root.
+# ── Path computation ─────────────────────────────────────────────────────────
+# Runtime-relative paths come from this file's own location; the toolchain comes
+# from the klausscpu-llvm fork via the KLAUSSCPU_LLVM_BIN env var (inherited by
+# the try_compile() subprocesses that re-read this file, which do NOT see -D
+# variables passed on the parent's command line).
 get_filename_component(_WOLFSSL_DIR  "${CMAKE_CURRENT_LIST_FILE}" DIRECTORY)
 # _WOLFSSL_DIR  = .../runtime/freertos/wolfssl
 get_filename_component(_FREERTOS_DIR "${_WOLFSSL_DIR}/.."  ABSOLUTE)
 # _FREERTOS_DIR = .../runtime/freertos
 get_filename_component(_RUNTIME_DIR  "${_FREERTOS_DIR}/.." ABSOLUTE)
-# _RUNTIME_DIR  = .../runtime
-# From runtime/ go up 5 more: KlaussCPU → Target → lib → llvm → llvm-project
-get_filename_component(_REPO_ROOT "${_RUNTIME_DIR}/../../../../.." ABSOLUTE)
-# _REPO_ROOT    = .../llvm-project
+# _RUNTIME_DIR  = repo root
 
-set(_LLVM_BUILD   "${_REPO_ROOT}/build")
+if(NOT DEFINED ENV{KLAUSSCPU_LLVM_BIN})
+    message(FATAL_ERROR
+        "KLAUSSCPU_LLVM_BIN is not set. Export it to <klausscpu-llvm>/build/bin "
+        "(the built toolchain). See ../../README.md")
+endif()
+# _LLVM_BUILD = parent of the toolchain bin dir (= <klausscpu-llvm>/build).
+get_filename_component(_LLVM_BUILD "$ENV{KLAUSSCPU_LLVM_BIN}/.." ABSOLUTE)
 set(_PICOLIBC     "${_RUNTIME_DIR}/picolibc-install")
 set(_FREERTOS_INC "${_FREERTOS_DIR}")
 

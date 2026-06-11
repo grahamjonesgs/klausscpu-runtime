@@ -67,16 +67,23 @@ at (or recreate) the workspace to compile.
 ```sh
 # From the parent directory (zephyr-ws):
 pip install --user west
-west init -l klausscpu-zephyr        # if not already initialised
-west update                          # pulls Zephyr 3.7 into ./zephyr/
+west init -l klausscpu-zephyr        # uses klausscpu-zephyr/west.yml (Zephyr v3.7.0)
+west update                          # pulls zephyr/ + modules/fs/fatfs
 ```
+
+`west init -l` reads the tracked manifest `klausscpu-zephyr/west.yml`, which pins
+upstream Zephyr to **v3.7.0** and imports only the `fatfs` module (the sole
+external module this minimal-libc port needs; wolfSSL/wolfSSH are supplied at
+build time via `EXTRA_ZEPHYR_MODULES`, not west). Add module names to the
+manifest's `name-allowlist` if a build reports one missing.
 
 After `west update` the workspace looks like:
 ```
 zephyr-ws/
 ├── .west/                  ← west state (gitignored)
-├── zephyr/                 ← Zephyr 3.7 LTS (gitignored, fetched by west)
-└── klausscpu-zephyr/       ← this module (tracked in git)
+├── zephyr/                 ← Zephyr v3.7.0 (gitignored, fetched by west)
+├── modules/                ← west modules e.g. fs/fatfs (gitignored, fetched)
+└── klausscpu-zephyr/       ← this module + west.yml manifest (tracked in git)
 ```
 
 ## Building

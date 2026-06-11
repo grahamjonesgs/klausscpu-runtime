@@ -11,15 +11,18 @@
 # this script then.  (The bare-metal Makefile links individual crt-*.o instead
 # and doesn't need this.)
 #
-# Usage:  ./build-builtins.sh         # uses $KLAUSSCPU_LLVM_BIN or build/bin
+# Usage:  KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin ./build-builtins.sh
 #
 set -euo pipefail
 
-ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
-LLVM_BIN="${KLAUSSCPU_LLVM_BIN:-$ROOT/build/bin}"
+# Toolchain and compiler-rt sources live in the separate klausscpu-llvm fork;
+# point KLAUSSCPU_LLVM_BIN at <klausscpu-llvm>/build/bin.  See README.md.
+LLVM_BIN="${KLAUSSCPU_LLVM_BIN:?set KLAUSSCPU_LLVM_BIN to <klausscpu-llvm>/build/bin (the built toolchain). See README.md}"
 CLANG="$LLVM_BIN/clang"
 AR="$LLVM_BIN/llvm-ar"
-B="$ROOT/compiler-rt/lib/builtins"
+# Fork root = parent of build/bin; compiler-rt sits alongside the build dir.
+LLVM_ROOT="$(cd "$LLVM_BIN/../.." && pwd)"
+B="$LLVM_ROOT/compiler-rt/lib/builtins"
 TRIPLE="klausscpu-unknown-elf"
 
 [ -x "$CLANG" ] || { echo "clang not found at $CLANG — build the LLVM toolchain first"; exit 1; }

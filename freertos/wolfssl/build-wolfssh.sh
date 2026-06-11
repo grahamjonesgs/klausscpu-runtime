@@ -12,9 +12,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 FREERTOS_DIR="$(realpath "$SCRIPT_DIR/..")"
 RUNTIME_DIR="$(realpath "$SCRIPT_DIR/../..")"
-REPO_ROOT="$(realpath "$SCRIPT_DIR/../../../../../../..")"
-
-LLVM_BUILD="$REPO_ROOT/build"
+# Toolchain lives in the separate klausscpu-llvm fork; point KLAUSSCPU_LLVM_BIN
+# at <klausscpu-llvm>/build/bin.  See ../../README.md.
+LLVM_BIN="${KLAUSSCPU_LLVM_BIN:?set KLAUSSCPU_LLVM_BIN to <klausscpu-llvm>/build/bin (the built toolchain). See ../../README.md}"
+LLVM_BUILD="$(cd "$LLVM_BIN/.." && pwd)"
 PICOLIBC="$RUNTIME_DIR/picolibc-install"
 WOLFSSL_INSTALL="$SCRIPT_DIR/wolfssl-install"
 INSTALL_DIR="$SCRIPT_DIR/wolfssh-install"

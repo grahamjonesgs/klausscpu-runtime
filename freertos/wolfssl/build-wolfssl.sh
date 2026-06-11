@@ -13,9 +13,11 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(realpath "$SCRIPT_DIR/../../../../../../../")"
 RUNTIME_DIR="$(realpath "$SCRIPT_DIR/../..")"
-LLVM_BUILD="$REPO_ROOT/build"
+# Toolchain lives in the separate klausscpu-llvm fork; point KLAUSSCPU_LLVM_BIN
+# at <klausscpu-llvm>/build/bin.  See ../../README.md.
+LLVM_BIN="${KLAUSSCPU_LLVM_BIN:?set KLAUSSCPU_LLVM_BIN to <klausscpu-llvm>/build/bin (the built toolchain). See ../../README.md}"
+LLVM_BUILD="$(cd "$LLVM_BIN/.." && pwd)"
 PICOLIBC="$RUNTIME_DIR/picolibc-install"
 INSTALL_DIR="$SCRIPT_DIR/wolfssl-install"
 WOLFSSL_SRC="$SCRIPT_DIR/wolfssl-src"
@@ -38,6 +40,16 @@ if [ ! -d "$WOLFSSL_SRC" ]; then
     echo "==> Cloning wolfSSL $WOLFSSL_TAG..."
     git clone --depth 1 --branch "$WOLFSSL_TAG" \
         https://github.com/wolfSSL/wolfssl.git "$WOLFSSL_SRC"
+fi
+
+# wolfSSL's zephyr/module.yml ships without a `name:`, so Zephyr derives the
+# module name from the directory — here `wolfssl-src`.  That breaks wolfSSH's
+# `depends: [wolfssl]` when both source trees are passed via
+# EXTRA_ZEPHYR_MODULES (the Zephyr ssh_shell build).  Pin the name to `wolfssl`.
+MODYML="$WOLFSSL_SRC/zephyr/module.yml"
+if [ -f "$MODYML" ] && ! grep -q '^name:' "$MODYML"; then
+    echo "==> Pinning Zephyr module name to 'wolfssl' in module.yml"
+    printf 'name: wolfssl\n%s' "$(cat "$MODYML")" > "$MODYML"
 fi
 
 rm -rf "$BUILD_DIR"

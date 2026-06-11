@@ -9,8 +9,12 @@
 #   cd .. && bash build-picolibc.sh   (builds picolibc with -fPIC once)
 
 RUNTIME   := ..
-BUILD_DIR := ../../../../../../build
-LLVM_BIN  := $(BUILD_DIR)/bin
+# Toolchain lives in the separate klausscpu-llvm fork; point KLAUSSCPU_LLVM_BIN
+# at <klausscpu-llvm>/build/bin.  See ../README.md.
+ifeq ($(strip $(KLAUSSCPU_LLVM_BIN)),)
+$(error KLAUSSCPU_LLVM_BIN is not set. Export it to the built toolchain's bin dir, e.g. `export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin`. See ../README.md)
+endif
+LLVM_BIN  := $(KLAUSSCPU_LLVM_BIN)
 LWIP_DIR  := $(RUNTIME)/lwip
 
 CC      := $(LLVM_BIN)/clang

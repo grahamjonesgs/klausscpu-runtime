@@ -30,11 +30,18 @@
 %: %.S
 %.s: %.S
 
-BUILD_DIR ?= $(shell git rev-parse --show-toplevel)/build
+# ── Toolchain location ────────────────────────────────────────────────────────
+# The KlaussCPU toolchain (clang/llc/ld.lld) is built in the separate
+# klausscpu-llvm fork; this repo only holds the software.  Point
+# KLAUSSCPU_LLVM_BIN at <klausscpu-llvm>/build/bin.  See README.md.
+ifeq ($(strip $(KLAUSSCPU_LLVM_BIN)),)
+$(error KLAUSSCPU_LLVM_BIN is not set. Export it to the built toolchain's bin dir, e.g. `export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin`. See README.md)
+endif
+LLVM_BIN ?= $(KLAUSSCPU_LLVM_BIN)
 
-CC  = $(BUILD_DIR)/bin/clang
-LLC = $(BUILD_DIR)/bin/llc
-LLD = $(BUILD_DIR)/bin/ld.lld
+CC  = $(LLVM_BIN)/clang
+LLC = $(LLVM_BIN)/llc
+LLD = $(LLVM_BIN)/ld.lld
 
 TARGET  = klausscpu-unknown-elf
 TRIPLE  = $(TARGET)
@@ -70,7 +77,9 @@ CFLAGS = -target $(TRIPLE) -O1 \
          -D_LDBL_EQ_DBL
 
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────
-BUILTINS    = $(shell git rev-parse --show-toplevel)/compiler-rt/lib/builtins
+# compiler-rt sources live in the klausscpu-llvm fork, alongside the toolchain.
+# Derive the fork root from $(LLVM_BIN) (= <fork>/build/bin).
+BUILTINS    = $(abspath $(LLVM_BIN)/../../compiler-rt/lib/builtins)
 CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
               -I$(BUILTINS) -D__SOFTFP__
 
@@ -461,7 +470,7 @@ test_sync: test_sync.elf
 # ── Inspect helpers ───────────────────────────────────────────────────────────
 
 %.dump: %.elf
-	$(BUILD_DIR)/bin/llvm-objdump -d --no-show-raw-insn $< | head -60
+	$(LLVM_BIN)/llvm-objdump -d --no-show-raw-insn $< | head -60
 
 clean:
 	rm -f *.o crt-*.o lwip_*.o *.d lwip_*.d *.elf *.pic *.sd.elf *.llext \
