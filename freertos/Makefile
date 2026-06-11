@@ -26,6 +26,18 @@ TARGET  := klausscpu-unknown-elf
 PICOLIBC := $(RUNTIME)/picolibc-install
 KERNEL   := FreeRTOS-Kernel
 
+# Local build dir for objects compiled from the SHARED sources at the repo root
+# (../src, ../fatfs, ../lwip_port) and the fork's compiler-rt.  Writing them here
+# instead of next to the shared sources keeps the repo root, ../src, ../fatfs and
+# ../lwip_port free of this build's .o/.lo/.d artifacts.
+OBJ := obj
+
+# compiler-rt builtins (soft-FP conversions + i128) for console_demo's
+# CRT_CONV_OBJS, built here from the fork's compiler-rt — so the FreeRTOS build
+# no longer relies on a prior bare-metal build having left crt-*.o at the root.
+BUILTINS  := $(abspath $(LLVM_BIN)/../../compiler-rt/lib/builtins)
+CRT_FLAGS := -target $(TARGET) -O1 -fPIC -nostdlibinc -I$(BUILTINS) -D__SOFTFP__
+
 # ── Common compiler flags ───────────────────────────────────────────────────
 
 BASE_CFLAGS := \
@@ -146,48 +158,48 @@ LWIP_PORT_SRCS := \
     sys_arch.c                          # FreeRTOS sys_arch
 
 LWIP_PORT_OBJS := \
-    $(RUNTIME)/lwip_port/ethernetif.lo \
+    $(OBJ)/ethernetif.lo \
     sys_arch.lo
 
 # ── Runtime support ──────────────────────────────────────────────────────────
 
 RUNTIME_OBJS := \
-    $(RUNTIME)/crt0.o \
-    $(RUNTIME)/uart_stubs.o \
-    $(RUNTIME)/src/syscalls.o \
-    $(RUNTIME)/stdio_handles.o \
-    $(RUNTIME)/src/setjmp.o \
-    $(RUNTIME)/src/mdio.o \
-    $(RUNTIME)/src/eth.o
+    $(OBJ)/crt0.o \
+    $(OBJ)/uart_stubs.o \
+    $(OBJ)/syscalls.o \
+    $(OBJ)/stdio_handles.o \
+    $(OBJ)/setjmp.o \
+    $(OBJ)/mdio.o \
+    $(OBJ)/eth.o
 
 # ── FatFs + SD card (console_demo only) ──────────────────────────────────────
 
 FATFS_DIR := $(RUNTIME)/fatfs
 
 FATFS_OBJS := \
-    $(FATFS_DIR)/ff.o \
-    $(FATFS_DIR)/ffsystem.o \
-    $(FATFS_DIR)/ffunicode.o
+    $(OBJ)/ff.o \
+    $(OBJ)/ffsystem.o \
+    $(OBJ)/ffunicode.o
 
 SD_OBJS := \
-    $(RUNTIME)/src/sd.o \
-    $(RUNTIME)/src/diskio.o
+    $(OBJ)/sd.o \
+    $(OBJ)/diskio.o
 
 # ── Hardware crypto driver ────────────────────────────────────────────────────
 
-CRYPTO_HW_OBJ := $(RUNTIME)/src/crypto_hw.o
+CRYPTO_HW_OBJ := $(OBJ)/crypto_hw.o
 
 # ── compiler-rt runtime support objects ──────────────────────────────────────
 # picolibc pulls in float/double conversion symbols even when %f is not used.
 # wolfSSL with 64-bit SP math uses __udivti3/__umodti3/__multi3 (i128 arithmetic).
 CRT_CONV_OBJS := \
-    $(RUNTIME)/crt-extendsfdf2.o \
-    $(RUNTIME)/crt-truncdfsf2.o \
-    $(RUNTIME)/fp_mode_stub.o \
-    $(RUNTIME)/crt-udivti3.o \
-    $(RUNTIME)/crt-umodti3.o \
-    $(RUNTIME)/crt-udivmodti4.o \
-    $(RUNTIME)/crt-multi3.o
+    $(OBJ)/crt-extendsfdf2.o \
+    $(OBJ)/crt-truncdfsf2.o \
+    $(OBJ)/fp_mode_stub.o \
+    $(OBJ)/crt-udivti3.o \
+    $(OBJ)/crt-umodti3.o \
+    $(OBJ)/crt-udivmodti4.o \
+    $(OBJ)/crt-multi3.o
 
 # ── SSH server objects ────────────────────────────────────────────────────────
 
@@ -248,36 +260,47 @@ telnet/pic_loader.o: telnet/pic_loader.c | check-kernel
 %.lo: %.c | check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/lwip_port/ethernetif.lo: $(RUNTIME)/lwip_port/ethernetif.c | check-kernel
+$(OBJ)/ethernetif.lo: $(RUNTIME)/lwip_port/ethernetif.c | $(OBJ) check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
 
 sys_arch.lo: sys_arch.c | check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
 
-# Runtime objects
-$(RUNTIME)/crt0.o: $(RUNTIME)/src/crt0.c
+# Local object directory for shared-source / compiler-rt objects.
+$(OBJ):
+	mkdir -p $(OBJ)
+
+# Runtime objects (compiled from the shared ../src sources into $(OBJ)/)
+$(OBJ)/crt0.o: $(RUNTIME)/src/crt0.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/uart_stubs.o: $(RUNTIME)/src/uart_stubs.c
+$(OBJ)/uart_stubs.o: $(RUNTIME)/src/uart_stubs.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/src/syscalls.o: $(RUNTIME)/src/syscalls.c
+$(OBJ)/syscalls.o: $(RUNTIME)/src/syscalls.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/stdio_handles.o: $(RUNTIME)/src/stdio_handles.c
+$(OBJ)/stdio_handles.o: $(RUNTIME)/src/stdio_handles.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/src/setjmp.o: $(RUNTIME)/src/setjmp.S
+$(OBJ)/setjmp.o: $(RUNTIME)/src/setjmp.S | $(OBJ)
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
-$(RUNTIME)/src/mdio.o: $(RUNTIME)/src/mdio.c
+$(OBJ)/mdio.o: $(RUNTIME)/src/mdio.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/src/eth.o: $(RUNTIME)/src/eth.c
+$(OBJ)/eth.o: $(RUNTIME)/src/eth.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(RUNTIME)/src/crypto_hw.o: $(RUNTIME)/src/crypto_hw.c
+$(OBJ)/crypto_hw.o: $(RUNTIME)/src/crypto_hw.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# compiler-rt builtins + fp_mode stub (console_demo soft-FP/i128 support)
+$(OBJ)/crt-%.o: $(BUILTINS)/%.c | $(OBJ)
+	$(CC) $(CRT_FLAGS) -c -o $@ $<
+
+$(OBJ)/fp_mode_stub.o: $(RUNTIME)/src/fp_mode_stub.c | $(OBJ)
+	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
 # SSH / wolfSSL objects (compiled with SSH_CFLAGS = NET_CFLAGS + wolfSSL includes)
 wolfssl_hw.o: wolfssl_hw.c
@@ -290,17 +313,20 @@ ssh/sshkeys.o: ssh/sshkeys.c
 	$(CC) $(SSH_CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
 
 # FatFs objects (no lwIP needed; FF_FS_REENTRANT=0 so no OS calls)
-$(FATFS_DIR)/ff.o: $(FATFS_DIR)/ff.c
+$(OBJ)/ff.o: $(FATFS_DIR)/ff.c | $(OBJ)
 	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
 
-$(FATFS_DIR)/ffsystem.o: $(FATFS_DIR)/ffsystem.c
+$(OBJ)/ffsystem.o: $(FATFS_DIR)/ffsystem.c | $(OBJ)
+	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
+
+$(OBJ)/ffunicode.o: $(FATFS_DIR)/ffunicode.c | $(OBJ)
 	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
 
 # SD card driver
-$(RUNTIME)/src/sd.o: $(RUNTIME)/src/sd.c
+$(OBJ)/sd.o: $(RUNTIME)/src/sd.c | $(OBJ)
 	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
 
-$(RUNTIME)/src/diskio.o: $(RUNTIME)/src/diskio.c
+$(OBJ)/diskio.o: $(RUNTIME)/src/diskio.c | $(OBJ)
 	$(CC) $(CFLAGS) -I$(FATFS_DIR) -c -o $@ $<
 
 # Link
@@ -336,28 +362,30 @@ console_demo.bin: console_demo.elf
 # The wildcards cover every subdirectory that receives output files.
 -include $(wildcard \
     *.d \
+    $(OBJ)/*.d \
     ssh/*.d telnet/*.d demo/*.d \
     portable/KlaussCPU/*.d \
-    $(RUNTIME)/src/*.d \
-    $(RUNTIME)/lwip_port/*.d \
     $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d)
 
 clean:
+	rm -rf $(OBJ)
 	rm -f $(KERNEL_OBJS) $(PORT_OBJS) \
-	      $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
-	      $(FATFS_OBJS) $(SD_OBJS) \
+	      $(LWIP_OBJS) \
 	      demo/demo.o demo/net_demo.o demo/console_demo.o \
 	      telnet/telnet.o telnet/pic_loader.o \
 	      wolfssl_hw.o ssh/ssh_server.o ssh/sshkeys.o \
-	      $(CRYPTO_HW_OBJ) \
 	      sys_arch.lo \
-	      $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o \
-	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/stdio_handles.o \
-	      $(RUNTIME)/src/setjmp.o \
-	      $(RUNTIME)/src/mdio.o $(RUNTIME)/src/eth.o \
 	      demo.elf demo.bin net_demo.elf net_demo.bin \
 	      console_demo.elf console_demo.bin \
 	      *.d ssh/*.d telnet/*.d demo/*.d \
 	      portable/KlaussCPU/*.d \
-	      $(RUNTIME)/src/*.d \
 	      $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d
+	# Sweep any stale shared-source objects a PRE-obj/ build left at the repo
+	# root / ../src / ../fatfs / ../lwip_port (harmless if already absent).
+	rm -f $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o $(RUNTIME)/stdio_handles.o \
+	      $(RUNTIME)/crt-*.o $(RUNTIME)/fp_mode_stub.o \
+	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/src/setjmp.o $(RUNTIME)/src/mdio.o \
+	      $(RUNTIME)/src/eth.o $(RUNTIME)/src/sd.o $(RUNTIME)/src/diskio.o \
+	      $(RUNTIME)/src/crypto_hw.o $(RUNTIME)/src/*.d \
+	      $(RUNTIME)/fatfs/ff.o $(RUNTIME)/fatfs/ffsystem.o $(RUNTIME)/fatfs/ffunicode.o \
+	      $(RUNTIME)/lwip_port/ethernetif.lo $(RUNTIME)/lwip_port/*.d 2>/dev/null; true

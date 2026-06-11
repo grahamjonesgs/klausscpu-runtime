@@ -54,9 +54,9 @@
 #include "lwip/priv/tcp_priv.h"   /* tcp_ack_now() — force immediate ACK */
 #include "lwip/etharp.h"
 #include "netif/ethernet.h"   /* ethernet_input() */
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 // ── Configuration ─────────────────────────────────────────────────────────
 

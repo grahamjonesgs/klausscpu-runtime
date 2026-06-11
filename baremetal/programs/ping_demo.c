@@ -25,9 +25,9 @@
 #include "lwip/prot/dhcp.h"    /* DHCP_STATE_* constants */
 #include "lwip/etharp.h"
 #include "netif/ethernet.h"
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 static struct netif g_netif;
 

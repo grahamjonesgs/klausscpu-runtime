@@ -13,7 +13,7 @@
  *   - bst_free:   post-order destructor
  */
 
-#include "../mmio.h"
+#include "../../mmio.h"
 
 #include <stdio.h>
 #include <stdlib.h>

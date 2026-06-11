@@ -27,9 +27,9 @@
 #include "lwip/apps/sntp.h"
 #include "netif/ethernet.h"
 
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 /* ── State ─────────────────────────────────────────────────────────────── */
 

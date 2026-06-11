@@ -24,9 +24,9 @@
 #include "lwip/etharp.h"
 #include "lwip/tcp.h"
 #include "netif/ethernet.h"
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 #define ECHO_PORT  7u
 

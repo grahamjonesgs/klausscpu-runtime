@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "ff.h"
-#include "../mmio.h"
+#include "../../mmio.h"
 
 /* ── Load address ──────────────────────────────────────────────────────── */
 #define PIC_LOAD_ADDR   0x04000000UL

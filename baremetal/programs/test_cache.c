@@ -29,7 +29,7 @@
  */
 
 #include <stdio.h>
-#include "../mmio.h"
+#include "../../mmio.h"
 
 /* ── Buffer sizes ──────────────────────────────────────────────────────────── */
 #define HOT_WORDS      32        /*  32 × 8 B =   256 B */

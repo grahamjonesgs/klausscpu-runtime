@@ -2,7 +2,7 @@
  * hello.c — KlaussCPU hello-world smoke test
  */
 
-#include "../mmio.h"
+#include "../../mmio.h"
 #include <stdio.h>
 #include <stdint.h>
 

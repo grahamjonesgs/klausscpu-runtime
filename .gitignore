@@ -1,5 +1,6 @@
 # Build artifacts
 *.o
+*.lo
 crt-*.o
 *.elf
 *.bin
@@ -25,3 +26,6 @@ picolibc-cross-abs.ini
 
 # lwIP — cloned externally, not part of this repo
 lwip/
+
+# Local Claude Code agent state (settings, scheduled-task lock) — not part of the build
+.claude/

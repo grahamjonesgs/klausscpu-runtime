@@ -23,9 +23,9 @@
  */
 
 #include <stdio.h>
-#include "../mmio.h"
-#include "../src/mdio.h"
-#include "../src/eth.h"
+#include "../../mmio.h"
+#include "../../src/mdio.h"
+#include "../../src/eth.h"
 
 // ── helpers ───────────────────────────────────────────────────────────────
 

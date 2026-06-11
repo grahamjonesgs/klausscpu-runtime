@@ -27,9 +27,9 @@
 #include "lwip/tcp.h"
 #include "lwip/mem.h"
 #include "netif/ethernet.h"
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 #define HTTP_PORT   80u
 #define REQ_BUF    512u

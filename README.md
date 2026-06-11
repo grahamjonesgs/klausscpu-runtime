@@ -19,7 +19,7 @@ fork's built `bin/` directory (no submodule):
 export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin
 ```
 
-Every build entry point (`Makefile`, `freertos/Makefile`, `build-*.sh`, the
+Every build entry point (`baremetal/Makefile`, `freertos/Makefile`, `build-*.sh`, the
 wolfSSL/Zephyr cmake toolchains) reads this and **fails loudly if it is unset**.
 The fork root (`$KLAUSSCPU_LLVM_BIN/../..`) is also where `compiler-rt/lib/builtins`
 is found for the soft-FP / integer-divide `crt-*.o` objects.
@@ -72,13 +72,19 @@ cd ..
 ## Building
 
 ### Bare-metal C programs
+The bare-metal build lives in `baremetal/` (the `Makefile` and the `programs/`
+test sources). Run `make` there so build artifacts (`.o`/`.elf`/`.d`) stay out
+of the repo root. The shared runtime sources (`src/`, `klausscpu.ld`, picolibc,
+lwIP, FatFs glue, headers) stay at the root, shared with the other builds.
 ```sh
+cd baremetal
 make hello          # uart hello-world
 make test_fp        # soft-FP test (links compiler-rt crt-*.o from the fork)
 make all            # every .elf
 ```
-Output is a `*.elf` with machine type `0x4b43` ("KC"). See the top of `Makefile`
-for the full target list (adventure, expr, bst, crypto, queens, fs_demo, …).
+Output is a `*.elf` with machine type `0x4b43` ("KC"). See the top of
+`baremetal/Makefile` for the full target list (adventure, expr, bst, crypto,
+queens, fs_demo, …).
 
 ### FreeRTOS
 ```sh
@@ -97,7 +103,8 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 
 | Path | Contents |
 |---|---|
-| `Makefile`, `programs/`, `src/`, `klausscpu.ld` | bare-metal runtime + test programs |
+| `baremetal/` | bare-metal build: `Makefile` + `programs/` test programs (run `make` here) |
+| `src/`, `klausscpu.ld` | shared runtime sources + linker script (used by all three builds) |
 | `freertos/` | FreeRTOS port, lwIP glue, wolfSSL/wolfSSH, demos |
 | `fatfs/` | FatFs glue for the **FreeRTOS** build (tracked) |
 | `lwip_port/` | lwIP `sys_arch`/`ethernetif`/`cc.h` for KlaussCPU |

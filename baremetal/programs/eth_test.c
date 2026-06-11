@@ -11,7 +11,7 @@
  * Wait at least ~1 second per stage to read the display.
  */
 
-#include "../mmio.h" /* provides REG_ETH_*, ETH_TX_SLOT, ETH_RX_SLOT,
+#include "../../mmio.h" /* provides REG_ETH_*, ETH_TX_SLOT, ETH_RX_SLOT,
                            ETH_DEFAULT_MAC_*, delay_ms()              */
 #include <stdint.h>
 #include <stdio.h>

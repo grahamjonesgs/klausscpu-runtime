@@ -33,9 +33,9 @@
 #include "lwip/tcp.h"
 #include "lwip/etharp.h"
 #include "netif/ethernet.h"   /* ethernet_input() */
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 // ── Network configuration ─────────────────────────────────────────────────
 // Used as fallback if DHCP does not respond within DHCP_TIMEOUT_MS.

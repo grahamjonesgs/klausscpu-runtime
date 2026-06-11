@@ -32,7 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../mmio.h"
+#include "../../mmio.h"
 
 typedef uint64_t u64;
 typedef uint32_t u32;

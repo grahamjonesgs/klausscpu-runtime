@@ -23,7 +23,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-#include "../mmio.h"   /* REG_AES_*, REG_SHA_*, REG_GCM_*, REG_HMAC_*, REG_TRNG_*,
+#include "../../mmio.h"   /* REG_AES_*, REG_SHA_*, REG_GCM_*, REG_HMAC_*, REG_TRNG_*,
                        aes_wait_done, sha_wait_done, hmac_wait_keyload,
                        gcm_wait_done, trng_read64, SHA_BLOCK_PTR, SHA_DIGEST_PTR */
 

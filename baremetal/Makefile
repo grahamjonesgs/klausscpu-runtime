@@ -46,22 +46,31 @@ LLD = $(LLVM_BIN)/ld.lld
 TARGET  = klausscpu-unknown-elf
 TRIPLE  = $(TARGET)
 
+# ── Repo-root location ────────────────────────────────────────────────────────
+# This Makefile and the bare-metal program sources (programs/) live in
+# baremetal/.  The shared runtime sources (src/), FatFs glue, linker script,
+# picolibc install, lwIP and headers live one level up at the repo root, shared
+# with the FreeRTOS and Zephyr builds.  Running make here keeps build artifacts
+# (.o/.elf/.d) out of the repo root.  Program sources reach the root-level
+# headers via ../../ includes (they sit two levels below the root).
+ROOT := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))/..
+
 # ── Source search paths ───────────────────────────────────────────────────────
-# Runtime library sources live in src/, program sources in programs/,
-# FatFs vendor sources in fatfs/.
+# Runtime library sources live in ../src, program sources in programs/ (local),
+# FatFs vendor sources in ../fatfs.
 #
 # Use per-extension `vpath` for SOURCES only — never a blanket `VPATH`.  A blanket
 # VPATH also searches these dirs for object files, so a stale src/foo.o left by the
 # freertos build (which compiles src/ sources in place) gets found and shadows the
-# root build, breaking the link with "cannot open foo.o".  Restricting to source
-# extensions means objects are always built/linked from the root.
-vpath %.c src:programs:fatfs
-vpath %.S src
-vpath %.s src
+# local build, breaking the link with "cannot open foo.o".  Restricting to source
+# extensions means objects are always built/linked here in baremetal/.
+vpath %.c $(ROOT)/src:programs:$(ROOT)/fatfs
+vpath %.S $(ROOT)/src
+vpath %.s $(ROOT)/src
 
 # ── picolibc install path ─────────────────────────────────────────────────────
-# Run ./build-picolibc.sh once to populate this directory.
-PICOLIBC ?= $(dir $(lastword $(MAKEFILE_LIST)))picolibc-install
+# Run ../build-picolibc.sh once to populate this directory.
+PICOLIBC ?= $(ROOT)/picolibc-install
 
 # ── Compiler flags ────────────────────────────────────────────────────────────
 # -D__IEEE_LITTLE_ENDIAN and -D_LDBL_EQ_DBL are needed because the installed
@@ -96,9 +105,9 @@ CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4 \
 CRT_FP_NAMES = $(CRT_SF_NAMES) $(CRT_DF_NAMES) $(CRT_INT_NAMES)
 CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o
 
-LD_SCRIPT = $(dir $(lastword $(MAKEFILE_LIST)))klausscpu.ld
+LD_SCRIPT = $(ROOT)/klausscpu.ld
 
-FATFS_DIR = $(dir $(lastword $(MAKEFILE_LIST)))fatfs
+FATFS_DIR = $(ROOT)/fatfs
 
 # Objects linked into every program.
 RUNTIME_OBJS = crt0.o uart_stubs.o
@@ -106,13 +115,14 @@ LIBC_OBJS    = syscalls.o stdio_handles.o setjmp.o
 
 # Hardware crypto driver (MMIO wrappers for all 5 crypto blocks).
 CRYPTO_HW_OBJ = crypto_hw.o
-crypto_hw.o: src/crypto_hw.c
+crypto_hw.o: $(ROOT)/src/crypto_hw.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 LIBC_LINK    = $(PICOLIBC)/lib/libc.a
 
 # FatFs objects (compiled with -I fatfs/ so ffconf.h / diskio.h are found).
-# Also used by sd.c and diskio.c which reference ff.h / diskio.h.
-FATFS_FLAGS = $(CFLAGS) -Os -I$(FATFS_DIR) -I$(dir $(lastword $(MAKEFILE_LIST)))
+# Also used by sd.c and diskio.c which reference ff.h / diskio.h.  -I$(ROOT) is
+# for the shared headers (mmio.h, crypto_hw.h, rtos.h) at the repo root.
+FATFS_FLAGS = $(CFLAGS) -Os -I$(FATFS_DIR) -I$(ROOT)
 FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 
 # ── Default target ────────────────────────────────────────────────────────────
@@ -137,11 +147,11 @@ all: $(addsuffix .elf, $(PROGRAMS))
 
 # Explicit rules for src/ objects to avoid VPATH finding stale copies
 # (e.g. src/setjmp.o left by the freertos build) and confusing make.
-setjmp.o:      src/setjmp.S      ; $(CC) $(CFLAGS) -c -o $@ $<
-syscalls.o:    src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
-stdio_handles.o: src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
-uart_stubs.o:  src/uart_stubs.c  ; $(CC) $(CFLAGS) -c -o $@ $<
-crt0.o:        src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
+setjmp.o:      $(ROOT)/src/setjmp.S      ; $(CC) $(CFLAGS) -c -o $@ $<
+syscalls.o:    $(ROOT)/src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
+stdio_handles.o: $(ROOT)/src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
+uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -c -o $@ $<
+crt0.o:        $(ROOT)/src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
 
 
 # compiler-rt builtins compiled from in-tree source
@@ -149,7 +159,7 @@ crt-%.o: $(BUILTINS)/%.c
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
 # fp_mode_stub.c lives in src/ but needs CRT_FLAGS (includes fp_mode.h from builtins)
-fp_mode_stub.o: src/fp_mode_stub.c
+fp_mode_stub.o: $(ROOT)/src/fp_mode_stub.c
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
 # FatFs core files — compiled with -I fatfs/ to find ffconf.h
@@ -163,10 +173,10 @@ ffsystem.o: $(FATFS_DIR)/ffsystem.c
 	$(CC) $(FATFS_FLAGS) -c -o $@ $<
 
 # SD driver and diskio porting layer also need the FatFs include path
-sd.o: src/sd.c
+sd.o: $(ROOT)/src/sd.c
 	$(CC) $(FATFS_FLAGS) -c -o $@ $<
 
-diskio.o: src/diskio.c
+diskio.o: $(ROOT)/src/diskio.c
 	$(CC) $(FATFS_FLAGS) -c -o $@ $<
 
 # fs_demo needs the FatFs include path for ff.h
@@ -247,8 +257,8 @@ test_big.elf: test_big.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 # ── Ethernet / lwIP ───────────────────────────────────────────────────────────
 
-LWIP_DIR  = $(dir $(lastword $(MAKEFILE_LIST)))lwip
-LWIP_PORT = $(dir $(lastword $(MAKEFILE_LIST)))lwip_port
+LWIP_DIR  = $(ROOT)/lwip
+LWIP_PORT = $(ROOT)/lwip_port
 
 LWIP_FLAGS = $(CFLAGS) \
     -I$(LWIP_DIR)/src/include \
@@ -291,10 +301,10 @@ lwip_%.o: $(LWIP_DIR)/src/apps/http/%.c
 # Ethernet low-level objects (shared by test_eth and lwip_demo)
 ETH_OBJS = mdio.o eth.o
 
-mdio.o: src/mdio.c
+mdio.o: $(ROOT)/src/mdio.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-eth.o: src/eth.c
+eth.o: $(ROOT)/src/eth.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # eth_test: imported Phase 5 test (standalone — no lwIP, no eth.c dependency)
@@ -382,7 +392,7 @@ loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 # Zephyr SSH app's ssh/llext_exports.c).  Copy the resulting .llext to the SD
 # card and load it with the SSH `run` command (e.g. `run adventure.llext`).
 EXT_CFLAGS = -target $(TARGET) -Os -nostdinc -ffreestanding -fno-builtin \
-             -I$(dir $(lastword $(MAKEFILE_LIST)))ext_include
+             -I$(ROOT)/ext_include
 EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch perf_baseline
 
 %.llext: programs/%.c
@@ -445,10 +455,10 @@ test_cache: test_cache.elf
 # RTOS objects (linked only into test_rtos)
 RTOS_OBJS = rtos.o context_switch.o
 
-rtos.o: src/rtos.c
+rtos.o: $(ROOT)/src/rtos.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-context_switch.o: src/context_switch.S
+context_switch.o: $(ROOT)/src/context_switch.S
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 test_rtos.o: programs/test_rtos.c
@@ -492,8 +502,9 @@ clean:
 	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" "fp_mode_stub 2.o" \
 		  "eth_test 2.elf" "eth_test 2.o" \
 	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
-	# Remove src/ and fatfs/ stale objects left by the freertos build so VPATH
+	# Remove ../src and ../fatfs stale objects left by the freertos build so VPATH
 	# doesn't confuse make into thinking targets are already up to date.
-	rm -f src/setjmp.o src/syscalls.o src/stdio_handles.o src/uart_stubs.o \
-	      src/crt0.o src/eth.o src/mdio.o src/diskio.o src/sd.o \
-	      fatfs/ff.o fatfs/ffsystem.o fatfs/ffunicode.o 2>/dev/null; true
+	rm -f $(ROOT)/src/setjmp.o $(ROOT)/src/syscalls.o $(ROOT)/src/stdio_handles.o \
+	      $(ROOT)/src/uart_stubs.o $(ROOT)/src/crt0.o $(ROOT)/src/eth.o \
+	      $(ROOT)/src/mdio.o $(ROOT)/src/diskio.o $(ROOT)/src/sd.o \
+	      $(ROOT)/fatfs/ff.o $(ROOT)/fatfs/ffsystem.o $(ROOT)/fatfs/ffunicode.o 2>/dev/null; true

@@ -34,8 +34,8 @@
  */
 
 #include <stdio.h>
-#include "../mmio.h"
-#include "../rtos.h"
+#include "../../mmio.h"
+#include "../../rtos.h"
 
 /* ── Semaphore test parameters ────────────────────────────────────────────── */
 #define BUF_CAP    4

@@ -18,8 +18,8 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "../crypto_hw.h"
-#include "../mmio.h"
+#include "../../crypto_hw.h"
+#include "../../mmio.h"
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 

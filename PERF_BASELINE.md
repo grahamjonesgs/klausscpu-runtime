@@ -1,8 +1,8 @@
 # KlaussCPU performance baseline
 
-Reference numbers from [programs/perf_baseline.c](programs/perf_baseline.c) for
-tracking CPU/cache improvements over time. Re-run `perf_baseline` after a change
-and diff the `CSV,` lines against the table below.
+Reference numbers from [baremetal/programs/perf_baseline.c](baremetal/programs/perf_baseline.c)
+for tracking CPU/cache improvements over time. Re-run `perf_baseline` (from
+`baremetal/`) after a change and diff the `CSV,` lines against the table below.
 
 ## Two ways to read the counters
 

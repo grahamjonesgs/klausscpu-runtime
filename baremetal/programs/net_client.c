@@ -31,9 +31,9 @@ static void print_tm(const struct tm *t) {
 #include "lwip/apps/sntp.h"
 #include "lwip/apps/http_client.h"
 #include "netif/ethernet.h"
-#include "../mmio.h"
-#include "../src/eth.h"
-#include "../lwip_port/ethernetif.h"
+#include "../../mmio.h"
+#include "../../src/eth.h"
+#include "../../lwip_port/ethernetif.h"
 
 #define HTTP_HOST    "httpbin.org"
 #define HTTP_PORT    80u

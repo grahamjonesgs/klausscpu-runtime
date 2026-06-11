@@ -20,8 +20,8 @@
  */
 
 #include <stdio.h>
-#include "../mmio.h"
-#include "../rtos.h"
+#include "../../mmio.h"
+#include "../../rtos.h"
 
 #define ITERS       8   /* iterations per worker task */
 #define SLEEP_TICKS 3   /* ticks task_b sleeps between iterations */
