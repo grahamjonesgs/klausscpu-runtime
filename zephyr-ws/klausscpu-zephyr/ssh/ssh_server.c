@@ -153,6 +153,7 @@ static K_THREAD_STACK_ARRAY_DEFINE(conn_stacks, SSH_MAX_CONNS, CONN_STACK_SIZE);
 static struct k_thread conn_threads[SSH_MAX_CONNS];
 static struct conn_args conn_args_pool[SSH_MAX_CONNS];
 static bool conn_busy[SSH_MAX_CONNS];
+static bool conn_used[SSH_MAX_CONNS];   /* slot's k_thread ever created */
 static struct k_mutex conn_mutex;
 
 static void ssh_conn_entry(void *p1, void *p2, void *p3)
@@ -340,6 +341,17 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 
 		conn_args_pool[slot].ssh = ssh;
 		conn_args_pool[slot].sock = client;
+
+		/* conn_busy[slot] is cleared just before the previous worker on
+		 * this slot returns, so the slot can be reselected here while that
+		 * thread is still tearing down.  Join it first so the k_thread
+		 * object isn't recreated mid-teardown (returns immediately for an
+		 * already-dead thread; a retired !safe slot stays busy and is
+		 * never reselected, so it's never joined here). */
+		if (conn_used[slot]) {
+			(void)k_thread_join(&conn_threads[slot], K_FOREVER);
+		}
+		conn_used[slot] = true;
 
 		k_thread_create(&conn_threads[slot], conn_stacks[slot],
 				CONN_STACK_SIZE, ssh_conn_entry,
