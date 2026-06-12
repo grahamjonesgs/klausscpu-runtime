@@ -32,6 +32,8 @@
 #include <zephyr/sys/util.h>
 
 #include <stdio.h>
+#include <string.h>
+#include <errno.h>
 
 #include <wolfssh/ssh.h>
 
@@ -316,3 +318,103 @@ static int cmd_run(const struct shell *sh, size_t argc, char **argv)
 SHELL_CMD_ARG_REGISTER(run, NULL,
 		       "Load & run extension [file] (default /SD:/PROG.LLEXT)",
 		       cmd_run, 1, 1);
+
+/* ── `svc` command — manage resident, detached background services ───────────
+ * Unlike `run` (foreground, stdio bound to this session), a service extension
+ * stays loaded and runs on its own thread(s).  See llext_service_* in
+ * llext_loader.c.  Registered here next to `run` as it shares that loader. */
+
+/* Resolve a user file argument to an SD path: absolute as-is, else /SD:/<arg>. */
+static const char *svc_resolve_path(const char *arg, char *buf, size_t buflen)
+{
+	if (arg[0] == '/') {
+		return arg;
+	}
+	(void)snprintf(buf, buflen, "/SD:/%s", arg);
+	return buf;
+}
+
+static int cmd_svc_load(const struct shell *sh, size_t argc, char **argv)
+{
+	char pathbuf[128];
+	const char *filename = svc_resolve_path(argv[1], pathbuf, sizeof(pathbuf));
+	char name[16];
+
+	if (argc > 2) {
+		/* explicit service name */
+		(void)strncpy(name, argv[2], sizeof(name) - 1);
+		name[sizeof(name) - 1] = '\0';
+	} else {
+		/* derive from the file's basename, sans directory and extension */
+		const char *slash = strrchr(filename, '/');
+		const char *base = (slash != NULL) ? slash + 1 : filename;
+		size_t i = 0;
+
+		while (base[i] != '\0' && base[i] != '.' &&
+		       i < sizeof(name) - 1) {
+			name[i] = base[i];
+			i++;
+		}
+		name[i] = '\0';
+		if (i == 0) {
+			shell_print(sh, "Cannot derive a service name from '%s'; "
+				    "pass one explicitly", filename);
+			return -EINVAL;
+		}
+	}
+
+	shell_print(sh, "Loading service '%s' from %s ...", name, filename);
+
+	int rc = llext_service_load(filename, name);
+
+	if (rc != 0) {
+		shell_print(sh, "Load failed (%d)%s", rc,
+			    rc == -EEXIST ? " — already loaded" : "");
+		return rc;
+	}
+	shell_print(sh, "Service '%s' running", name);
+	return 0;
+}
+
+static int cmd_svc_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+
+	int rc = llext_service_stop(argv[1]);
+
+	if (rc == -ENOENT) {
+		shell_print(sh, "No such service: %s", argv[1]);
+		return rc;
+	}
+	if (rc != 0) {
+		shell_print(sh, "Stop failed (%d)", rc);
+		return rc;
+	}
+	shell_print(sh, "Service '%s' stopped", argv[1]);
+	return 0;
+}
+
+static int cmd_svc_list(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	shell_print(sh, "Loaded services:");
+	llext_service_list(sh);
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(svc_subcmds,
+	SHELL_CMD_ARG(load, NULL,
+		      "load <file.llext> [name] — load & start a service",
+		      cmd_svc_load, 2, 1),
+	SHELL_CMD_ARG(stop, NULL,
+		      "stop <name> — stop & unload a service",
+		      cmd_svc_stop, 2, 0),
+	SHELL_CMD_ARG(list, NULL,
+		      "list loaded services",
+		      cmd_svc_list, 1, 0),
+	SHELL_SUBCMD_SET_END
+);
+SHELL_CMD_REGISTER(svc, &svc_subcmds,
+		   "Manage resident background service extensions", NULL);

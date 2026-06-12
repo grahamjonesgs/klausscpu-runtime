@@ -94,9 +94,10 @@ make net_demo       # FreeRTOS + lwIP: DHCP + NTP + HTTP
 ```
 
 ### Zephyr (SSH shell)
-Full workspace setup and the exact `west build` invocation (including the
-wolfSSL/wolfSSH `EXTRA_ZEPHYR_MODULES` and the two required Zephyr patches) live
-in [`zephyr-ws/klausscpu-zephyr/README.md`](zephyr-ws/klausscpu-zephyr/README.md).
+Command-first build guide (env var, one-time `west` setup, the exact verified
+`west build` invocation, `.kbt` loading): **[`zephyr-ws/klausscpu-zephyr/CLAUDE.md`](zephyr-ws/klausscpu-zephyr/CLAUDE.md)**.
+Background, Kconfig requirements, memory map and LLEXT internals are in the
+human-facing [`zephyr-ws/klausscpu-zephyr/README.md`](zephyr-ws/klausscpu-zephyr/README.md).
 The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klausscc`.
 
 ## Layout

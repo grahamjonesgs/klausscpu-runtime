@@ -14,10 +14,15 @@
  */
 
 #include <zephyr/llext/symbol.h>
+#include <zephyr/sys/printk.h>       /* snprintk */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef CONFIG_FILE_SYSTEM
+#include <zephyr/fs/fs.h>
+#endif
 
 /*
  * Minimal libc's <stdio.h> macro-defines putchar(c) as putc(c, stdout); undo
@@ -71,3 +76,32 @@ EXPORT_SYMBOL(strcpy);
 EXPORT_SYMBOL(strncpy);
 EXPORT_SYMBOL(strcat);
 EXPORT_SYMBOL(strchr);
+EXPORT_SYMBOL(strrchr);
+EXPORT_SYMBOL(strstr);
+
+/* stdlib — numeric parse (httpd URL/query handling) */
+EXPORT_SYMBOL(strtol);
+EXPORT_SYMBOL(strtoul);
+
+/* Zephyr formatted output (httpd builds responses with snprintk). */
+EXPORT_SYMBOL(snprintk);
+
+/* Filesystem API for extensions that serve files (the loadable HTTP server in
+ * httpd.c/webapi.c).
+ *
+ * NOTE: kernel threading/uptime/errno and the whole socket (zsock) syscall API
+ * are ALREADY exported by Zephyr's built-in subsys/llext/llext_export.c (it
+ * covers every k_ and zsock syscall, the mem/str basics, uart, net_if, log,
+ * etc.), so we must NOT re-export those - only symbols Zephyr's table omits.
+ * The fs API is one such gap.  Guarded so llext builds without a filesystem
+ * (e.g. the llext_demo app, which also pulls in this file) still link. */
+#ifdef CONFIG_FILE_SYSTEM
+EXPORT_SYMBOL(fs_open);
+EXPORT_SYMBOL(fs_close);
+EXPORT_SYMBOL(fs_read);
+EXPORT_SYMBOL(fs_write);
+EXPORT_SYMBOL(fs_opendir);
+EXPORT_SYMBOL(fs_readdir);
+EXPORT_SYMBOL(fs_closedir);
+EXPORT_SYMBOL(fs_stat);
+#endif /* CONFIG_FILE_SYSTEM */

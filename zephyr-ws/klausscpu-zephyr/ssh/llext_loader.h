@@ -27,4 +27,33 @@ void llext_loader_init(void);
  */
 int llext_run_from_sd(const char *filename, const struct shell *sh);
 
+/*
+ * Resident background services
+ * ----------------------------
+ * Unlike llext_run_from_sd() (which runs an extension's main() to completion on
+ * the calling thread and then unloads it), a service extension stays loaded and
+ * runs detached on its own thread(s).  Such an extension exports two GLOBAL
+ * entry points:
+ *
+ *   int svc_start(void);   spawn the worker thread(s) and return promptly (0 = ok)
+ *   int svc_stop(void);    stop AND k_thread_join the worker(s), then return
+ *
+ * svc_stop() MUST join its threads before returning: llext_service_stop()
+ * unloads the image (freeing the threads' stacks) as soon as svc_stop()
+ * returns.
+ */
+
+/* Load `filename` from SD as a resident service registered under `name`
+ * (<=15 chars, unique), resolve and call its svc_start(), and keep it loaded.
+ * Returns 0 on success; negative errno on failure (image freed on any error). */
+int llext_service_load(const char *filename, const char *name);
+
+/* Stop and unload the resident service `name`: call its svc_stop() (joins the
+ * worker), then unload + free.  Returns 0, or -ENOENT if no such service. */
+int llext_service_stop(const char *name);
+
+/* Print the resident-service table (one name per line).  Routes to `sh` if
+ * non-NULL (so it reaches an SSH session), else to printk (UART/log). */
+void llext_service_list(const struct shell *sh);
+
 #endif /* LLEXT_LOADER_H */

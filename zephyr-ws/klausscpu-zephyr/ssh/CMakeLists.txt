@@ -18,8 +18,9 @@ if(CONFIG_FAT_FILESYSTEM_ELM)
   zephyr_library_compile_definitions(ZEPHYR_CONFIG_OVERRIDE=zephyr_fatfs_config.h)
 endif()
 
-# Kernel symbols exported to loadable extensions (libc + getchar).
-zephyr_library_sources_ifdef(CONFIG_LLEXT llext_exports.c)
+# Kernel symbols exported to loadable extensions (libc + getchar), plus the
+# logging entry point (ext_log) extensions use in lieu of their own log module.
+zephyr_library_sources_ifdef(CONFIG_LLEXT llext_exports.c ext_log.c)
 
 # HTTP file server (serves /SD:).  httpd.c holds the transport-agnostic request
 # dispatch (httpd_serve) shared by the plain :80 and the TLS :443 servers, so it

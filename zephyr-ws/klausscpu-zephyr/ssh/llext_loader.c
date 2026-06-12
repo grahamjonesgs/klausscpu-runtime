@@ -23,6 +23,8 @@
 #include <zephyr/llext/buf_loader.h>
 #include <zephyr/logging/log.h>
 
+#include <errno.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -237,4 +239,176 @@ int llext_run_from_sd(const char *filename, const struct shell *sh)
 	k_free(buf);
 
 	return result;
+}
+
+/* ── Resident background services (svc_start/svc_stop extensions) ─────────── */
+
+#define EXT_SVC_MAX 4
+
+typedef int (*svc_fn)(void);
+
+/* One loaded, running service.  `ext`/`buf` are kept alive for the whole run
+ * (the worker thread's stack lives in the extension image); both are released
+ * only after svc_stop() has joined that thread. */
+struct ext_service {
+	char          name[16];
+	struct llext *ext;
+	uint8_t      *buf;
+	svc_fn        stop;
+};
+
+static struct ext_service svc_tab[EXT_SVC_MAX];
+static K_MUTEX_DEFINE(svc_lock);
+
+int llext_service_load(const char *filename, const char *name)
+{
+	if (name == NULL || name[0] == '\0' ||
+	    strlen(name) >= sizeof(svc_tab[0].name)) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&svc_lock, K_FOREVER);
+
+	/* Reject a duplicate name and find a free slot in one pass. */
+	struct ext_service *slot = NULL;
+
+	for (int i = 0; i < EXT_SVC_MAX; i++) {
+		if (svc_tab[i].ext != NULL &&
+		    strcmp(svc_tab[i].name, name) == 0) {
+			k_mutex_unlock(&svc_lock);
+			LOG_ERR("service '%s' already loaded", name);
+			return -EEXIST;
+		}
+		if (svc_tab[i].ext == NULL && slot == NULL) {
+			slot = &svc_tab[i];
+		}
+	}
+	if (slot == NULL) {
+		k_mutex_unlock(&svc_lock);
+		LOG_ERR("service table full (%d)", EXT_SVC_MAX);
+		return -ENOMEM;
+	}
+
+	uint8_t *buf = NULL;
+	size_t size = 0;
+
+	if (read_file(filename, NULL, &buf, &size) != 0) {
+		k_mutex_unlock(&svc_lock);
+		return -EIO;
+	}
+
+	struct llext_buf_loader buf_loader = LLEXT_BUF_LOADER(buf, size);
+	struct llext_load_param ldr_parm = LLEXT_LOAD_PARAM_DEFAULT;
+	struct llext *ext = NULL;
+
+	/* keep_symtab so svc_start/svc_stop resolve by name (as llext_run_*). */
+	ldr_parm.keep_symtab = true;
+
+	int ret = llext_load(&buf_loader.loader, name, &ext, &ldr_parm);
+
+	if (ret != 0) {
+		k_mutex_unlock(&svc_lock);
+		LOG_ERR("service '%s' llext_load failed: %d", name, ret);
+		k_free(buf);
+		return -ENOEXEC;
+	}
+
+	svc_fn start = (svc_fn)llext_find_sym(&ext->sym_tab, "svc_start");
+	svc_fn stop  = (svc_fn)llext_find_sym(&ext->sym_tab, "svc_stop");
+
+	if (start == NULL || stop == NULL) {
+		k_mutex_unlock(&svc_lock);
+		LOG_ERR("service '%s' missing svc_start/svc_stop", name);
+		llext_unload(&ext);
+		k_free(buf);
+		return -ENOSYS;
+	}
+
+	/* svc_start() spawns the worker and returns promptly; held under
+	 * svc_lock, which is fine as long as it doesn't block. */
+	int rc = start();
+
+	if (rc != 0) {
+		k_mutex_unlock(&svc_lock);
+		LOG_ERR("service '%s' svc_start failed: %d", name, rc);
+		llext_unload(&ext);
+		k_free(buf);
+		return -EAGAIN;
+	}
+
+	strncpy(slot->name, name, sizeof(slot->name) - 1);
+	slot->name[sizeof(slot->name) - 1] = '\0';
+	slot->ext = ext;
+	slot->buf = buf;
+	slot->stop = stop;
+
+	k_mutex_unlock(&svc_lock);
+	LOG_INF("service '%s' started (%zu bytes)", name, size);
+	return 0;
+}
+
+int llext_service_stop(const char *name)
+{
+	k_mutex_lock(&svc_lock, K_FOREVER);
+
+	struct ext_service *slot = NULL;
+
+	for (int i = 0; i < EXT_SVC_MAX; i++) {
+		if (svc_tab[i].ext != NULL &&
+		    strcmp(svc_tab[i].name, name) == 0) {
+			slot = &svc_tab[i];
+			break;
+		}
+	}
+	if (slot == NULL) {
+		k_mutex_unlock(&svc_lock);
+		return -ENOENT;
+	}
+
+	/* svc_stop() must stop and JOIN the worker before returning; only then
+	 * is it safe to unload (which frees that thread's stack). */
+	int rc = slot->stop();
+	struct llext *ext = slot->ext;
+	uint8_t *buf = slot->buf;
+
+	slot->ext = NULL;
+	slot->buf = NULL;
+	slot->stop = NULL;
+	slot->name[0] = '\0';
+
+	k_mutex_unlock(&svc_lock);
+
+	if (rc != 0) {
+		LOG_WRN("service '%s' svc_stop returned %d", name, rc);
+	}
+	llext_unload(&ext);
+	k_free(buf);
+	LOG_INF("service '%s' stopped", name);
+	return 0;
+}
+
+void llext_service_list(const struct shell *sh)
+{
+	k_mutex_lock(&svc_lock, K_FOREVER);
+
+	int n = 0;
+
+	for (int i = 0; i < EXT_SVC_MAX; i++) {
+		if (svc_tab[i].ext != NULL) {
+			if (sh != NULL) {
+				shell_print(sh, "  %s", svc_tab[i].name);
+			} else {
+				printk("  %s\n", svc_tab[i].name);
+			}
+			n++;
+		}
+	}
+	if (n == 0) {
+		if (sh != NULL) {
+			shell_print(sh, "  (no services loaded)");
+		} else {
+			printk("  (no services loaded)\n");
+		}
+	}
+	k_mutex_unlock(&svc_lock);
 }

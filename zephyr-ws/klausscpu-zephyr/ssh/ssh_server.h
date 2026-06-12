@@ -10,7 +10,13 @@ extern "C" {
 #endif
 
 #define SSH_PORT        22
-#define SSH_MAX_CONNS   2
+/* Concurrent SSH sessions.  Each costs a 16 KB connection-thread stack
+ * (CONN_STACK_SIZE) + a per-session shell instance (CONFIG_SHELL_STACK_SIZE,
+ * 40 KB) — ~56 KB each, negligible against the board's 126 MB.  The thread
+ * arrays, shell instances (LISTIFY in ssh_shell_transport.c) and the listen
+ * backlog all scale off this.  Net/fd limits in prj.conf (NET_MAX_CONN=20,
+ * *_MAX_FDS=28) have headroom for these plus HTTPS/DNS. */
+#define SSH_MAX_CONNS   5
 #define SSH_STACK_SIZE  8192
 #define SSH_PRIO        5
 
