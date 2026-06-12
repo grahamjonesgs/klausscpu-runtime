@@ -38,10 +38,4 @@ void httpd_send(struct httpd_conn *c, const char *status,
 /* Start the plain HTTP file-server thread (:80).  Call once after DHCP. */
 void httpd_start(void);
 
-/* Stop the plain HTTP file-server thread and join it (blocks until the worker
- * has closed its sockets and exited).  Safe to call when not running (no-op).
- * Pairs with httpd_start(); needed so a loadable httpd extension can be
- * unloaded without freeing a running thread's stack. */
-void httpd_stop(void);
-
 #endif /* KLAUSSCPU_HTTPD_H_ */

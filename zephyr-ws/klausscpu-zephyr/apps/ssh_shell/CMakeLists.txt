@@ -4,17 +4,17 @@ project(klausscpu_ssh_shell)
 
 target_sources(app PRIVATE src/main.c)
 
-# Loadable HTTP server extension (httpd + webapi + svc shim).
+# Loadable API backend extension (the /api/* route logic).
 #
-# httpd_ext.c is a single-source unity TU (CONFIG_LLEXT_TYPE_ELF_OBJECT allows
-# only one source per llext).  It is compiled against THIS app's Zephyr config
-# with LL_EXTENSION_BUILD defined, so its ABI matches the kernel that loads it
-# and its LOG_* calls route to the exported ext_log().  The .llext is emitted to
-# the build dir; copy it to the SD card (e.g. /SD:/httpd.llext) and load it with
-# the `svc` shell command.
+# httpd + httpsd stay in the kernel; only the backend handler is loadable —
+# apibackend.c registers it via webapi_register() at svc_start (see webapi.c).
+# It is a single-source ELF-object llext (CONFIG_LLEXT_TYPE_ELF_OBJECT allows
+# only one source per llext), compiled against THIS app's Zephyr config so its
+# ABI matches the kernel that loads it.  The .llext is emitted to the build dir;
+# copy it to the SD card (/SD:/apibackend.llext) and load it with `svc load`.
 if(CONFIG_LLEXT)
-  get_filename_component(httpd_ext_src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../ssh/httpd_ext.c ABSOLUTE)
+  get_filename_component(apibackend_src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ssh/apibackend.c ABSOLUTE)
   # Override two inherited Zephyr flags for the extension (LLEXT_APPEND_FLAGS is
   # appended after them by add_llext_target, so these win):
   #   -fno-data-sections : the default -fdata-sections puts every global in its
@@ -25,9 +25,9 @@ if(CONFIG_LLEXT)
   #       non-allocated debug section and fails ("Section N not loaded in any
   #       memory region").  Dropping debug info removes those rela sections.
   set(LLEXT_APPEND_FLAGS -fno-data-sections -g0)
-  add_llext_target(httpd_ext
-    OUTPUT  ${CMAKE_BINARY_DIR}/httpd.llext
-    SOURCES ${httpd_ext_src}
+  add_llext_target(apibackend
+    OUTPUT  ${CMAKE_BINARY_DIR}/apibackend.llext
+    SOURCES ${apibackend_src}
   )
-  add_dependencies(app httpd_ext)
+  add_dependencies(app apibackend)
 endif()

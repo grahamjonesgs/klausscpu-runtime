@@ -25,6 +25,9 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/fs/fs.h>
+#ifdef CONFIG_LLEXT
+#include <zephyr/llext/symbol.h>
+#endif
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -32,14 +35,6 @@
 
 #include "httpd.h"
 #include "webapi.h"
-
-#ifdef LL_EXTENSION_BUILD
-/* Compiled into a loadable extension: re-route LOG_* to the kernel's exported
- * ext_log() and make LOG_MODULE_REGISTER a no-op (an extension can't own a log
- * module).  Included LAST — after every Zephyr header that may pull in
- * <zephyr/logging/log.h> — so its macro overrides win.  See ext_log.c. */
-#include "ext_log_compat.h"
-#endif
 
 LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 
@@ -53,23 +48,8 @@ LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 #define HTTPD_STACK_SIZE 8192
 #define HTTPD_PRIO       7
 
-#ifdef LL_EXTENSION_BUILD
-/* In a loadable extension a K_THREAD_STACK_DEFINE array lands in a large
- * PROGBITS .noinit section that the llext loader can't map (its file range
- * overlaps the .text region — "Region ... overlaps ..."), so allocate the
- * worker stack from the kernel heap at start instead and free it after join.
- * Requires CONFIG_DYNAMIC_THREAD + CONFIG_DYNAMIC_THREAD_ALLOC in the kernel. */
-static k_thread_stack_t *httpd_stack;
-#else
 static K_THREAD_STACK_DEFINE(httpd_stack, HTTPD_STACK_SIZE);
-#endif
 static struct k_thread httpd_thread;
-
-/* Set by httpd_start(), cleared by httpd_stop().  The accept loop polls it (with
- * a 1 s timeout on the listening socket) so the server thread exits promptly on
- * a stop request and can be joined before its stack/image is freed — which is
- * what lets httpd run as a load/unload-able extension. */
-static volatile bool httpd_run;
 
 /* Transfer buffer for the plain (:80) server — only one connection is served
  * at a time.  The TLS server (httpsd.c) owns its own separate buffer. */
@@ -114,6 +94,10 @@ void httpd_send(struct httpd_conn *c, const char *status,
 		(void)send_str(c, body);
 	}
 }
+#ifdef CONFIG_LLEXT
+/* The loadable API backend (apibackend.llext) builds its responses with this. */
+EXPORT_SYMBOL(httpd_send);
+#endif
 
 static void send_status(struct httpd_conn *c, const char *status,
 			const char *body)
@@ -566,20 +550,7 @@ static void httpd_main(void *a, void *b, void *cc)
 
 	LOG_INF("HTTP file server on :%d (root %s)", HTTPD_PORT, DOC_ROOT);
 
-	/* accept() ignores SO_RCVTIMEO in Zephyr (it waits K_FOREVER on the
-	 * accept queue), so poll the listening socket with a timeout instead:
-	 * the loop re-checks httpd_run ~once a second and exits cleanly for
-	 * httpd_stop(), with no second thread closing srv out from under
-	 * accept().  zsock_poll honours its own timeout argument. */
-	struct zsock_pollfd pfd = { .fd = srv, .events = ZSOCK_POLLIN };
-
-	while (httpd_run) {
-		int pr = zsock_poll(&pfd, 1, 1000);
-
-		if (pr <= 0 || (pfd.revents & ZSOCK_POLLIN) == 0) {
-			continue;       /* timeout/error: re-check httpd_run */
-		}
-
+	for (;;) {
 		struct sockaddr_in peer;
 		socklen_t plen = sizeof(peer);
 		int cfd = zsock_accept(srv, (struct sockaddr *)&peer, &plen);
@@ -604,55 +575,18 @@ static void httpd_main(void *a, void *b, void *cc)
 		};
 
 		/* Keep serving requests on this connection (HTTP keep-alive)
-		 * until the client closes, errors, the recv timeout fires, or a
-		 * stop was requested (httpd_run cleared) — the latter bounds the
-		 * stop latency to at most one more request on this connection. */
-		while (httpd_run && httpd_serve(&conn)) {
+		 * until the client closes, errors, or the recv timeout fires. */
+		while (httpd_serve(&conn)) {
 		}
 		(void)zsock_close(cfd);
 	}
-
-	(void)zsock_close(srv);
-	LOG_INF("HTTP file server on :%d stopped", HTTPD_PORT);
 }
 
 void httpd_start(void)
 {
-	httpd_run = true;
-#ifdef LL_EXTENSION_BUILD
-	httpd_stack = k_thread_stack_alloc(HTTPD_STACK_SIZE, 0);
-	if (httpd_stack == NULL) {
-		LOG_ERR("httpd: worker stack alloc failed");
-		httpd_run = false;
-		return;
-	}
-	(void)k_thread_create(&httpd_thread, httpd_stack, HTTPD_STACK_SIZE,
-			      httpd_main, NULL, NULL, NULL,
-			      HTTPD_PRIO, 0, K_NO_WAIT);
-#else
 	(void)k_thread_create(&httpd_thread, httpd_stack,
 			      K_THREAD_STACK_SIZEOF(httpd_stack),
 			      httpd_main, NULL, NULL, NULL,
 			      HTTPD_PRIO, 0, K_NO_WAIT);
-#endif
 	(void)k_thread_name_set(&httpd_thread, "httpd");
-}
-
-void httpd_stop(void)
-{
-	if (!httpd_run) {
-		return;
-	}
-	httpd_run = false;
-	/* Block until the accept loop notices (within the poll timeout), lets
-	 * any in-flight connection finish, closes its sockets and returns — so
-	 * the thread is truly done before the caller frees its stack or unloads
-	 * the extension that owns this code. */
-	(void)k_thread_join(&httpd_thread, K_FOREVER);
-#ifdef LL_EXTENSION_BUILD
-	if (httpd_stack != NULL) {
-		(void)k_thread_stack_free(httpd_stack);
-		httpd_stack = NULL;
-	}
-#endif
 }

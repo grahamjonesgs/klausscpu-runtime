@@ -1,5 +1,17 @@
 # Plan: HTTP stack as a loadable, detachable LLEXT service
 
+> **SUPERSEDED (2026-06-12) — see `~/.claude/plans/ok-so-what-i-indexed-bentley.md`.**
+> We first shipped the *whole* HTTP server as `httpd.llext` (everything below,
+> built & working). We then pivoted to a cleaner model: **httpd (:80) and httpsd
+> (:443) stay kernel-resident**, and only the **`/api/*` backend handler** is
+> loadable — `webapi.c` is now a dispatcher to a handler that
+> **`apibackend.llext`** registers via `webapi_register()` at `svc load`. The
+> Phase 0 logging, `svc` commands, `llext_service_*` loader, and export-table /
+> add_llext_target machinery below all carried over unchanged; the whole-server
+> `httpd_ext.c` + its dynamic-stack/`DYNAMIC_THREAD` bits were reverted. The load
+> gates (NOBITS/region/debug) no longer bite because the backend has no thread.
+> The rest of this doc is retained as the history of how we got here.
+
 Turn the statically-linked HTTP/HTTPS file server + JSON API backend into a
 runtime-loadable, detachable extension that lives on the SD card, with logging
 that persists to a file you can inspect.
@@ -308,13 +320,23 @@ load. Two `*/`-in-comment self-inflicts fixed along the way.
 Output is `build_ssh/httpd.llext` — copy it to the SD card (`/SD:/httpd.llext`),
 e.g. via SFTP or HTTP PUT, to load it.
 
-**Multiple-.bss fix (found on first HW load).** The loader rejects >1 SHT_NOBITS
-section ("Multiple SHT_NOBITS sections are not supported", -134). The inherited
-`-fdata-sections` gives each global its own `.bss.<name>`, so the build sets
-`LLEXT_APPEND_FLAGS = -fno-data-sections` before `add_llext_target` to coalesce
-them into one `.bss` (verify: `readelf -S | grep -c NOBITS` == 1). The
-`K_THREAD_STACK_DEFINE` stack was *not* the issue — it's a single PROGBITS
-`.noinit` section. Only the `.llext` changes for this fix; no firmware reflash.
+**Load-time fixes (found on HW — all solved; loads & serves :80 end-to-end).**
+Three gates, in order:
+
+1. *Multiple SHT_NOBITS* (-134): `-fdata-sections` splits globals into many
+   `.bss.<name>`; loader allows one. → append `-fno-data-sections`.
+2. *Region overlap* (-8): `K_THREAD_STACK_DEFINE` makes a big PROGBITS `.noinit`
+   stack section overlapping `.text`. → in the extension build, allocate the
+   worker stack with `k_thread_stack_alloc` (freed after join), gated on
+   `#ifdef LL_EXTENSION_BUILD` in `httpd.c`; enable `CONFIG_DYNAMIC_THREAD` +
+   `_ALLOC` + `_PREFER_ALLOC` in `prj.conf` (kernel change → reflash).
+3. *Section N not loaded in any memory region* (-8, link): `-g` emits `.debug_*`
+   with `.rela.debug_*` the loader can't relocate. → append `-g0`.
+
+So `set(LLEXT_APPEND_FLAGS -fno-data-sections -g0)` + the dynamic-stack code +
+DYNAMIC_THREAD config. Flags/`.llext`-only changes need just a re-copy of
+httpd.llext to SD; the DYNAMIC_THREAD config needed a reflash. See
+[[llext-extension-build]] in memory for the full play-by-play.
 
 ### 7. Shell commands — **(done — built)**
 

@@ -1,118 +1,85 @@
 /*
- * webapi.c — JSON control/telemetry API for the KlaussCPU HTTP file server.
- * See webapi.h for the routes.  Reuses the board MMIO accessors (board_io.h)
- * and httpd_send() for the response.
+ * webapi.c — dispatcher for the HTTP control/telemetry API (/api/*).
+ *
+ * The actual route logic (LEDs, 7-seg, status/perf JSON) is NOT here — it lives
+ * in a loadable service extension (apibackend.llext) that registers a handler
+ * via webapi_register() at `svc load` and removes it at `svc stop`.  This file
+ * is the kernel-resident glue that httpd_serve() (shared by the :80 plain and
+ * :443 TLS servers) calls: it forwards "/api/..." requests to the registered
+ * handler, or answers 503 when no backend is loaded.
+ *
+ * Concurrency: the :80 and :443 server threads may both be inside the handler
+ * at once while a `svc stop` runs on a shell thread.  A refcount (api_inflight)
+ * taken around each handler call — plus webapi_unregister() draining it to zero
+ * before returning — guarantees the handler code is idle before the extension
+ * that owns it is unloaded.  g_handler is swapped only under api_lock, and the
+ * inflight bump happens under that same lock, so register/unregister can't race
+ * a dispatch.
  */
 
 #include <zephyr/kernel.h>
 #include <string.h>
-#include <stdlib.h>
+#ifdef CONFIG_LLEXT
+#include <zephyr/llext/symbol.h>
+#endif
 
 #include "httpd.h"
 #include "webapi.h"
-#include "board_io.h"
 
-/* Software shadow of the 7-seg value: the register at 0xF0030010 is write-only
- * in practice (reads don't return what was written), so we report the last
- * value this API set rather than reading it back. */
-static uint32_t s_seg;
+static webapi_handler_fn g_handler;
+static K_MUTEX_DEFINE(api_lock);
+static atomic_t api_inflight;
 
-/* Extract an unsigned value for `key` from a "k=v&k2=v2" query string.
- * Base 0: accepts decimal or 0x-prefixed hex. */
-static bool query_ulong(const char *query, const char *key, unsigned long *out)
+void webapi_register(webapi_handler_fn fn)
 {
-	size_t klen = strlen(key);
+	k_mutex_lock(&api_lock, K_FOREVER);
+	g_handler = fn;
+	k_mutex_unlock(&api_lock);
+}
 
-	for (const char *p = query; p != NULL && *p != '\0';) {
-		if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
-			*out = strtoul(p + klen + 1, NULL, 0);
-			return true;
-		}
-		const char *amp = strchr(p, '&');
+void webapi_unregister(void)
+{
+	k_mutex_lock(&api_lock, K_FOREVER);
+	g_handler = NULL;
+	k_mutex_unlock(&api_lock);
 
-		if (amp == NULL) {
-			break;
-		}
-		p = amp + 1;
+	/* Wait for any in-flight handler call (on a server thread) to return
+	 * before the caller unloads the extension that owns the handler. */
+	while (atomic_get(&api_inflight) != 0) {
+		k_sleep(K_MSEC(5));
 	}
-	return false;
 }
 
-static void api_status(struct httpd_conn *c)
-{
-	struct board_perf p;
-
-	board_perf_read(&p);
-
-	(void)snprintk(c->xfer, c->xfer_sz,
-		"{\"uptime_ms\":%llu,\"switches\":%u,\"leds\":%u,\"seg\":%u,"
-		"\"perf\":{"
-		"\"cycles\":%llu,\"instr\":%llu,\"fetch\":%llu,\"exec\":%llu,"
-		"\"mul\":%llu,\"div\":%llu,\"intc\":%llu,\"idle\":%llu,"
-		"\"alu\":%llu,\"load\":%llu,\"store\":%llu,\"branch\":%llu,"
-		"\"taken\":%llu,\"jump\":%llu,\"call\":%llu,\"ind\":%llu,"
-		"\"other\":%llu,"
-		"\"rh\":%llu,\"rm\":%llu,\"wh\":%llu,\"wm\":%llu,"
-		"\"wb\":%llu,\"stall\":%llu}}",
-		(unsigned long long)k_uptime_get(),
-		(unsigned)board_switches_get(), (unsigned)board_leds_get(),
-		(unsigned)s_seg,
-		(unsigned long long)p.cycles, (unsigned long long)p.instr,
-		(unsigned long long)p.fetch,  (unsigned long long)p.exec,
-		(unsigned long long)p.mul,    (unsigned long long)p.div,
-		(unsigned long long)p.intc,   (unsigned long long)p.idle,
-		(unsigned long long)p.alu,    (unsigned long long)p.load,
-		(unsigned long long)p.store,  (unsigned long long)p.branch,
-		(unsigned long long)p.taken,  (unsigned long long)p.jump,
-		(unsigned long long)p.call,   (unsigned long long)p.ind,
-		(unsigned long long)p.other,
-		(unsigned long long)p.rh, (unsigned long long)p.rm,
-		(unsigned long long)p.wh, (unsigned long long)p.wm,
-		(unsigned long long)p.wb, (unsigned long long)p.stall);
-
-	httpd_send(c, "200 OK", "application/json", c->xfer);
-}
+#ifdef CONFIG_LLEXT
+EXPORT_SYMBOL(webapi_register);
+EXPORT_SYMBOL(webapi_unregister);
+#endif
 
 bool webapi_handle(struct httpd_conn *c, const char *method, const char *url,
 		   const char *query)
 {
-	ARG_UNUSED(method);
-
 	if (strncmp(url, "/api/", 5) != 0) {
 		return false;
 	}
 
-	if (strcmp(url, "/api/status") == 0) {
-		api_status(c);
+	/* Snapshot + pin the handler under the lock so a concurrent unregister
+	 * can't NULL it (and free its code) between the check and the call. */
+	k_mutex_lock(&api_lock, K_FOREVER);
+	webapi_handler_fn h = g_handler;
+
+	if (h != NULL) {
+		atomic_inc(&api_inflight);
+	}
+	k_mutex_unlock(&api_lock);
+
+	if (h == NULL) {
+		httpd_send(c, "503 Service Unavailable", "application/json",
+			   "{\"error\":\"no api backend loaded\"}");
 		return true;
 	}
 
-	if (strcmp(url, "/api/leds") == 0) {
-		unsigned long v;
+	bool ret = h(c, method, url, query);
 
-		if (query_ulong(query, "v", &v)) {
-			board_leds_set((uint16_t)v);
-		}
-		(void)snprintk(c->xfer, c->xfer_sz, "{\"leds\":%u}",
-			       (unsigned)board_leds_get());
-		httpd_send(c, "200 OK", "application/json", c->xfer);
-		return true;
-	}
-
-	if (strcmp(url, "/api/seg") == 0) {
-		unsigned long v;
-
-		if (query_ulong(query, "v", &v)) {
-			s_seg = (uint32_t)v;
-			board_seg_set(s_seg);
-		}
-		(void)snprintk(c->xfer, c->xfer_sz, "{\"seg\":%u}",
-			       (unsigned)s_seg);
-		httpd_send(c, "200 OK", "application/json", c->xfer);
-		return true;
-	}
-
-	httpd_send(c, "404 Not Found", "application/json",
-		   "{\"error\":\"unknown api route\"}");
-	return true;
+	atomic_dec(&api_inflight);
+	return ret;
 }
