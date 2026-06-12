@@ -48,12 +48,34 @@ LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 #define HTTPD_STACK_SIZE 8192
 #define HTTPD_PRIO       7
 
+/* Concurrent connections: the accept loop hands each accepted socket to a free
+ * worker thread (each with its own stack + transfer buffer) and keeps accepting,
+ * so a slow/keep-alive client can't block others (and stop starving the TCP
+ * connection-context pool).  Mirrors the SSH server's conn pool.  A browser
+ * opens several parallel keep-alive connections, so size for one busy browser
+ * plus other clients (curl, a second browser). */
+#define HTTPD_MAX_CONNS  8
+
+/* Per-connection recv timeout.  Doubles as the keep-alive idle timeout: a worker
+ * blocks this long waiting for the next request on an open connection before
+ * giving up and closing it (freeing its slot).  Kept short so a browser's idle
+ * spare connections don't pin workers — the dashboard's ~1 Hz polling keeps its
+ * own connection alive well within this. */
+#define HTTPD_RECV_TIMEOUT_S  5
+
+/* Accept-loop thread. */
 static K_THREAD_STACK_DEFINE(httpd_stack, HTTPD_STACK_SIZE);
 static struct k_thread httpd_thread;
 
-/* Transfer buffer for the plain (:80) server — only one connection is served
- * at a time.  The TLS server (httpsd.c) owns its own separate buffer. */
-static char xfer[XFER_SZ];
+/* Per-connection worker pool. */
+static K_THREAD_STACK_ARRAY_DEFINE(httpd_conn_stacks, HTTPD_MAX_CONNS,
+				   HTTPD_STACK_SIZE);
+static struct k_thread httpd_conn_threads[HTTPD_MAX_CONNS];
+static int  httpd_conn_sock[HTTPD_MAX_CONNS];   /* accepted fd (stable per slot) */
+static bool httpd_conn_busy[HTTPD_MAX_CONNS];
+static bool httpd_conn_used[HTTPD_MAX_CONNS];   /* slot's k_thread ever created */
+static char httpd_xfer[HTTPD_MAX_CONNS][XFER_SZ];  /* one transfer buf per worker */
+static K_MUTEX_DEFINE(httpd_conn_mutex);
 
 /* ── small helpers ──────────────────────────────────────────────────────── */
 
@@ -436,9 +458,10 @@ bool httpd_serve(struct httpd_conn *c)
 		return c->keepalive;
 	}
 
-	/* Control/telemetry JSON API (GET only; sets via query param). */
-	if (strncmp(url, "/api/", 5) == 0) {
-		(void)webapi_handle(c, method, url, query);
+	/* Loadable backends: a registered handler may own this URL by prefix
+	 * (e.g. /api/* from apibackend.llext).  If one handles it we're done;
+	 * otherwise fall through to file serving. */
+	if (webapi_handle(c, method, url, query)) {
 		return c->keepalive;
 	}
 
@@ -518,6 +541,42 @@ static int plain_send(void *ctx, const void *buf, size_t len)
 	return zsock_send(*(int *)ctx, buf, len, 0);
 }
 
+/* Per-connection worker: serve one accepted socket (keep-alive loop) on its own
+ * thread, then close it and release the pool slot. */
+static void httpd_conn_entry(void *p1, void *p2, void *p3)
+{
+	int slot = (int)(uintptr_t)p1;
+
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	int cfd = httpd_conn_sock[slot];
+
+	/* Bound blocking recv (mid-request stall + keep-alive idle), so an idle
+	 * or stalled connection frees its worker slot within the timeout. */
+	struct zsock_timeval tv = { .tv_sec = HTTPD_RECV_TIMEOUT_S, .tv_usec = 0 };
+
+	(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	struct httpd_conn conn = {
+		.io_ctx = &httpd_conn_sock[slot],   /* stable per-slot fd storage */
+		.io_recv = plain_recv,
+		.io_send = plain_send,
+		.xfer = httpd_xfer[slot],
+		.xfer_sz = XFER_SZ,
+	};
+
+	/* Keep serving requests on this connection (HTTP keep-alive) until the
+	 * client closes, errors, or the recv timeout fires. */
+	while (httpd_serve(&conn)) {
+	}
+	(void)zsock_close(cfd);
+
+	k_mutex_lock(&httpd_conn_mutex, K_FOREVER);
+	httpd_conn_busy[slot] = false;
+	k_mutex_unlock(&httpd_conn_mutex);
+}
+
 static void httpd_main(void *a, void *b, void *cc)
 {
 	ARG_UNUSED(a);
@@ -542,7 +601,7 @@ static void httpd_main(void *a, void *b, void *cc)
 		(void)zsock_close(srv);
 		return;
 	}
-	if (zsock_listen(srv, 2) < 0) {
+	if (zsock_listen(srv, HTTPD_MAX_CONNS) < 0) {
 		LOG_ERR("listen failed: %d", -errno);
 		(void)zsock_close(srv);
 		return;
@@ -559,26 +618,47 @@ static void httpd_main(void *a, void *b, void *cc)
 			continue;
 		}
 
-		/* Bound blocking recv so a client that stalls mid-request can't
-		 * hang this single-threaded worker indefinitely. */
-		struct zsock_timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+		/* Hand off to a free worker thread; keep accepting meanwhile. */
+		int slot = -1;
 
-		(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv,
-				       sizeof(tv));
-
-		struct httpd_conn conn = {
-			.io_ctx = &cfd,
-			.io_recv = plain_recv,
-			.io_send = plain_send,
-			.xfer = xfer,
-			.xfer_sz = sizeof(xfer),
-		};
-
-		/* Keep serving requests on this connection (HTTP keep-alive)
-		 * until the client closes, errors, or the recv timeout fires. */
-		while (httpd_serve(&conn)) {
+		k_mutex_lock(&httpd_conn_mutex, K_FOREVER);
+		for (int i = 0; i < HTTPD_MAX_CONNS; i++) {
+			if (!httpd_conn_busy[i]) {
+				httpd_conn_busy[i] = true;
+				slot = i;
+				break;
+			}
 		}
-		(void)zsock_close(cfd);
+		k_mutex_unlock(&httpd_conn_mutex);
+
+		if (slot < 0) {
+			LOG_WRN("HTTP :%d busy (%d conns), rejecting",
+				HTTPD_PORT, HTTPD_MAX_CONNS);
+			(void)zsock_close(cfd);
+			continue;
+		}
+
+		httpd_conn_sock[slot] = cfd;
+
+		/* The worker clears httpd_conn_busy[slot] just before it returns,
+		 * so the slot can be picked here while that thread is still
+		 * tearing down.  Recreating the k_thread object then corrupts it
+		 * (slot leaks busy / garbage) — so join the previous worker first;
+		 * on a free slot the join returns immediately. */
+		if (httpd_conn_used[slot]) {
+			(void)k_thread_join(&httpd_conn_threads[slot], K_FOREVER);
+		}
+		httpd_conn_used[slot] = true;
+
+		(void)k_thread_create(&httpd_conn_threads[slot],
+				      httpd_conn_stacks[slot], HTTPD_STACK_SIZE,
+				      httpd_conn_entry, (void *)(uintptr_t)slot,
+				      NULL, NULL, HTTPD_PRIO, 0, K_NO_WAIT);
+
+		char tname[16];
+
+		(void)snprintk(tname, sizeof(tname), "httpdc%d", slot);
+		(void)k_thread_name_set(&httpd_conn_threads[slot], tname);
 	}
 }
 

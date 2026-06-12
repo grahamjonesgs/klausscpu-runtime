@@ -45,11 +45,31 @@ LOG_MODULE_REGISTER(httpsd, LOG_LEVEL_INF);
 #define HTTPSD_STACK_SIZE 16384
 #define HTTPSD_PRIO       7
 
+/* Concurrent TLS connections: the accept loop hands each accepted socket to a
+ * free worker (own stack + WOLFSSL session + transfer buffer) and keeps
+ * accepting, so one keep-alive client (e.g. the dashboard polling) can't block
+ * others or starve the TCP connection-context pool.  Mirrors ssh_server.c.
+ * Sized for a busy browser's parallel keep-alive connections plus other clients. */
+#define HTTPSD_MAX_CONNS  8
+
+/* Per-connection recv timeout / keep-alive idle timeout — short so idle spare
+ * connections free their worker (and TLS session) quickly; see httpd.c. */
+#define HTTPSD_RECV_TIMEOUT_S  5
+
+/* Accept-loop thread. */
 static K_THREAD_STACK_DEFINE(httpsd_stack, HTTPSD_STACK_SIZE);
 static struct k_thread httpsd_thread;
 
-/* Transfer buffer — one connection served at a time, separate from httpd's. */
-static char xfer[XFER_SZ];
+/* Per-connection worker pool. */
+static K_THREAD_STACK_ARRAY_DEFINE(httpsd_conn_stacks, HTTPSD_MAX_CONNS,
+				   HTTPSD_STACK_SIZE);
+static struct k_thread httpsd_conn_threads[HTTPSD_MAX_CONNS];
+static int      httpsd_conn_sock[HTTPSD_MAX_CONNS];  /* fd (stable per slot) */
+static WOLFSSL *httpsd_conn_ssl[HTTPSD_MAX_CONNS];
+static bool     httpsd_conn_busy[HTTPSD_MAX_CONNS];
+static bool     httpsd_conn_used[HTTPSD_MAX_CONNS];  /* slot's k_thread ever created */
+static char     httpsd_xfer[HTTPSD_MAX_CONNS][XFER_SZ];
+static K_MUTEX_DEFINE(httpsd_conn_mutex);
 
 static WOLFSSL_CTX *s_ctx;
 
@@ -94,6 +114,60 @@ static int tls_send(void *ctx, const void *buf, size_t len)
 	return wolfSSL_write((WOLFSSL *)ctx, buf, (int)len);
 }
 
+/* ── per-connection worker ────────────────────────────────────────────────── */
+
+/* Run the TLS handshake + serve loop for one accepted socket on its own thread
+ * (the WOLFSSL session was created in the accept loop), then tear it down and
+ * release the pool slot.  Each worker uses its own transfer buffer. */
+static void httpsd_conn_entry(void *p1, void *p2, void *p3)
+{
+	int slot = (int)(uintptr_t)p1;
+
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	int cfd = httpsd_conn_sock[slot];
+	WOLFSSL *ssl = httpsd_conn_ssl[slot];
+
+	/* Bound blocking recv (handshake + request reads + keep-alive idle) so an
+	 * idle or stalled connection frees its worker (and TLS session) quickly. */
+	struct zsock_timeval tv = { .tv_sec = HTTPSD_RECV_TIMEOUT_S, .tv_usec = 0 };
+
+	(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	/* Point wolfSSL's I/O at this slot's stable fd storage. */
+	wolfSSL_SetIOReadCtx(ssl, &httpsd_conn_sock[slot]);
+	wolfSSL_SetIOWriteCtx(ssl, &httpsd_conn_sock[slot]);
+
+	int rc = wolfSSL_accept(ssl);
+
+	if (rc != WOLFSSL_SUCCESS) {
+		LOG_WRN("TLS handshake failed (slot %d): err=%d", slot,
+			wolfSSL_get_error(ssl, rc));
+	} else {
+		struct httpd_conn conn = {
+			.io_ctx = ssl,
+			.io_recv = tls_recv,
+			.io_send = tls_send,
+			.xfer = httpsd_xfer[slot],
+			.xfer_sz = XFER_SZ,
+		};
+
+		/* Serve multiple requests over this one TLS session (keep-alive)
+		 * until the client closes, errors, or the recv timeout fires. */
+		while (httpd_serve(&conn)) {
+		}
+		(void)wolfSSL_shutdown(ssl);
+	}
+
+	wolfSSL_free(ssl);
+	(void)zsock_close(cfd);
+
+	k_mutex_lock(&httpsd_conn_mutex, K_FOREVER);
+	httpsd_conn_busy[slot] = false;
+	k_mutex_unlock(&httpsd_conn_mutex);
+}
+
 /* ── server thread ──────────────────────────────────────────────────────── */
 
 static void httpsd_main(void *a, void *b, void *cc)
@@ -124,7 +198,7 @@ static void httpsd_main(void *a, void *b, void *cc)
 		(void)zsock_close(srv);
 		return;
 	}
-	if (zsock_listen(srv, 2) < 0) {
+	if (zsock_listen(srv, HTTPSD_MAX_CONNS) < 0) {
 		LOG_ERR("listen failed: %d", -errno);
 		(void)zsock_close(srv);
 		return;
@@ -141,52 +215,61 @@ static void httpsd_main(void *a, void *b, void *cc)
 			continue;
 		}
 
-		/* Bound blocking recv (handshake + request reads) so a stalled
-		 * client can't hang this single-threaded worker indefinitely —
-		 * e.g. a PUT that sends Expect: 100-continue and then no body. */
-		struct zsock_timeval tv = { .tv_sec = 15, .tv_usec = 0 };
+		/* Hand off to a free worker thread; keep accepting meanwhile. */
+		int slot = -1;
 
-		(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv,
-				       sizeof(tv));
+		k_mutex_lock(&httpsd_conn_mutex, K_FOREVER);
+		for (int i = 0; i < HTTPSD_MAX_CONNS; i++) {
+			if (!httpsd_conn_busy[i]) {
+				httpsd_conn_busy[i] = true;
+				slot = i;
+				break;
+			}
+		}
+		k_mutex_unlock(&httpsd_conn_mutex);
 
+		if (slot < 0) {
+			LOG_WRN("HTTPS :%d busy (%d conns), rejecting",
+				HTTPS_PORT, HTTPSD_MAX_CONNS);
+			(void)zsock_close(cfd);
+			continue;
+		}
+
+		/* Create the WOLFSSL session here (accept loop, serialised) —
+		 * like ssh_server's wolfSSH_new — so concurrent workers don't
+		 * race on the shared CTX; the worker runs the handshake + serve. */
 		WOLFSSL *ssl = wolfSSL_new(s_ctx);
 
 		if (ssl == NULL) {
 			LOG_ERR("wolfSSL_new failed");
 			(void)zsock_close(cfd);
+			k_mutex_lock(&httpsd_conn_mutex, K_FOREVER);
+			httpsd_conn_busy[slot] = false;
+			k_mutex_unlock(&httpsd_conn_mutex);
 			continue;
 		}
 
-		/* cfd is stable for this iteration; the handshake + serve run
-		 * synchronously here (unlike SSH, which hands off to a thread). */
-		wolfSSL_SetIOReadCtx(ssl, &cfd);
-		wolfSSL_SetIOWriteCtx(ssl, &cfd);
+		httpsd_conn_sock[slot] = cfd;
+		httpsd_conn_ssl[slot] = ssl;
 
-		int rc = wolfSSL_accept(ssl);
-
-		if (rc != WOLFSSL_SUCCESS) {
-			LOG_WRN("TLS handshake failed: err=%d",
-				wolfSSL_get_error(ssl, rc));
-		} else {
-			struct httpd_conn conn = {
-				.io_ctx = ssl,
-				.io_recv = tls_recv,
-				.io_send = tls_send,
-				.xfer = xfer,
-				.xfer_sz = sizeof(xfer),
-			};
-
-			/* Serve multiple requests over this one TLS session
-			 * (keep-alive) so a page's assets share a single
-			 * handshake.  Loop until the client closes, errors, or
-			 * the recv timeout fires. */
-			while (httpd_serve(&conn)) {
-			}
-			(void)wolfSSL_shutdown(ssl);
+		/* Join the slot's previous worker before recreating its k_thread:
+		 * the worker clears httpsd_conn_busy[slot] just before returning,
+		 * so without this the struct could be recreated mid-teardown and
+		 * corrupt the slot.  Returns immediately on a free slot. */
+		if (httpsd_conn_used[slot]) {
+			(void)k_thread_join(&httpsd_conn_threads[slot], K_FOREVER);
 		}
+		httpsd_conn_used[slot] = true;
 
-		wolfSSL_free(ssl);
-		(void)zsock_close(cfd);
+		(void)k_thread_create(&httpsd_conn_threads[slot],
+				      httpsd_conn_stacks[slot], HTTPSD_STACK_SIZE,
+				      httpsd_conn_entry, (void *)(uintptr_t)slot,
+				      NULL, NULL, HTTPSD_PRIO, 0, K_NO_WAIT);
+
+		char tname[16];
+
+		(void)snprintk(tname, sizeof(tname), "httpsdc%d", slot);
+		(void)k_thread_name_set(&httpsd_conn_threads[slot], tname);
 	}
 }
 

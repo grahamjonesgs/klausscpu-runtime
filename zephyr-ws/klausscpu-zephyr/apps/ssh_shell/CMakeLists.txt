@@ -30,4 +30,14 @@ if(CONFIG_LLEXT)
     SOURCES ${apibackend_src}
   )
   add_dependencies(app apibackend)
+
+  # Example second backend (claims "/ctrl/") to demonstrate prefix-keyed
+  # dispatch — load it alongside apibackend.llext. Same flags apply.
+  get_filename_component(ctrlbackend_src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ssh/ctrlbackend.c ABSOLUTE)
+  add_llext_target(ctrlbackend
+    OUTPUT  ${CMAKE_BINARY_DIR}/ctrl.llext
+    SOURCES ${ctrlbackend_src}
+  )
+  add_dependencies(app ctrlbackend)
 endif()

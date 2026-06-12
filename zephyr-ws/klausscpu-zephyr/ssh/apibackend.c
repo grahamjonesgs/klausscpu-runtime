@@ -131,12 +131,13 @@ static bool api_handle(struct httpd_conn *c, const char *method,
 
 int svc_start(void)
 {
-	webapi_register(api_handle);
-	return 0;
+	/* Claim the "/api/" prefix; fail the load if it's already taken so the
+	 * loader unwinds cleanly (see llext_service_load). */
+	return webapi_register("/api/", api_handle) == 0 ? 0 : -1;
 }
 
 int svc_stop(void)
 {
-	webapi_unregister();
+	webapi_unregister("/api/");
 	return 0;
 }
