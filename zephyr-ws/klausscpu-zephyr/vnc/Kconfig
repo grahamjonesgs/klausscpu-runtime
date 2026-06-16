@@ -1,0 +1,11 @@
+config KLAUSSCPU_VNC_SERVER
+	bool "KlaussCPU VNC (RFB) server"
+	default n
+	depends on NET_SOCKETS
+	help
+	  Minimal RFB (VNC) server on port 5900 exposing an in-RAM RGB565
+	  framebuffer to standard VNC clients (macOS Screen Sharing, TigerVNC,
+	  RealVNC).  No VGA hardware required — the framebuffer is served over
+	  the network instead of scanned out to a monitor.  Implements the
+	  RFB 3.8 mandatory subset (security None, Raw encoding) with per-pixel
+	  format conversion.  No auth or TLS — intended for trusted LAN use.

@@ -131,7 +131,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf test_varargs perf_baseline fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           netboot loader crypto_selftest crypto_test
+           netboot loader crypto_selftest crypto_test dhrystone
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -235,6 +235,9 @@ test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 perf_baseline.elf: perf_baseline.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,perf_baseline.o)
+
+dhrystone.elf: dhrystone.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,dhrystone.o)
 
 fs_demo.elf: fs_demo.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(FATFS_OBJS) fs_demo.o)
@@ -393,7 +396,7 @@ loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 # card and load it with the SSH `run` command (e.g. `run adventure.llext`).
 EXT_CFLAGS = -target $(TARGET) -Os -nostdinc -ffreestanding -fno-builtin \
              -I$(ROOT)/ext_include
-EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch perf_baseline
+EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch perf_baseline dhrystone
 
 %.llext: programs/%.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -434,6 +437,7 @@ test_asm:    test_asm.elf
 test_printf:       test_printf.elf
 test_varargs:      test_varargs.elf
 perf_baseline:     perf_baseline.elf
+dhrystone:         dhrystone.elf
 fs_demo:           fs_demo.elf
 test_fatfs_printf: test_fatfs_printf.elf
 test_sd:           test_sd.elf

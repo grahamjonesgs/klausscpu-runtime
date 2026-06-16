@@ -29,6 +29,10 @@
 #include "httpsd.h"
 #endif
 
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
+#include "vnc_server.h"
+#endif
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* No RTC on this board, so NTP is the time source for FatFs file timestamps.
@@ -170,6 +174,13 @@ int main(void)
 		} else {
 			LOG_ERR("HTTPS server failed");
 		}
+	}
+#endif
+
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
+	if (net_ok) {
+		vnc_server_start();
+		LOG_INF("VNC server ready on port 5900");
 	}
 #endif
 
