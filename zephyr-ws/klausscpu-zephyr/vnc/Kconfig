@@ -9,3 +9,12 @@ config KLAUSSCPU_VNC_SERVER
 	  the network instead of scanned out to a monitor.  Implements the
 	  RFB 3.8 mandatory subset (security None, Raw encoding) with per-pixel
 	  format conversion.  No auth or TLS — intended for trusted LAN use.
+
+config KLAUSSCPU_VNC_DEMO
+	bool "VNC built-in demo content (test pattern + bouncing box)"
+	default y
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  Draw a test pattern at start and animate a bouncing box so the VNC
+	  pipeline has visible content when nothing else drives the framebuffer.
+	  Disable when another component (e.g. the Doom app) owns the framebuffer.

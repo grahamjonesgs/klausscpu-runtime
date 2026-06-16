@@ -42,7 +42,7 @@ LOG_MODULE_REGISTER(vncd, LOG_LEVEL_INF);
 /* Refresh throttle: never send incremental updates faster than this, so a
  * fast-changing framebuffer can't flood the link or peg the soft core.  Dirt
  * accumulated between sends is coalesced into one update. */
-#define VNC_MAX_FPS     30
+#define VNC_MAX_FPS     10
 #define VNC_MIN_FRAME_MS (1000 / VNC_MAX_FPS)
 /* While an incremental update is pending, re-check the dirty box this often. */
 #define VNC_POLL_MS     10
@@ -70,9 +70,11 @@ static uint8_t rowbuf[FB_WIDTH * 4];
 static K_THREAD_STACK_DEFINE(vnc_stack, VNC_STACK_SIZE);
 static struct k_thread vnc_thread;
 
+#ifdef CONFIG_KLAUSSCPU_VNC_DEMO
 #define DEMO_STACK_SIZE 2048
 static K_THREAD_STACK_DEFINE(demo_stack, DEMO_STACK_SIZE);
 static struct k_thread demo_thread;
+#endif
 
 /* ── byte helpers (RFB is big-endian on the wire) ───────────────────────── */
 
@@ -455,6 +457,7 @@ static void serve_client(int s)
 	}
 }
 
+#ifdef CONFIG_KLAUSSCPU_VNC_DEMO
 /* Placeholder content source: a two-tone box bouncing over the test pattern,
  * marking the framebuffer dirty so the dirty-rect/throttle path has something
  * to do.  Replace with the real (FPGA) framebuffer source in milestone 6+. */
@@ -483,6 +486,7 @@ static void vnc_demo(void *a, void *b, void *c)
 		k_sleep(K_MSEC(VNC_MIN_FRAME_MS));
 	}
 }
+#endif /* CONFIG_KLAUSSCPU_VNC_DEMO */
 
 static void vnc_main(void *a, void *b, void *c)
 {
@@ -532,13 +536,14 @@ static void vnc_main(void *a, void *b, void *c)
 
 void vnc_server_start(void)
 {
-	fb_test_pattern();
-
 	(void)k_thread_create(&vnc_thread, vnc_stack,
 			      K_THREAD_STACK_SIZEOF(vnc_stack),
 			      vnc_main, NULL, NULL, NULL,
 			      VNC_PRIO, 0, K_NO_WAIT);
 	(void)k_thread_name_set(&vnc_thread, "vncd");
+
+#ifdef CONFIG_KLAUSSCPU_VNC_DEMO
+	fb_test_pattern();
 
 	/* Placeholder animated content (see vnc_demo). */
 	(void)k_thread_create(&demo_thread, demo_stack,
@@ -546,4 +551,5 @@ void vnc_server_start(void)
 			      vnc_demo, NULL, NULL, NULL,
 			      VNC_PRIO, 0, K_NO_WAIT);
 	(void)k_thread_name_set(&demo_thread, "vncdemo");
+#endif
 }

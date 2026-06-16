@@ -125,6 +125,11 @@ SECTIONS
 
     __heap_start = _end;
     __heap_end   = ORIGIN(STACK);
+    /* Common-libc malloc with CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=-1 sizes its
+     * heap as (_heap_sentry - _end), giving it all RAM up to the stack region
+     * at runtime — so a large heap costs no image/file space (the arena is not
+     * a stored .bss array).  Apps using a fixed positive arena ignore this. */
+    PROVIDE(_heap_sentry = ORIGIN(STACK));
 
     GROUP_END(RAMABLE_REGION)
 

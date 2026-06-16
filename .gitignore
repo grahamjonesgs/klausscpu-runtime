@@ -27,5 +27,8 @@ picolibc-cross-abs.ini
 # lwIP — cloned externally, not part of this repo
 lwip/
 
+# doomgeneric — cloned by apps/doom/fetch-doomgeneric.sh, not part of this repo
+zephyr-ws/klausscpu-zephyr/apps/doom/doomgeneric-src/
+
 # Local Claude Code agent state (settings, scheduled-task lock) — not part of the build
 .claude/
