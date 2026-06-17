@@ -40,6 +40,11 @@ target_sources(app PRIVATE
 # include dirs — SYSTEM keeps clang from warning on the stub headers.
 target_include_directories(app BEFORE PRIVATE ${DG} compat)
 
+# Render at Doom's native 320x200 (no software 2x upscale).  Quarters the
+# render, convert and VNC-send work vs the default 640x400; the VNC client
+# scales it up for display.
+target_compile_definitions(app PRIVATE DOOMGENERIC_RESX=320 DOOMGENERIC_RESY=200)
+
 # Doom is full of intentional old-C idioms; silence its warnings rather than
 # patch vendored sources, and force-include our stdio shim so the file
 # functions minimal libc lacks (fopen/fread/...) have correct prototypes.

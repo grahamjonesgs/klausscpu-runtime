@@ -18,3 +18,11 @@ config KLAUSSCPU_VNC_DEMO
 	  Draw a test pattern at start and animate a bouncing box so the VNC
 	  pipeline has visible content when nothing else drives the framebuffer.
 	  Disable when another component (e.g. the Doom app) owns the framebuffer.
+
+config KLAUSSCPU_VNC_PROFILE
+	bool "Profile VNC send throughput"
+	default n
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  Print periodic per-update send time, bytes/update and throughput to the
+	  console.  Diagnostic only.

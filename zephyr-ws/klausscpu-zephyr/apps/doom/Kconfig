@@ -1,0 +1,11 @@
+# Doom app Kconfig.  An application Kconfig must source the rest of Zephyr's.
+
+config DOOM_PROFILE
+	bool "Profile the Doom frame pipeline"
+	default n
+	help
+	  Print periodic per-frame timing to the console: fps and average
+	  tick / convert / render (= tick - convert) milliseconds.  Pair with
+	  KLAUSSCPU_VNC_PROFILE to see the send side.  Diagnostic only.
+
+source "Kconfig.zephyr"

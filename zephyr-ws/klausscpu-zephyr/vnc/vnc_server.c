@@ -65,7 +65,11 @@ static const struct pixfmt native_fmt = {
 };
 
 /* One converted scanline, max width at 4 bytes/pixel. */
-static uint8_t rowbuf[FB_WIDTH * 4];
+/* Batch buffer: convert many scanlines into this, then send in big chunks
+ * (one zsock_send per ~64 KB instead of one per row).  Per-row sends were the
+ * dominant cost — 400 sends/frame of ~1.3 KB each, ~3.7 s/frame total. */
+#define SENDBUF_SZ (64 * 1024)
+static uint8_t sendbuf[SENDBUF_SZ];
 
 static K_THREAD_STACK_DEFINE(vnc_stack, VNC_STACK_SIZE);
 static struct k_thread vnc_thread;
@@ -156,22 +160,42 @@ static void parse_pixfmt(struct pixfmt *f, const uint8_t *p)
 }
 
 /* RGB565 -> the client's requested format value (channel-scaled + shifted). */
-static uint32_t convert_pixel(uint16_t px, const struct pixfmt *f)
+/* Per-channel conversion LUTs (indexed by the RGB565 components), rebuilt
+ * whenever the client pixel format changes.  This replaces 3 software divides
+ * per pixel — ruinous on this core (no hardware divide), and the dominant cost
+ * when streaming full frames — with table lookups + ORs. */
+static uint32_t lut_r[32];
+static uint32_t lut_g[64];
+static uint32_t lut_b[32];
+
+/* True when the client's format is byte-identical to our native RGB565 LE, so a
+ * row can be memcpy'd out with no per-pixel conversion (the common case — it's
+ * the standard VNC 16bpp format).  Set by build_luts(). */
+static bool fmt_native;
+
+static void build_luts(const struct pixfmt *f)
 {
-	uint8_t r5 = (px >> 11) & 0x1F;
-	uint8_t g6 = (px >> 5) & 0x3F;
-	uint8_t b5 = px & 0x1F;
-	/* bit-replicate to 8 bits */
-	uint8_t r8 = (uint8_t)((r5 << 3) | (r5 >> 2));
-	uint8_t g8 = (uint8_t)((g6 << 2) | (g6 >> 4));
-	uint8_t b8 = (uint8_t)((b5 << 3) | (b5 >> 2));
+	fmt_native = (f->bpp == 16 && !f->big_endian &&
+		      f->red_max == 31 && f->green_max == 63 && f->blue_max == 31 &&
+		      f->red_shift == 11 && f->green_shift == 5 && f->blue_shift == 0);
 
-	uint32_t cr = ((uint32_t)r8 * f->red_max   + 127) / 255;
-	uint32_t cg = ((uint32_t)g8 * f->green_max + 127) / 255;
-	uint32_t cb = ((uint32_t)b8 * f->blue_max  + 127) / 255;
+	for (int i = 0; i < 32; i++) {
+		uint8_t c8 = (uint8_t)((i << 3) | (i >> 2));   /* 5-bit -> 8-bit */
 
-	return (cr << f->red_shift) | (cg << f->green_shift) |
-	       (cb << f->blue_shift);
+		lut_r[i] = (((uint32_t)c8 * f->red_max + 127) / 255) << f->red_shift;
+		lut_b[i] = (((uint32_t)c8 * f->blue_max + 127) / 255) << f->blue_shift;
+	}
+	for (int i = 0; i < 64; i++) {
+		uint8_t c8 = (uint8_t)((i << 2) | (i >> 4));   /* 6-bit -> 8-bit */
+
+		lut_g[i] = (((uint32_t)c8 * f->green_max + 127) / 255) << f->green_shift;
+	}
+}
+
+static inline uint32_t convert_pixel(uint16_t px)
+{
+	return lut_r[(px >> 11) & 0x1F] | lut_g[(px >> 5) & 0x3F] |
+	       lut_b[px & 0x1F];
 }
 
 static void put_pixel_bytes(uint8_t *p, uint32_t v, int bytes, bool big_endian)
@@ -230,6 +254,37 @@ static int send_server_init(int s)
 	return send_all(s, DESKTOP_NAME, strlen(DESKTOP_NAME));
 }
 
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+/* Split per-update cost into convert (CPU) vs send (network), + throughput. */
+#define VNC_PROF_WINDOW 10
+static void vnc_prof_account(uint32_t conv_ms, uint32_t send_ms, uint64_t bytes)
+{
+	static uint64_t sum_conv, sum_send, sum_bytes;
+	static uint32_t upd;
+	static int64_t t0_ms;
+
+	if (upd == 0) {
+		t0_ms = k_uptime_get();
+	}
+	sum_conv += conv_ms;
+	sum_send += send_ms;
+	sum_bytes += bytes;
+	if (++upd >= VNC_PROF_WINDOW) {
+		uint32_t ms = (uint32_t)(k_uptime_get() - t0_ms);
+
+		printk("vnc: convert=%ums send=%ums %uKB/upd ~%u KB/s\n",
+		       (uint32_t)(sum_conv / upd),
+		       (uint32_t)(sum_send / upd),
+		       (uint32_t)(sum_bytes / upd / 1024U),
+		       ms ? (uint32_t)(sum_bytes / 1024U * 1000U / ms) : 0U);
+		sum_conv = 0;
+		sum_send = 0;
+		sum_bytes = 0;
+		upd = 0;
+	}
+}
+#endif
+
 /* Send one FramebufferUpdate carrying a single Raw rectangle [x,y,w,h].
  * Converts and sends one scanline at a time, copying out under fb_lock() and
  * sending unlocked so drawing is never stalled across a network write. */
@@ -240,6 +295,9 @@ static int send_rect(int s, int x, int y, int w, int h, const struct pixfmt *f)
 	if (bytes < 1 || bytes > 4 || w <= 0 || h <= 0) {
 		return -1;
 	}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	uint32_t conv_ms = 0, send_ms = 0;
+#endif
 
 	/* FramebufferUpdate header: type 0, pad, number-of-rectangles = 1. */
 	uint8_t hdr[4] = { 0, 0, 0, 1 };
@@ -256,24 +314,53 @@ static int send_rect(int s, int x, int y, int w, int h, const struct pixfmt *f)
 		return -1;
 	}
 
-	for (int row = 0; row < h; row++) {
-		/* Copy + convert this scanline under the lock, then release it
-		 * before sending. */
-		fb_lock();
-		const uint16_t *src = fb_pixels() + (size_t)(y + row) * FB_WIDTH + x;
-		uint8_t *o = rowbuf;
+	size_t row_bytes = (size_t)w * bytes;
+	int row = 0;
 
-		for (int col = 0; col < w; col++) {
-			put_pixel_bytes(o, convert_pixel(src[col], f), bytes,
-					f->big_endian);
-			o += bytes;
+	while (row < h) {
+		/* Convert as many whole scanlines as fit into the batch buffer
+		 * (under one lock), then send the whole chunk unlocked. */
+		size_t len = 0;
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+		int64_t c0 = k_uptime_get();
+#endif
+
+		fb_lock();
+		while (row < h && len + row_bytes <= SENDBUF_SZ) {
+			const uint16_t *src =
+				fb_pixels() + (size_t)(y + row) * FB_WIDTH + x;
+
+			if (fmt_native) {
+				/* RGB565 LE == our framebuffer: copy raw. */
+				memcpy(sendbuf + len, src, row_bytes);
+			} else {
+				uint8_t *o = sendbuf + len;
+
+				for (int col = 0; col < w; col++) {
+					put_pixel_bytes(o, convert_pixel(src[col]),
+							bytes, f->big_endian);
+					o += bytes;
+				}
+			}
+			len += row_bytes;
+			row++;
 		}
 		fb_unlock();
 
-		if (send_all(s, rowbuf, (size_t)w * bytes)) {
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+		conv_ms += (uint32_t)(k_uptime_get() - c0);
+		int64_t s0 = k_uptime_get();
+#endif
+		if (send_all(s, sendbuf, len)) {
 			return -1;
 		}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+		send_ms += (uint32_t)(k_uptime_get() - s0);
+#endif
 	}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	vnc_prof_account(conv_ms, send_ms, (uint64_t)w * h * bytes);
+#endif
 	return 0;
 }
 
@@ -318,6 +405,7 @@ static void serve_client(int s)
 	}
 
 	LOG_INF("VNC client connected");
+	build_luts(&fmt);   /* conversion tables for the initial (native) format */
 
 	/* Incremental-update state: the client requests a region and expects an
 	 * update only once something changes (RFB lets the server delay).  We
@@ -368,6 +456,7 @@ static void serve_client(int s)
 				return;
 			}
 			parse_pixfmt(&fmt, b + 3);
+			build_luts(&fmt);
 			LOG_INF("client pixel format: %u bpp, depth %u, %s-endian, "
 				"truecolour=%u, max r%u/g%u/b%u, shift %u/%u/%u",
 				fmt.bpp, fmt.depth,

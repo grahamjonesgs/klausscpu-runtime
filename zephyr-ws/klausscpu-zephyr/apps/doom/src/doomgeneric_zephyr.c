@@ -28,11 +28,26 @@
 
 LOG_MODULE_REGISTER(doom, LOG_LEVEL_INF);
 
-/* Centre Doom's 400-row image in the 480-row framebuffer. */
+/* Centre Doom's image in the framebuffer (640x480).  At 320x200 it sits in the
+ * middle; the VNC client scales it up for display. */
+#define FB_XOFF  ((FB_WIDTH  - DOOMGENERIC_RESX) / 2)
 #define FB_YOFF  ((FB_HEIGHT - DOOMGENERIC_RESY) / 2)
 
-BUILD_ASSERT(DOOMGENERIC_RESX == FB_WIDTH, "Doom width must match framebuffer");
+BUILD_ASSERT(DOOMGENERIC_RESX <= FB_WIDTH, "Doom width must fit framebuffer");
 BUILD_ASSERT(DOOMGENERIC_RESY <= FB_HEIGHT, "Doom height must fit framebuffer");
+
+#ifdef CONFIG_DOOM_PROFILE
+/* Wall-clock ms timing (k_cycle_get_32 is unreliable on this core).  tick =
+ * whole doomgeneric_Tick (includes any preemption by the VNC send thread);
+ * convert = the ARGB->RGB565 loop; draws counts actual DG_DrawFrame calls so we
+ * can see how many ticks actually paint. */
+#define PROF_WINDOW   20
+static uint64_t prof_tick_ms;
+static uint64_t prof_conv_ms;
+static uint32_t prof_ticks;
+static uint32_t prof_draws;
+static int64_t  prof_t0_ms;
+#endif
 
 /* ── DG platform hooks ──────────────────────────────────────────────────── */
 
@@ -46,9 +61,12 @@ void DG_DrawFrame(void)
 
 	fb_lock();
 	uint16_t *dst = fb_pixels();
+#ifdef CONFIG_DOOM_PROFILE
+	int64_t c0 = k_uptime_get();
+#endif
 
 	for (int y = 0; y < DOOMGENERIC_RESY; y++) {
-		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH;
+		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
 		const uint32_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
 
 		for (int x = 0; x < DOOMGENERIC_RESX; x++) {
@@ -57,16 +75,13 @@ void DG_DrawFrame(void)
 			drow[x] = fb_rgb((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
 		}
 	}
+#ifdef CONFIG_DOOM_PROFILE
+	prof_conv_ms += k_uptime_get() - c0;
+	prof_draws++;
+#endif
 	fb_unlock();
 
-	fb_mark_dirty(0, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
-
-	/* Heartbeat so we can confirm rendering is progressing (temporary). */
-	static unsigned frames;
-
-	if ((++frames % 70) == 0) {
-		printk("doom: %u frames\n", frames);
-	}
+	fb_mark_dirty(FB_XOFF, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -172,8 +187,36 @@ static void doom_entry(void *a, void *b, void *c)
 
 	doomgeneric_Create(ARRAY_SIZE(argv), argv);
 
+#ifdef CONFIG_DOOM_PROFILE
+	prof_t0_ms = k_uptime_get();
+#endif
+
 	for (;;) {
+#ifdef CONFIG_DOOM_PROFILE
+		int64_t t0 = k_uptime_get();
+#endif
 		doomgeneric_Tick();
+#ifdef CONFIG_DOOM_PROFILE
+		prof_tick_ms += k_uptime_get() - t0;
+
+		if (++prof_ticks >= PROF_WINDOW) {
+			int64_t now = k_uptime_get();
+			uint32_t wall = (uint32_t)(now - prof_t0_ms);
+
+			printk("doom: drawfps=%u tick=%ums convert=%ums "
+			       "(draws=%u/%u ticks in %ums)\n",
+			       wall ? (prof_draws * 1000U / wall) : 0U,
+			       (uint32_t)(prof_tick_ms / prof_ticks),
+			       prof_draws ? (uint32_t)(prof_conv_ms / prof_draws) : 0U,
+			       prof_draws, prof_ticks, wall);
+
+			prof_tick_ms = 0;
+			prof_conv_ms = 0;
+			prof_ticks = 0;
+			prof_draws = 0;
+			prof_t0_ms = now;
+		}
+#endif
 	}
 }
 
