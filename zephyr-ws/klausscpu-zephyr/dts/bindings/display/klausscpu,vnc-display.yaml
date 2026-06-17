@@ -1,0 +1,18 @@
+description: |
+  KlaussCPU in-RAM framebuffer exposed as a Zephyr display device.  The driver
+  (display_vnc.c) copies flushed RGB565 rectangles into the framebuffer that the
+  VNC server streams.  Set as chosen zephyr,display so LVGL renders over VNC.
+
+compatible: "klausscpu,vnc-display"
+
+include: [base.yaml]
+
+properties:
+  width:
+    type: int
+    required: true
+    description: Horizontal resolution in pixels (match the framebuffer).
+  height:
+    type: int
+    required: true
+    description: Vertical resolution in pixels (match the framebuffer).

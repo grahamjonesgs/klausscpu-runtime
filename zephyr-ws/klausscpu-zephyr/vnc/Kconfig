@@ -26,3 +26,13 @@ config KLAUSSCPU_VNC_PROFILE
 	help
 	  Print periodic per-update send time, bytes/update and throughput to the
 	  console.  Diagnostic only.
+
+config KLAUSSCPU_VNC_DISPLAY
+	bool "Expose the VNC framebuffer as a Zephyr display device"
+	default n
+	depends on KLAUSSCPU_VNC_SERVER && DISPLAY
+	help
+	  Register a Zephyr display driver (compatible "klausscpu,vnc-display")
+	  whose write() copies into the VNC framebuffer, so display-based stacks
+	  such as LVGL render over VNC.  Requires a matching devicetree node set
+	  as chosen zephyr,display.

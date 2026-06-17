@@ -1,0 +1,12 @@
+/ {
+	chosen {
+		zephyr,display = &vnc_display;
+	};
+
+	vnc_display: vnc_display {
+		compatible = "klausscpu,vnc-display";
+		status = "okay";
+		width = <640>;
+		height = <480>;
+	};
+};

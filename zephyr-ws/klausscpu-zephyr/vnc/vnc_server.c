@@ -74,6 +74,16 @@ static uint8_t sendbuf[SENDBUF_SZ];
 static K_THREAD_STACK_DEFINE(vnc_stack, VNC_STACK_SIZE);
 static struct k_thread vnc_thread;
 
+/* Optional input handlers (see vnc_register_input). */
+static vnc_key_fn     s_key_cb;
+static vnc_pointer_fn s_ptr_cb;
+
+void vnc_register_input(vnc_key_fn key, vnc_pointer_fn pointer)
+{
+	s_key_cb = key;
+	s_ptr_cb = pointer;
+}
+
 #ifdef CONFIG_KLAUSSCPU_VNC_DEMO
 #define DEMO_STACK_SIZE 2048
 static K_THREAD_STACK_DEFINE(demo_stack, DEMO_STACK_SIZE);
@@ -522,11 +532,17 @@ static void serve_client(int s)
 			if (recv_all(s, b, 7)) {
 				return;
 			}
+			if (s_key_cb) {
+				s_key_cb(b[0] != 0, rd32(b + 3));
+			}
 			break;
 
 		case MSG_POINTER_EVENT:           /* mask + x + y        (5) */
 			if (recv_all(s, b, 5)) {
 				return;
+			}
+			if (s_ptr_cb) {
+				s_ptr_cb(rd16(b + 1), rd16(b + 3), b[0]);
 			}
 			break;
 

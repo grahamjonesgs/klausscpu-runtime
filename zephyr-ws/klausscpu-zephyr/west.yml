@@ -32,3 +32,4 @@ manifest:
         # Add module names here if a build reports one missing.
         name-allowlist:
           - fatfs
+          - lvgl   # embedded GUI library (gui_lvgl app, rendered over VNC)
