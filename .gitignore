@@ -32,3 +32,6 @@ zephyr-ws/klausscpu-zephyr/apps/doom/doomgeneric-src/
 
 # Local Claude Code agent state (settings, scheduled-task lock) — not part of the build
 .claude/
+
+# Build logs (redirected west/ninja output) — not part of the build
+zephyr-ws/build_*.log
