@@ -1,0 +1,41 @@
+KlaussCPU LVGL over VNC
+=== LVGL render benchmark (640x480, render + flush=memcpy) ===
+LVGL bench fill     : total=610 render=217 copy=393 ms/frame (copy 393627 us)
+  rd hit: 98.46%
+  wr hit: 89.65%
+  stall%: 21.14%
+  CPI: 9.622  instr/fr=6347137
+  rm/fr=69238 wm/fr=121433 wb/fr=122115
+LVGL bench blend50  : total=1024 render=631 copy=393 ms/frame (copy 393897 us)
+  rd hit: 98.36%
+  wr hit: 95.01%
+  stall%: 14.27%
+  CPI: 8.533  instr/fr=12007800
+  rm/fr=135983 wm/fr=79674 wb/fr=139100
+LVGL bench rounded  : total=703 render=310 copy=393 ms/frame (copy 393027 us)
+  rd hit: 98.34%
+  wr hit: 91.24%
+  stall%: 18.48%
+  CPI: 9.278  instr/fr=7579540
+  rm/fr=90631 wm/fr=107322 wb/fr=110147
+LVGL bench shadow   : total=1583 render=1190 copy=393 ms/frame (copy 393723 us)
+  rd hit: 99.06%
+  wr hit: 95.38%
+  stall%: 8.87%
+  CPI: 8.108  instr/fr=19530440
+  rm/fr=121151 wm/fr=93560 wb/fr=117353
+LVGL bench text     : total=1252 render=859 copy=393 ms/frame (copy 393688 us)
+  rd hit: 98.82%
+  wr hit: 95.20%
+  stall%: 10.39%
+  CPI: 8.235  instr/fr=15211659
+  rm/fr=125277 wm/fr=81607 wb/fr=92481
+LVGL bench gradient : total=522 render=128 copy=394 ms/frame (copy 394016 us)
+  rd hit: 98.77%
+  wr hit: 88.97%
+  stall%: 20.94%
+  CPI: 9.636  instr/fr=5423896
+  rm/fr=46993 wm/fr=111069 wb/fr=111291
+=== benchmark done ===
+
+

@@ -16,18 +16,48 @@
 #include <errno.h>
 
 #include "framebuffer.h"
+#ifdef CONFIG_KLAUSSCPU_VNC_BLITTER
+#include "blitter.h"
+#endif
 
-/* Accumulated ms spent copying flushed pixels into the framebuffer.  Lets a
- * caller (e.g. the LVGL benchmark) split total frame time into render vs this
- * flush-copy — the copy is what a fill/copy DMA ("blitter") would remove. */
-static uint64_t vncd_copy_ms_acc;
+/* Free-running 100 MHz CPU cycle counter (perf block 0xF00D_0008) — reliable
+ * and non-destructive (unlike k_cycle_get_32 on this core); used to time the
+ * flush copy at sub-ms precision now the blitter can make it near-free. */
+#define VNCD_PERF_CYCLES (*(volatile uint64_t *)(unsigned long)0xF00D0008u)
 
-uint32_t vncd_copy_ms_reset(void)
+/* Accumulated CPU cycles spent moving flushed pixels into the framebuffer.
+ * Lets a caller (the LVGL benchmark) split total frame time into render vs this
+ * flush copy — the part the blitter offloads. */
+static uint64_t vncd_copy_cyc_acc;
+
+/* Of the copy time, the cycles the blitter engine itself reported busy (its own
+ * BLIT_CYCLES) — so copy minus this is the whole-cache FLUSH/INVALIDATE cost. */
+static uint64_t vncd_blit_cyc_acc;
+
+/* Whether a 2D DMA blitter is present in this bitstream (probed at init).  When
+ * false (or built without CONFIG_KLAUSSCPU_VNC_BLITTER) the flush falls back to
+ * a CPU memcpy, so the same image runs on a pre-blitter bitstream. */
+static bool vncd_blit;
+
+uint64_t vncd_copy_cyc_reset(void)
 {
-	uint32_t v = (uint32_t)vncd_copy_ms_acc;
+	uint64_t v = vncd_copy_cyc_acc;
 
-	vncd_copy_ms_acc = 0;
+	vncd_copy_cyc_acc = 0;
 	return v;
+}
+
+uint64_t vncd_blit_cyc_reset(void)
+{
+	uint64_t v = vncd_blit_cyc_acc;
+
+	vncd_blit_cyc_acc = 0;
+	return v;
+}
+
+bool vncd_blit_active(void)
+{
+	return vncd_blit;
 }
 
 static int vncd_write(const struct device *dev, const uint16_t x,
@@ -43,18 +73,31 @@ static int vncd_write(const struct device *dev, const uint16_t x,
 		return -EINVAL;
 	}
 
-	int64_t t0 = k_uptime_get();
+	uint64_t c0 = VNCD_PERF_CYCLES;
 
 	fb_lock();
-	uint16_t *fb = fb_pixels();
+	uint16_t *dst = fb_pixels() + (size_t)y * FB_WIDTH + x;
 
-	for (uint16_t row = 0; row < desc->height; row++) {
-		memcpy(fb + (size_t)(y + row) * FB_WIDTH + x,
-		       src + (size_t)row * desc->pitch,
-		       (size_t)desc->width * sizeof(uint16_t));
+#ifdef CONFIG_KLAUSSCPU_VNC_BLITTER
+	if (vncd_blit) {
+		/* One DMA copy for the whole rect; strides handle the row stride
+		 * difference between the LVGL draw buffer and the framebuffer. */
+		blit_copy_rect((uint32_t)(uintptr_t)dst, FB_WIDTH * sizeof(uint16_t),
+			       (uint32_t)(uintptr_t)src,
+			       (uint32_t)desc->pitch * sizeof(uint16_t),
+			       desc->width, desc->height);
+		vncd_blit_cyc_acc += blit_last_cycles();
+	} else
+#endif
+	{
+		for (uint16_t row = 0; row < desc->height; row++) {
+			memcpy(dst + (size_t)row * FB_WIDTH,
+			       src + (size_t)row * desc->pitch,
+			       (size_t)desc->width * sizeof(uint16_t));
+		}
 	}
 	fb_unlock();
-	vncd_copy_ms_acc += k_uptime_get() - t0;
+	vncd_copy_cyc_acc += VNCD_PERF_CYCLES - c0;
 
 	fb_mark_dirty(x, y, desc->width, desc->height);
 	return 0;
@@ -93,6 +136,9 @@ static int vncd_blanking_on(const struct device *dev)
 static int vncd_init(const struct device *dev)
 {
 	ARG_UNUSED(dev);
+#ifdef CONFIG_KLAUSSCPU_VNC_BLITTER
+	vncd_blit = blit_probe();
+#endif
 	return 0;
 }
 

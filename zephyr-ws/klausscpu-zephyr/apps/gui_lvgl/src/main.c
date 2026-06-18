@@ -229,7 +229,8 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	const int n = 20;
 	struct cstat c0, c1;
 
-	(void)vncd_copy_ms_reset();              /* clear flush-copy counter */
+	(void)vncd_copy_cyc_reset();             /* clear flush-copy counters */
+	(void)vncd_blit_cyc_reset();
 	cstat_read(&c0);
 	int64_t t0 = k_uptime_get();
 
@@ -240,7 +241,13 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	uint32_t total = (uint32_t)((k_uptime_get() - t0) / n);
 
 	cstat_read(&c1);
-	uint32_t copy = vncd_copy_ms_reset() / n;
+	/* 100 MHz core: 100 cycles = 1 us.  Sub-ms once the blitter offloads it.
+	 * Split the copy into the blit engine itself vs the whole-cache
+	 * FLUSH/INVALIDATE bracket (the part region-scoped maintenance would cut). */
+	uint32_t copy_us = (uint32_t)(vncd_copy_cyc_reset() / 100ULL / n);
+	uint32_t blit_us = (uint32_t)(vncd_blit_cyc_reset() / 100ULL / n);
+	uint32_t cache_us = (copy_us > blit_us) ? copy_us - blit_us : 0;
+	uint32_t copy = copy_us / 1000u;
 	uint32_t render = (total > copy) ? total - copy : 0;
 
 	uint64_t rh = c1.rh - c0.rh, rm = c1.rm - c0.rm;
@@ -249,8 +256,9 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	uint64_t ins = c1.instr - c0.instr;
 	uint64_t cpi_m = ins ? (cyc * 1000ULL) / ins : 0;   /* milli-CPI */
 
-	printk("LVGL bench %-9s: total=%u render=%u copy=%u ms/frame\n",
-	       name, total, render, copy);
+	printk("LVGL bench %-9s: total=%u render=%u copy=%u ms/frame "
+	       "(copy %u us = blit %u + cache %u)\n",
+	       name, total, render, copy, copy_us, blit_us, cache_us);
 	print_pct("rd hit:", rh, rh + rm);
 	print_pct("wr hit:", wh, wh + wm);
 	print_pct("stall%:", st, cyc);
@@ -264,7 +272,8 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 
 static void run_benchmark(void)
 {
-	printk("=== LVGL render benchmark (640x480, render + flush) ===\n");
+	printk("=== LVGL render benchmark (640x480, render + flush=%s) ===\n",
+	       vncd_blit_active() ? "blitter" : "memcpy");
 	bench_scene("fill", scene_fill);
 	bench_scene("blend50", scene_blend);
 	bench_scene("rounded", scene_rounded);
@@ -330,7 +339,8 @@ int main(void)
 	lv_indev_drv_register(&indev_drv);
 
 	build_ui();
-	LOG_INF("LVGL UI ready on VNC :5900");
+	LOG_INF("LVGL UI ready on VNC :5900 (flush: %s)",
+		vncd_blit_active() ? "blitter" : "memcpy");
 
 	/* LVGL is single-threaded: drive it (and the flush) from here only. */
 	for (;;) {

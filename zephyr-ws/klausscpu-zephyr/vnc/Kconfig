@@ -36,3 +36,16 @@ config KLAUSSCPU_VNC_DISPLAY
 	  whose write() copies into the VNC framebuffer, so display-based stacks
 	  such as LVGL render over VNC.  Requires a matching devicetree node set
 	  as chosen zephyr,display.
+
+config KLAUSSCPU_VNC_BLITTER
+	bool "Offload the display flush copy to the 2D DMA blitter"
+	default y
+	depends on KLAUSSCPU_VNC_DISPLAY
+	help
+	  Use the KlaussCPU 2D DMA blitter (MMIO 0xF00E_0000) to copy flushed
+	  rectangles from the LVGL draw buffer into the framebuffer, bracketed
+	  with whole-cache FLUSH/INVALIDATE for coherency, instead of a CPU
+	  memcpy.  Presence is probed at init; if no blitter is in the loaded
+	  bitstream the driver transparently falls back to the memcpy, so the
+	  same image runs either way.  Set n to force the memcpy path (useful
+	  for an A/B baseline on a blitter-equipped bitstream).
