@@ -11,10 +11,24 @@
 
 #include <zephyr/drivers/display.h>
 #include <zephyr/device.h>
+#include <zephyr/kernel.h>
 #include <string.h>
 #include <errno.h>
 
 #include "framebuffer.h"
+
+/* Accumulated ms spent copying flushed pixels into the framebuffer.  Lets a
+ * caller (e.g. the LVGL benchmark) split total frame time into render vs this
+ * flush-copy — the copy is what a fill/copy DMA ("blitter") would remove. */
+static uint64_t vncd_copy_ms_acc;
+
+uint32_t vncd_copy_ms_reset(void)
+{
+	uint32_t v = (uint32_t)vncd_copy_ms_acc;
+
+	vncd_copy_ms_acc = 0;
+	return v;
+}
 
 static int vncd_write(const struct device *dev, const uint16_t x,
 		      const uint16_t y,
@@ -29,6 +43,8 @@ static int vncd_write(const struct device *dev, const uint16_t x,
 		return -EINVAL;
 	}
 
+	int64_t t0 = k_uptime_get();
+
 	fb_lock();
 	uint16_t *fb = fb_pixels();
 
@@ -38,6 +54,7 @@ static int vncd_write(const struct device *dev, const uint16_t x,
 		       (size_t)desc->width * sizeof(uint16_t));
 	}
 	fb_unlock();
+	vncd_copy_ms_acc += k_uptime_get() - t0;
 
 	fb_mark_dirty(x, y, desc->width, desc->height);
 	return 0;

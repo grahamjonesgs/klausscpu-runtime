@@ -1,0 +1,14 @@
+diff --git a/include/zephyr/sys/cbprintf_internal.h b/include/zephyr/sys/cbprintf_internal.h
+index b580eea8704..c8813b4bba5 100644
+--- a/include/zephyr/sys/cbprintf_internal.h
++++ b/include/zephyr/sys/cbprintf_internal.h
+@@ -38,6 +38,9 @@
+ #else
+ #define VA_STACK_MIN_ALIGN	(__riscv_xlen / 8)
+ #endif /* CONFIG_RISCV_ISA_RV32E */
++#elif defined(__klausscpu__)
++/* KlaussCPU: 64-bit ABI, variadic args occupy 8-byte stack slots */
++#define VA_STACK_MIN_ALIGN	8
+ #endif
+ 
+ /*

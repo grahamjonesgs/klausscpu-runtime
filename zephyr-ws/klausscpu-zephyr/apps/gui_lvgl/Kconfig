@@ -1,0 +1,13 @@
+# gui_lvgl app Kconfig.  An application Kconfig must source the rest of Zephyr's.
+
+config GUI_LVGL_BENCHMARK
+	bool "Run an LVGL render micro-benchmark at boot"
+	default n
+	help
+	  Before starting the interactive UI, time per-operation render+flush
+	  (fill / alpha-blend / rounded / shadow / text / gradient) over the full
+	  640x480 screen and print ms-per-frame to the console.  Guides which
+	  operations are worth hardware acceleration.  Needs no VNC client (it
+	  renders straight into the framebuffer via the display driver).
+
+source "Kconfig.zephyr"

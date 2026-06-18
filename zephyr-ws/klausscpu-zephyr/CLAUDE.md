@@ -26,13 +26,17 @@ fresh clone, from `zephyr-ws/`:
 # a) Zephyr v3.7.0 + the fatfs module (manifest = klausscpu-zephyr/west.yml)
 pip install --user west
 west init -l klausscpu-zephyr
-west update                         # pulls zephyr/ (~1.1 GB) + modules/fs/fatfs
+west update                         # pulls zephyr/ (~1.1 GB) + fatfs + lvgl
 
-# b) Re-apply the two vendored Zephyr patches AFTER EVERY `west update`
+# b) Re-apply the three vendored Zephyr patches AFTER EVERY `west update`
 #    (the zephyr/ tree is gitignored, so the patches don't persist there).
 git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/klausscpu-core.patch
 git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch
-#    Verify: `git -C zephyr status` shows exactly 10 changed files.
+git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/cbprintf-klausscpu.patch
+#    Verify: `git -C zephyr status` shows exactly 11 changed files.
+#    (cbprintf-klausscpu.patch: adds klausscpu to the VA_STACK_ALIGN table so
+#     cbprintf packaging aligns 32-bit varargs correctly — fixes LOG_*/printk
+#     multi-arg %u/%d garble.  Only needed for the lvgl/gui apps but harmless.)
 
 # c) wolfSSL + wolfSSH (only needed for the ssh_shell app) — built from source
 #    as Zephyr modules. build-wolfssl.sh also pins the module name to `wolfssl`
@@ -116,7 +120,7 @@ Add a program: drop it in `baremetal/programs/`, add its name to `EXT_DEMOS` in
 
 ## Gotchas (things that bite)
 
-- **Re-apply the two patches after every `west update`** — the `zephyr/` tree is
+- **Re-apply the three patches after every `west update`** — the `zephyr/` tree is
   gitignored and fetched clean each time, so the patches don't survive.
 - **`EXTRA_ZEPHYR_MODULES` for `ssh_shell` must include both wolfSSL and wolfSSH**
   or Kconfig aborts with `undefined symbol WOLFSSL`. They point at the *source*

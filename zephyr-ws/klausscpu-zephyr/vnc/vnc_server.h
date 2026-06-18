@@ -20,4 +20,9 @@ typedef void (*vnc_key_fn)(bool pressed, uint32_t keysym);
 typedef void (*vnc_pointer_fn)(uint16_t x, uint16_t y, uint8_t buttons);
 void vnc_register_input(vnc_key_fn key, vnc_pointer_fn pointer);
 
+/* Accumulated ms spent in the display driver's flush-copy (framebuffer
+ * memcpy) since the last call; resets the counter.  Provided by display_vnc.c
+ * (CONFIG_KLAUSSCPU_VNC_DISPLAY).  Used to split render vs copy in benchmarks. */
+uint32_t vncd_copy_ms_reset(void);
+
 #endif /* KLAUSSCPU_VNC_SERVER_H_ */
