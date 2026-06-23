@@ -79,15 +79,21 @@ static inline bool blit_probe(void)
 }
 
 /*
- * DMA-coherent RGB565 rectangular copy: FLUSH -> COPY -> wait BUSY -> INVALIDATE.
- * dst/src are DDR byte addresses (== CPU pointers), strides in bytes, w/h in
- * pixels.  No hardware clipping — pass a pre-clipped rect.  Blocks until done.
+ * Async RGB565 rectangular-copy primitives.  Split so the caller can sleep or
+ * yield between polls instead of busy-spinning — on this core the CPU runs the
+ * blit autonomously, so a spin needlessly starves lower-priority threads (e.g.
+ * the VNC send + network threads) for the whole DMA.
+ *
+ * Sequence: blit_start_copy() -> poll blit_busy() (sleeping between) -> read
+ * blit_last_cycles() if wanted -> blit_finish().  dst/src are DDR byte
+ * addresses (== CPU pointers), strides in bytes, w/h in pixels.  No hardware
+ * clipping — pass a pre-clipped rect.
  */
-static inline void blit_copy_rect(uint32_t dst, uint32_t dst_stride,
-				  uint32_t src, uint32_t src_stride,
-				  uint16_t w, uint16_t h)
+static inline void blit_start_copy(uint32_t dst, uint32_t dst_stride,
+				   uint32_t src, uint32_t src_stride,
+				   uint16_t w, uint16_t h)
 {
-	CACHE_CTRL = CACHE_CTRL_FLUSH;            /* push rendered src to DDR (blocks) */
+	CACHE_CTRL = CACHE_CTRL_FLUSH;           /* push rendered src to DDR (blocks) */
 
 	BLIT_R64(BLIT_DST_ADDR)   = dst;
 	BLIT_R64(BLIT_DST_STRIDE) = dst_stride;
@@ -96,13 +102,33 @@ static inline void blit_copy_rect(uint32_t dst, uint32_t dst_stride,
 	BLIT_R64(BLIT_WIDTH)      = w;
 	BLIT_R64(BLIT_HEIGHT)     = h;
 	BLIT_R64(BLIT_CTRL)       = BLIT_CTRL_START | (BLIT_OP_COPY << 1);
+}
 
-	while (BLIT_R64(BLIT_STATUS) & BLIT_STATUS_BUSY) {
-		/* spin: shares the 100 MHz clock, completes in burst time */
-	}
+static inline bool blit_busy(void)
+{
+	return (BLIT_R64(BLIT_STATUS) & BLIT_STATUS_BUSY) != 0;
+}
+
+/* Acknowledge DONE (W1C) and drop the CPU's now-stale cached copies of the
+ * destination so subsequent reads (CPU / VNC) see the blitter's output. */
+static inline void blit_finish(void)
+{
 	BLIT_R64(BLIT_STATUS) = BLIT_STATUS_DONE;        /* W1C */
-
 	CACHE_CTRL = CACHE_CTRL_INVAL;           /* drop stale dst copies (blocks) */
+}
+
+/* Convenience synchronous (busy-spin) copy — for callers outside thread context
+ * that cannot sleep.  Thread-context callers should use the split primitives
+ * above with a sleeping poll. */
+static inline void blit_copy_rect(uint32_t dst, uint32_t dst_stride,
+				  uint32_t src, uint32_t src_stride,
+				  uint16_t w, uint16_t h)
+{
+	blit_start_copy(dst, dst_stride, src, src_stride, w, h);
+	while (blit_busy()) {
+		/* spin */
+	}
+	blit_finish();
 }
 
 /* Cycle count of the most recently completed blit (profiling). */

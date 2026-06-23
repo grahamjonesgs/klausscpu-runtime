@@ -82,11 +82,22 @@ static int vncd_write(const struct device *dev, const uint16_t x,
 	if (vncd_blit) {
 		/* One DMA copy for the whole rect; strides handle the row stride
 		 * difference between the LVGL draw buffer and the framebuffer. */
-		blit_copy_rect((uint32_t)(uintptr_t)dst, FB_WIDTH * sizeof(uint16_t),
-			       (uint32_t)(uintptr_t)src,
-			       (uint32_t)desc->pitch * sizeof(uint16_t),
-			       desc->width, desc->height);
+		blit_start_copy((uint32_t)(uintptr_t)dst, FB_WIDTH * sizeof(uint16_t),
+				(uint32_t)(uintptr_t)src,
+				(uint32_t)desc->pitch * sizeof(uint16_t),
+				desc->width, desc->height);
+		/* Sleep rather than busy-spin while the DMA runs: the LVGL thread
+		 * is higher priority than the VNC send + network threads, so a
+		 * spin would starve them for the whole blit.  Blocking lets them
+		 * use the CPU in parallel with the DMA.  K_TICKS(1) = one 1 kHz
+		 * tick; the <=1-2 ms wake latency is negligible vs the blit. */
+		while (blit_busy()) {
+#ifdef CONFIG_KLAUSSCPU_VNC_BLIT_SLEEP
+			k_sleep(K_TICKS(1));
+#endif
+		}
 		vncd_blit_cyc_acc += blit_last_cycles();
+		blit_finish();
 	} else
 #endif
 	{

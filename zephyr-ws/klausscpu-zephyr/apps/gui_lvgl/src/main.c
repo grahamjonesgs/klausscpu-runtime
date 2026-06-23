@@ -194,13 +194,17 @@ static void scene_gradient(lv_obj_t *scr)
  * pipeline block 0xF00D; cumulative 64-bit, non-destructive). */
 #define REG64(a) (*(volatile uint64_t *)(unsigned long)(a))
 struct cstat {
-	uint64_t cyc, instr, rh, rm, wh, wm, wb, stall;
+	uint64_t cyc, instr, fetch, exec, mul, div, rh, rm, wh, wm, wb, stall;
 };
 
 static void cstat_read(struct cstat *s)
 {
 	s->cyc   = REG64(0xF00D0008u);
 	s->instr = REG64(0xF00D0010u);
+	s->fetch = REG64(0xF00D0018u);   /* fetch/decode cycles (overlapped by a pipeline) */
+	s->exec  = REG64(0xF00D0020u);   /* execute/writeback cycles (incl. mem + blit spin) */
+	s->mul   = REG64(0xF00D0028u);
+	s->div   = REG64(0xF00D0030u);
 	s->rh    = REG64(0xF0050040u);
 	s->rm    = REG64(0xF0050048u);
 	s->wh    = REG64(0xF0050050u);
@@ -265,6 +269,16 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	printk("  CPI: %llu.%03llu  instr/fr=%llu\n",
 	       (unsigned long long)(cpi_m / 1000), (unsigned long long)(cpi_m % 1000),
 	       (unsigned long long)(ins / n));
+	/* Cycle split (Tier-1 perf counters): a pipeline overlaps fetch away, so
+	 * fetch%% should fall after the CPU fix.  exec%% includes the blitter
+	 * BUSY spin, so it is inflated on the light scenes. */
+	uint64_t fe = c1.fetch - c0.fetch, ex = c1.exec - c0.exec;
+	uint64_t md = (c1.mul - c0.mul) + (c1.div - c0.div);
+
+	printk("  cyc split: fetch %llu%% exec %llu%% muldiv %llu%%\n",
+	       (unsigned long long)(cyc ? fe * 100 / cyc : 0),
+	       (unsigned long long)(cyc ? ex * 100 / cyc : 0),
+	       (unsigned long long)(cyc ? md * 100 / cyc : 0));
 	printk("  rm/fr=%llu wm/fr=%llu wb/fr=%llu\n",
 	       (unsigned long long)(rm / n), (unsigned long long)(wm / n),
 	       (unsigned long long)(wb / n));

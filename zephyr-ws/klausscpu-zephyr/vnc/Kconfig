@@ -49,3 +49,16 @@ config KLAUSSCPU_VNC_BLITTER
 	  bitstream the driver transparently falls back to the memcpy, so the
 	  same image runs either way.  Set n to force the memcpy path (useful
 	  for an A/B baseline on a blitter-equipped bitstream).
+
+config KLAUSSCPU_VNC_BLIT_SLEEP
+	bool "Sleep (not busy-spin) while the blitter copies"
+	default y
+	depends on KLAUSSCPU_VNC_BLITTER
+	help
+	  While the 2D DMA blitter copies a flushed rectangle, block the (higher-
+	  priority) LVGL thread on a 1 ms sleep-poll instead of busy-spinning on
+	  the BUSY bit.  Blocking lets the lower-priority VNC send + network
+	  threads use the CPU in parallel with the DMA, improving VNC streaming
+	  while rendering.  Set n to busy-spin (an A/B baseline; also lower wake
+	  latency for the synchronous render benchmark, which has nothing else to
+	  schedule anyway).
