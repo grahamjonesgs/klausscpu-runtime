@@ -25,6 +25,11 @@ extern void __stdout_hook_install(int (*hook)(int c));
 #define _INT_PEND   (*(volatile uint32_t *)0xF00F0008u)
 #define _INT_VEC(n) (*(volatile uint32_t *)(0xF00F0010u + 8u * (n)))
 
+/* UART (0xF001_0000): TX write transmits low byte, STATUS bit0 = TX busy. */
+#define _UART_TX      (*(volatile uint32_t *)0xF0010000u)
+#define _UART_STATUS  (*(volatile uint32_t *)0xF0010010u)
+#define _UART_TX_BUSY (1u << 0)
+
 /* Software bitmask of currently-enabled interrupt sources. */
 static uint32_t _irq_enabled_mask;
 
@@ -99,10 +104,9 @@ void klausscpu_irq_init(void)
  * supplying a strong arch_printk_char_out here we make printk work without
  * needing the full Zephyr console subsystem.
  *
- * Uses the same TXCHARMEMR builtin path as our UART driver — works from any
+ * Uses the same polled MMIO UART path as our UART driver — works from any
  * context, no kernel state required.
  */
-static volatile char _printk_char_buf;
 
 /*
  * Optional console-output router.  When set, it is consulted for every
@@ -125,11 +129,13 @@ int arch_printk_char_out(int c)
     }
 
     if (c == '\n') {
-        _printk_char_buf = '\r';
-        __builtin_klausscpu_txcharmemr((const void *)&_printk_char_buf);
+        while (_UART_STATUS & _UART_TX_BUSY) {
+        }
+        _UART_TX = '\r';
     }
-    _printk_char_buf = (char)c;
-    __builtin_klausscpu_txcharmemr((const void *)&_printk_char_buf);
+    while (_UART_STATUS & _UART_TX_BUSY) {
+    }
+    _UART_TX = (uint32_t)(unsigned char)c;
     return c;
 }
 

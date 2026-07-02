@@ -36,4 +36,9 @@ uint64_t vncd_blit_cyc_reset(void);
  * with CONFIG_KLAUSSCPU_VNC_BLITTER and probed present in the bitstream). */
 bool vncd_blit_active(void);
 
+/* Standalone blitter self-test (no LVGL/VNC): FILL + COPY known patterns between
+ * two DDR buffers, CPU reads back, prints PASS/FAIL + first mismatches.  Isolates
+ * the blitter hardware; FILL-clean + COPY-corrupt points at the read path. */
+void vncd_blit_selftest(void);
+
 #endif /* KLAUSSCPU_VNC_SERVER_H_ */

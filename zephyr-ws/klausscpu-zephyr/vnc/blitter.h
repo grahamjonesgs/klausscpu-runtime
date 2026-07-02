@@ -131,6 +131,26 @@ static inline void blit_copy_rect(uint32_t dst, uint32_t dst_stride,
 	blit_finish();
 }
 
+/* Synchronous solid FILL (write-only — no source read).  Exercises only the
+ * blitter's DDR write path, so FILL-clean + COPY-corrupt isolates the fault to
+ * the read-data capture.  FLUSH first so the post-blit INVALIDATE has no dirty
+ * dst lines to write back over the blitter's output. */
+static inline void blit_fill_rect(uint32_t dst, uint32_t dst_stride,
+				  uint16_t w, uint16_t h, uint16_t color)
+{
+	CACHE_CTRL = CACHE_CTRL_FLUSH;
+	BLIT_R64(BLIT_DST_ADDR)   = dst;
+	BLIT_R64(BLIT_DST_STRIDE) = dst_stride;
+	BLIT_R64(BLIT_WIDTH)      = w;
+	BLIT_R64(BLIT_HEIGHT)     = h;
+	BLIT_R64(BLIT_COLOR)      = color;
+	BLIT_R64(BLIT_CTRL)       = BLIT_CTRL_START | (BLIT_OP_FILL << 1);
+	while (blit_busy()) {
+		/* spin */
+	}
+	blit_finish();
+}
+
 /* Cycle count of the most recently completed blit (profiling). */
 static inline uint32_t blit_last_cycles(void)
 {

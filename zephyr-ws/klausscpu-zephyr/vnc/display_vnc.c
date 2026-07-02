@@ -60,6 +60,112 @@ bool vncd_blit_active(void)
 	return vncd_blit;
 }
 
+/*
+ * Standalone blitter self-test — no LVGL, no VNC.  Blits known patterns between
+ * two cached DDR buffers (same row width/stride as the real framebuffer) and the
+ * CPU reads them back, so it isolates the blitter hardware from everything else:
+ *
+ *   FILL  : write-only path  (no DDR read).
+ *   COPY  : read + write path.  Source pixel encodes its column in the low byte
+ *           and row in the high byte, so any horizontal misplacement is obvious
+ *           in the "want vs got" of the first mismatches.
+ *
+ * FILL-clean + COPY-corrupt  => the read-data capture is the fault.
+ * Both corrupt                => the write path (or cache flush/invalidate).
+ * Both clean                  => the blitter is fine; look elsewhere.
+ */
+#ifdef CONFIG_KLAUSSCPU_VNC_BLITTER
+#define ST_W      640                 /* same row width/stride as the framebuffer */
+#define ST_H      32
+#define ST_STRIDE (ST_W * (int)sizeof(uint16_t))
+#define ST_POISON 0xDEADu
+
+static uint16_t st_src[ST_W * ST_H];
+static uint16_t st_dst[ST_W * ST_H];
+
+static inline uint16_t st_pat(unsigned x, unsigned y)
+{
+	return (uint16_t)((x & 0xFFu) | ((y & 0xFFu) << 8));
+}
+
+void vncd_blit_selftest(void)
+{
+	if (!vncd_blit) {
+		printk("blit self-test: no blitter present (memcpy path)\n");
+		return;
+	}
+	printk("=== blit self-test (%dx%d, stride %d B, aligned) ===\n",
+	       ST_W, ST_H, ST_STRIDE);
+
+	/* ── FILL: write-only ──────────────────────────────────────────────── */
+	for (int i = 0; i < ST_W * ST_H; i++) {
+		st_dst[i] = ST_POISON;
+	}
+	blit_fill_rect((uint32_t)(uintptr_t)st_dst, ST_STRIDE, ST_W, ST_H, 0x07E0);
+
+	int fbad = 0, ffx = 0, ffy = 0;
+	uint16_t fgot = 0;
+
+	for (int y = 0; y < ST_H; y++) {
+		for (int x = 0; x < ST_W; x++) {
+			uint16_t v = st_dst[y * ST_W + x];
+
+			if (v != 0x07E0) {
+				if (!fbad) { ffx = x; ffy = y; fgot = v; }
+				fbad++;
+			}
+		}
+	}
+	if (fbad == 0) {
+		printk("FILL : PASS\n");
+	} else {
+		printk("FILL : FAIL %d/%d bad; first (%d,%d) want=07e0 got=%04x\n",
+		       fbad, ST_W * ST_H, ffx, ffy, fgot);
+	}
+
+	/* ── COPY: read + write ────────────────────────────────────────────── */
+	for (int y = 0; y < ST_H; y++) {
+		for (int x = 0; x < ST_W; x++) {
+			st_src[y * ST_W + x] = st_pat(x, y);
+		}
+	}
+	for (int i = 0; i < ST_W * ST_H; i++) {
+		st_dst[i] = ST_POISON;
+	}
+	blit_copy_rect((uint32_t)(uintptr_t)st_dst, ST_STRIDE,
+		       (uint32_t)(uintptr_t)st_src, ST_STRIDE, ST_W, ST_H);
+
+	int cbad = 0, shown = 0;
+
+	for (int y = 0; y < ST_H; y++) {
+		for (int x = 0; x < ST_W; x++) {
+			uint16_t want = st_pat(x, y);    /* from the formula, not st_src */
+			uint16_t got  = st_dst[y * ST_W + x];
+
+			if (want != got) {
+				cbad++;
+				if (shown < 12) {
+					printk("  (%3d,%2d) want=%04x got=%04x\n",
+					       x, y, want, got);
+					shown++;
+				}
+			}
+		}
+	}
+	if (cbad == 0) {
+		printk("COPY : PASS\n");
+	} else {
+		printk("COPY : FAIL %d/%d bad\n", cbad, ST_W * ST_H);
+	}
+	printk("=== blit self-test done ===\n");
+}
+#else
+void vncd_blit_selftest(void)
+{
+	printk("blit self-test: built without CONFIG_KLAUSSCPU_VNC_BLITTER\n");
+}
+#endif
+
 static int vncd_write(const struct device *dev, const uint16_t x,
 		      const uint16_t y,
 		      const struct display_buffer_descriptor *desc,

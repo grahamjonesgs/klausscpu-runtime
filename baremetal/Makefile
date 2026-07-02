@@ -131,7 +131,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf test_varargs perf_baseline fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           netboot loader crypto_selftest crypto_test dhrystone
+           netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -150,7 +150,7 @@ all: $(addsuffix .elf, $(PROGRAMS))
 setjmp.o:      $(ROOT)/src/setjmp.S      ; $(CC) $(CFLAGS) -c -o $@ $<
 syscalls.o:    $(ROOT)/src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
 stdio_handles.o: $(ROOT)/src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
-uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -c -o $@ $<
+uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -I$(ROOT) -c -o $@ $<
 crt0.o:        $(ROOT)/src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
 
 
@@ -214,6 +214,12 @@ bst.elf: bst.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 crypto.elf: crypto.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,crypto.o)
+
+blit_selftest.elf: blit_selftest.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,blit_selftest.o)
+
+blit_capture.elf: blit_capture.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,blit_capture.o)
 
 queens.elf: queens.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,queens.o)

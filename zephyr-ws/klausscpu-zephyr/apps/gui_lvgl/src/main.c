@@ -42,11 +42,36 @@ static void lvgl_ptr_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 				  : LV_INDEV_STATE_RELEASED;
 }
 
+/* ── live hardware telemetry (perf counters: pipeline 0xF00D, cache 0xF005) ─ */
+
+#define PREG64(a) (*(volatile uint64_t *)(unsigned long)(a))
+struct perf_s { uint64_t cyc, instr, rh, rm, wh, wm, stall; };
+
+static void perf_sample(struct perf_s *s)
+{
+	s->cyc   = PREG64(0xF00D0008u);
+	s->instr = PREG64(0xF00D0010u);
+	s->rh    = PREG64(0xF0050040u);
+	s->rm    = PREG64(0xF0050048u);
+	s->wh    = PREG64(0xF0050050u);
+	s->wm    = PREG64(0xF0050058u);
+	s->stall = PREG64(0xF0050068u);
+}
+
 /* ── widgets ────────────────────────────────────────────────────────────── */
 
 static lv_obj_t *count_label;
 static lv_obj_t *slider_label;
+static lv_obj_t *ctl_arc;
 static int counter;
+
+static lv_obj_t *clock_label;          /* top-bar uptime */
+static lv_obj_t *mon_label;            /* monitor: MIPS / stall */
+static lv_obj_t *bar_rd, *bar_wr;      /* monitor: cache hit-rate bars */
+static lv_obj_t *act_chart;            /* scrolling CPU-activity chart */
+static lv_chart_series_t *act_ser;
+static struct perf_s perf_prev;
+static int64_t perf_t_prev;
 
 static void update_count(void)
 {
@@ -58,58 +83,222 @@ static void btn_dec_cb(lv_event_t *e) { ARG_UNUSED(e); counter--; update_count()
 
 static void slider_cb(lv_event_t *e)
 {
-	lv_obj_t *s = lv_event_get_target(e);
+	int v = (int)lv_slider_get_value(lv_event_get_target(e));
 
-	lv_label_set_text_fmt(slider_label, "%d %%", (int)lv_slider_get_value(s));
+	lv_label_set_text_fmt(slider_label, "%d %%", v);
+	if (ctl_arc) {
+		lv_arc_set_value(ctl_arc, v);
+	}
 }
 
-static lv_obj_t *make_button(lv_obj_t *parent, const char *text,
-			     lv_coord_t xofs, lv_event_cb_t cb)
+/* ── draggable windows ──────────────────────────────────────────────────── */
+
+static void win_drag_cb(lv_event_t *e)
 {
-	lv_obj_t *btn = lv_btn_create(parent);
+	lv_obj_t *win = lv_event_get_user_data(e);
+	lv_indev_t *indev = lv_indev_get_act();
+	lv_point_t v;
 
-	lv_obj_set_size(btn, 110, 56);
-	lv_obj_align(btn, LV_ALIGN_CENTER, xofs, -40);
-	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
-
-	lv_obj_t *lbl = lv_label_create(btn);
-
-	lv_label_set_text(lbl, text);
-	lv_obj_center(lbl);
-	return btn;
+	if (!indev) {
+		return;
+	}
+	lv_indev_get_vect(indev, &v);
+	lv_obj_set_pos(win, lv_obj_get_x(win) + v.x, lv_obj_get_y(win) + v.y);
 }
 
-static void build_ui(void)
+static void win_front_cb(lv_event_t *e)
 {
-	lv_obj_t *scr = lv_scr_act();
+	lv_obj_move_foreground(lv_event_get_user_data(e));
+}
 
-	lv_obj_t *title = lv_label_create(scr);
+static lv_obj_t *make_window(const char *title, lv_coord_t x, lv_coord_t y,
+			     lv_coord_t w, lv_coord_t h)
+{
+	lv_obj_t *win = lv_win_create(lv_scr_act(), 26);
+	lv_obj_t *hdr;
 
-	lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
-	lv_label_set_text(title, "KlaussCPU  -  LVGL over VNC");
-	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
+	lv_obj_set_size(win, w, h);
+	lv_obj_set_pos(win, x, y);
+	lv_win_add_title(win, title);
 
-	count_label = lv_label_create(scr);
+	/* Drag the window by its title bar; raise it to the front on touch. */
+	hdr = lv_win_get_header(win);
+	lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(hdr, win_drag_cb, LV_EVENT_PRESSING, win);
+	lv_obj_add_event_cb(hdr, win_front_cb, LV_EVENT_PRESSED, win);
+	return win;
+}
+
+/* ── window contents ────────────────────────────────────────────────────── */
+
+static void build_monitor(lv_obj_t *win)
+{
+	lv_obj_t *c = lv_win_get_content(win);
+	lv_obj_t *l;
+
+	lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_layout(c, 0);   /* LV_LAYOUT_NONE: absolute positioning */
+
+	mon_label = lv_label_create(c);
+	lv_obj_align(mon_label, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_label_set_text(mon_label, "MIPS  --\nstall --%");
+
+	l = lv_label_create(c);
+	lv_label_set_text(l, "rd hit");
+	lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 60);
+	bar_rd = lv_bar_create(c);
+	lv_bar_set_range(bar_rd, 0, 100);
+	lv_obj_set_size(bar_rd, 150, 12);
+	lv_obj_align(bar_rd, LV_ALIGN_TOP_LEFT, 60, 62);
+
+	l = lv_label_create(c);
+	lv_label_set_text(l, "wr hit");
+	lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 84);
+	bar_wr = lv_bar_create(c);
+	lv_bar_set_range(bar_wr, 0, 100);
+	lv_obj_set_size(bar_wr, 150, 12);
+	lv_obj_align(bar_wr, LV_ALIGN_TOP_LEFT, 60, 86);
+}
+
+static void build_chart(lv_obj_t *win)
+{
+	lv_obj_t *c = lv_win_get_content(win);
+
+	lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_layout(c, 0);   /* LV_LAYOUT_NONE: absolute positioning */
+
+	act_chart = lv_chart_create(c);
+	lv_obj_set_size(act_chart, lv_pct(100), lv_pct(100));
+	lv_chart_set_type(act_chart, LV_CHART_TYPE_LINE);
+	lv_chart_set_update_mode(act_chart, LV_CHART_UPDATE_MODE_SHIFT);
+	lv_chart_set_point_count(act_chart, 50);
+	lv_chart_set_range(act_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 25);
+	act_ser = lv_chart_add_series(act_chart, lv_palette_main(LV_PALETTE_CYAN),
+				      LV_CHART_AXIS_PRIMARY_Y);
+}
+
+static void build_controls(lv_obj_t *win)
+{
+	lv_obj_t *c = lv_win_get_content(win);
+	lv_obj_t *slider, *btn, *lbl;
+
+	lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_layout(c, 0);   /* LV_LAYOUT_NONE: absolute positioning */
+
+	count_label = lv_label_create(c);
 	lv_obj_set_style_text_font(count_label, &lv_font_montserrat_28, 0);
-	lv_obj_align(count_label, LV_ALIGN_TOP_MID, 0, 70);
+	lv_obj_align(count_label, LV_ALIGN_TOP_LEFT, 0, 0);
 	update_count();
 
-	make_button(scr, LV_SYMBOL_MINUS, -90, btn_dec_cb);
-	make_button(scr, LV_SYMBOL_PLUS, 90, btn_inc_cb);
+	btn = lv_btn_create(c);
+	lv_obj_set_size(btn, 56, 44);
+	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, 44);
+	lv_obj_add_event_cb(btn, btn_dec_cb, LV_EVENT_CLICKED, NULL);
+	lbl = lv_label_create(btn); lv_label_set_text(lbl, LV_SYMBOL_MINUS);
+	lv_obj_center(lbl);
 
-	lv_obj_t *slider = lv_slider_create(scr);
+	btn = lv_btn_create(c);
+	lv_obj_set_size(btn, 56, 44);
+	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 64, 44);
+	lv_obj_add_event_cb(btn, btn_inc_cb, LV_EVENT_CLICKED, NULL);
+	lbl = lv_label_create(btn); lv_label_set_text(lbl, LV_SYMBOL_PLUS);
+	lv_obj_center(lbl);
 
-	lv_obj_set_width(slider, 320);
-	lv_obj_align(slider, LV_ALIGN_CENTER, 0, 60);
+	slider = lv_slider_create(c);
+	lv_obj_set_width(slider, 180);
+	lv_obj_align(slider, LV_ALIGN_TOP_LEFT, 0, 112);
 	lv_obj_add_event_cb(slider, slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-	slider_label = lv_label_create(scr);
+	slider_label = lv_label_create(c);
 	lv_label_set_text(slider_label, "0 %");
-	lv_obj_align(slider_label, LV_ALIGN_CENTER, 0, 90);
+	lv_obj_align(slider_label, LV_ALIGN_TOP_LEFT, 0, 134);
 
-	lv_obj_t *sw = lv_switch_create(scr);
+	lv_obj_align(lv_switch_create(c), LV_ALIGN_TOP_LEFT, 200, 112);
 
-	lv_obj_align(sw, LV_ALIGN_CENTER, 0, 140);
+	/* Arc gauge driven by the slider (display-only). */
+	ctl_arc = lv_arc_create(c);
+	lv_obj_set_size(ctl_arc, 96, 96);
+	lv_arc_set_range(ctl_arc, 0, 100);
+	lv_arc_set_value(ctl_arc, 0);
+	lv_obj_align(ctl_arc, LV_ALIGN_TOP_RIGHT, 0, 12);
+	lv_obj_clear_flag(ctl_arc, LV_OBJ_FLAG_CLICKABLE);
+}
+
+static void build_desktop(void)
+{
+	lv_obj_t *scr = lv_scr_act();
+	lv_obj_t *bar, *t, *w;
+
+	lv_obj_set_style_bg_color(scr, lv_color_hex(0x12161f), 0);
+	lv_obj_set_style_bg_grad_color(scr, lv_color_hex(0x243049), 0);
+	lv_obj_set_style_bg_grad_dir(scr, LV_GRAD_DIR_VER, 0);
+
+	/* top bar: title + live uptime clock */
+	bar = lv_obj_create(scr);
+	lv_obj_set_size(bar, lv_pct(100), 28);
+	lv_obj_set_pos(bar, 0, 0);
+	lv_obj_set_style_radius(bar, 0, 0);
+	lv_obj_set_style_pad_all(bar, 4, 0);
+	lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+	t = lv_label_create(bar);
+	lv_label_set_text(t, LV_SYMBOL_HOME "  KlaussCPU Desktop");
+	lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
+
+	clock_label = lv_label_create(bar);
+	lv_label_set_text(clock_label, "up 00:00:00");
+	lv_obj_align(clock_label, LV_ALIGN_RIGHT_MID, 0, 0);
+
+	w = make_window("System Monitor", 8, 36, 300, 196);
+	build_monitor(w);
+
+	w = make_window("CPU activity (MIPS)", 316, 36, 316, 196);
+	build_chart(w);
+
+	w = make_window("Controls", 80, 240, 440, 226);
+	build_controls(w);
+
+	perf_sample(&perf_prev);
+	perf_t_prev = k_uptime_get();
+}
+
+/* Periodic UI refresh (clock + live perf monitor + activity chart). */
+static void ui_tick(lv_timer_t *timer)
+{
+	ARG_UNUSED(timer);
+	struct perf_s now;
+	int64_t tn = k_uptime_get();
+	uint32_t up = (uint32_t)(tn / 1000);
+	uint32_t dt_ms;
+	uint64_t dins, dcyc, drh, drm, dwh, dwm, dst;
+	uint32_t mips, stallp, rdhit, wrhit;
+
+	lv_label_set_text_fmt(clock_label, "up %02u:%02u:%02u",
+			      up / 3600u, (up / 60u) % 60u, up % 60u);
+
+	perf_sample(&now);
+	dt_ms = (uint32_t)(tn - perf_t_prev);
+	if (dt_ms == 0u) {
+		dt_ms = 1u;
+	}
+	dins = now.instr - perf_prev.instr;
+	dcyc = now.cyc - perf_prev.cyc;
+	drh = now.rh - perf_prev.rh; drm = now.rm - perf_prev.rm;
+	dwh = now.wh - perf_prev.wh; dwm = now.wm - perf_prev.wm;
+	dst = now.stall - perf_prev.stall;
+
+	mips   = (uint32_t)(dins / ((uint64_t)dt_ms * 1000u));   /* instr/us == MIPS */
+	stallp = dcyc ? (uint32_t)(dst * 100u / dcyc) : 0u;
+	rdhit  = (drh + drm) ? (uint32_t)(drh * 100u / (drh + drm)) : 0u;
+	wrhit  = (dwh + dwm) ? (uint32_t)(dwh * 100u / (dwh + dwm)) : 0u;
+
+	lv_label_set_text_fmt(mon_label, "MIPS  %u\nstall %u%%", mips, stallp);
+	lv_bar_set_value(bar_rd, rdhit, LV_ANIM_OFF);
+	lv_bar_set_value(bar_wr, wrhit, LV_ANIM_OFF);
+	lv_chart_set_next_value(act_chart, act_ser, mips);
+
+	perf_prev = now;
+	perf_t_prev = tn;
 }
 
 /* ── render micro-benchmark (CONFIG_GUI_LVGL_BENCHMARK) ─────────────────── */
@@ -248,8 +437,10 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	/* 100 MHz core: 100 cycles = 1 us.  Sub-ms once the blitter offloads it.
 	 * Split the copy into the blit engine itself vs the whole-cache
 	 * FLUSH/INVALIDATE bracket (the part region-scoped maintenance would cut). */
-	uint32_t copy_us = (uint32_t)(vncd_copy_cyc_reset() / 100ULL / n);
-	uint32_t blit_us = (uint32_t)(vncd_blit_cyc_reset() / 100ULL / n);
+	uint64_t copy_cyc = vncd_copy_cyc_reset();   /* total flush cycles over n */
+	uint64_t blit_cyc = vncd_blit_cyc_reset();
+	uint32_t copy_us = (uint32_t)(copy_cyc / 100ULL / n);
+	uint32_t blit_us = (uint32_t)(blit_cyc / 100ULL / n);
 	uint32_t cache_us = (copy_us > blit_us) ? copy_us - blit_us : 0;
 	uint32_t copy = copy_us / 1000u;
 	uint32_t render = (total > copy) ? total - copy : 0;
@@ -258,27 +449,31 @@ static void bench_scene(const char *name, void (*build)(lv_obj_t *))
 	uint64_t wh = c1.wh - c0.wh, wm = c1.wm - c0.wm;
 	uint64_t wb = c1.wb - c0.wb, st = c1.stall - c0.stall, cyc = c1.cyc - c0.cyc;
 	uint64_t ins = c1.instr - c0.instr;
-	uint64_t cpi_m = ins ? (cyc * 1000ULL) / ins : 0;   /* milli-CPI */
+	/* Render-only cycles: subtract the synchronous flush (blit + cache walk +
+	 * blit-wait), so CPI / stall% / the cyc split reflect the CPU's rendering
+	 * alone — meaningful on every scene, not just the blit-light ones. */
+	uint64_t rcyc = (cyc > copy_cyc) ? cyc - copy_cyc : cyc;
+	uint64_t cpi_m = ins ? (rcyc * 1000ULL) / ins : 0;   /* milli-CPI, render-only */
 
 	printk("LVGL bench %-9s: total=%u render=%u copy=%u ms/frame "
 	       "(copy %u us = blit %u + cache %u)\n",
 	       name, total, render, copy, copy_us, blit_us, cache_us);
 	print_pct("rd hit:", rh, rh + rm);
 	print_pct("wr hit:", wh, wh + wm);
-	print_pct("stall%:", st, cyc);
-	printk("  CPI: %llu.%03llu  instr/fr=%llu\n",
+	print_pct("stall%:", st, rcyc);
+	printk("  CPI(rndr): %llu.%03llu  instr/fr=%llu\n",
 	       (unsigned long long)(cpi_m / 1000), (unsigned long long)(cpi_m % 1000),
 	       (unsigned long long)(ins / n));
-	/* Cycle split (Tier-1 perf counters): a pipeline overlaps fetch away, so
-	 * fetch%% should fall after the CPU fix.  exec%% includes the blitter
-	 * BUSY spin, so it is inflated on the light scenes. */
+	/* Cycle split over render-only cycles (Tier-1 perf counters): a true
+	 * fetch/execute pipeline overlaps fetch away, so fetch%% should fall as the
+	 * core improves.  Excludes the flush, so it sums to ~100%% on every scene. */
 	uint64_t fe = c1.fetch - c0.fetch, ex = c1.exec - c0.exec;
 	uint64_t md = (c1.mul - c0.mul) + (c1.div - c0.div);
 
 	printk("  cyc split: fetch %llu%% exec %llu%% muldiv %llu%%\n",
-	       (unsigned long long)(cyc ? fe * 100 / cyc : 0),
-	       (unsigned long long)(cyc ? ex * 100 / cyc : 0),
-	       (unsigned long long)(cyc ? md * 100 / cyc : 0));
+	       (unsigned long long)(rcyc ? fe * 100 / rcyc : 0),
+	       (unsigned long long)(rcyc ? ex * 100 / rcyc : 0),
+	       (unsigned long long)(rcyc ? md * 100 / rcyc : 0));
 	printk("  rm/fr=%llu wm/fr=%llu wb/fr=%llu\n",
 	       (unsigned long long)(rm / n), (unsigned long long)(wm / n),
 	       (unsigned long long)(wb / n));
@@ -337,6 +532,10 @@ int main(void)
 {
 	printk("\nKlaussCPU LVGL over VNC\n");
 
+#ifdef CONFIG_GUI_LVGL_BLIT_SELFTEST
+	vncd_blit_selftest();   /* blitter HW check; no LVGL/VNC involved */
+#endif
+
 #ifdef CONFIG_GUI_LVGL_BENCHMARK
 	run_benchmark();   /* renders into the framebuffer; no network needed */
 #endif
@@ -352,8 +551,9 @@ int main(void)
 	indev_drv.read_cb = lvgl_ptr_read;
 	lv_indev_drv_register(&indev_drv);
 
-	build_ui();
-	LOG_INF("LVGL UI ready on VNC :5900 (flush: %s)",
+	build_desktop();
+	lv_timer_create(ui_tick, 500, NULL);   /* clock + live monitor + chart */
+	LOG_INF("LVGL desktop ready on VNC :5900 (flush: %s)",
 		vncd_blit_active() ? "blitter" : "memcpy");
 
 	/* LVGL is single-threaded: drive it (and the flush) from here only. */

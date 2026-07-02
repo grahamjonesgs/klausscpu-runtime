@@ -21,7 +21,7 @@
 #define MMIO_BASE   ((uint32_t)0xF0000000u)
 
 #define SD_BASE     (MMIO_BASE + 0x00000000u)   /* 0xF000_xxxx */
-#define UART_BASE   (MMIO_BASE + 0x00010000u)   /* 0xF001_xxxx  (reserved) */
+#define UART_BASE   (MMIO_BASE + 0x00010000u)   /* 0xF001_xxxx */
 #define RGB_BASE    (MMIO_BASE + 0x00020000u)   /* 0xF002_xxxx */
 #define SEG_BASE    (MMIO_BASE + 0x00030000u)   /* 0xF003_xxxx */
 #define IO_BASE     (MMIO_BASE + 0x00040000u)   /* 0xF004_xxxx */
@@ -46,6 +46,40 @@
 /* SCK frequency = 100 MHz / (2 × (clk_div + 1)) */
 #define SD_CLK_INIT   249u   /* ~200 kHz — safe for SD init */
 #define SD_CLK_FAST     1u   /* ~25 MHz  — full speed       */
+
+/* ── UART — 0xF001_xxxx ──────────────────────────────────────────────────── */
+/* Polled 8-bit UART.  Writing TX transmits the low byte (transmitter is busy   */
+/* until the byte has been shifted out); reading RX pops one byte from the RX    */
+/* FIFO.  Poll STATUS before touching TX/RX.                                     */
+
+#define REG_UART_TX      (*(volatile uint32_t *)(UART_BASE + 0x0000u))  /* W: low byte → TX     */
+#define REG_UART_RX      (*(volatile uint32_t *)(UART_BASE + 0x0008u))  /* R: pop RX-FIFO byte  */
+#define REG_UART_STATUS  (*(volatile uint32_t *)(UART_BASE + 0x0010u))  /* R: status bits below */
+
+#define UART_STATUS_TX_BUSY   (1u << 0)   /* transmitter still shifting a byte */
+#define UART_STATUS_RX_EMPTY  (1u << 1)   /* RX FIFO has no byte to pop         */
+#define UART_STATUS_RX_FULL   (1u << 2)   /* RX FIFO is full                    */
+
+/* Blocking single-byte transmit: wait for the transmitter to go idle, then send.
+ * No CR/LF translation — callers add it (see uart_putc in uart_stubs.c). */
+static inline void uart_tx_byte(uint8_t c) {
+    while (REG_UART_STATUS & UART_STATUS_TX_BUSY) {}
+    REG_UART_TX = c;
+}
+
+/* Blocking receive: wait for a byte, then pop and return it. */
+static inline uint8_t uart_rx_byte(void) {
+    while (REG_UART_STATUS & UART_STATUS_RX_EMPTY) {}
+    return (uint8_t)REG_UART_RX;
+}
+
+/* Non-blocking receive: stores a byte and returns 1 if one was available,
+ * returns 0 (and leaves *out untouched) when the RX FIFO is empty. */
+static inline int uart_rx_try(uint8_t *out) {
+    if (REG_UART_STATUS & UART_STATUS_RX_EMPTY) return 0;
+    *out = (uint8_t)REG_UART_RX;
+    return 1;
+}
 
 /* ── RGB LEDs — 0xF002_xxxx ─────────────────────────────────────────────── */
 /* Each channel is 4 bits (0 = off, 15 = max brightness ~25% duty cycle).   */
@@ -130,6 +164,10 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 #define REG_PERF_CNT_CALL          (*(volatile uint64_t *)(PERF_BASE + 0x0090u))
 #define REG_PERF_CNT_INDIRECT      (*(volatile uint64_t *)(PERF_BASE + 0x0098u))
 #define REG_PERF_CNT_OTHER         (*(volatile uint64_t *)(PERF_BASE + 0x00A0u))
+/* P4.1 X_DISPATCH fast-path fire count: instructions dispatched via the
+ * fetch/execute overlap that skipped the FETCH2 settle bubble. (Slot was the
+ * P4.1a predecode-mismatch validator, retired once the pipeline shipped.) */
+#define REG_PERF_FASTPATH (*(volatile uint64_t *)(PERF_BASE + 0x00A8u))
 
 /* PERF_CTRL: bit 0 is write-1-auto-clear; zeroes every counter next cycle. */
 #define PERF_CTRL_CLEAR            (1u << 0)

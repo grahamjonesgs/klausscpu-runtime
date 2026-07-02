@@ -10,4 +10,14 @@ config GUI_LVGL_BENCHMARK
 	  operations are worth hardware acceleration.  Needs no VNC client (it
 	  renders straight into the framebuffer via the display driver).
 
+config GUI_LVGL_BLIT_SELFTEST
+	bool "Run the blitter self-test at boot"
+	default n
+	help
+	  Before the UI/benchmark, run a standalone blitter self-test (FILL + COPY
+	  of known patterns between two DDR buffers, read back by the CPU) and print
+	  PASS/FAIL + first mismatches.  No LVGL/VNC involved, so it isolates the
+	  blitter hardware.  Used to diagnose the DDR-retiming COPY corruption
+	  (see docs/blitter-ddr-corruption-handoff.md).
+
 source "Kconfig.zephyr"

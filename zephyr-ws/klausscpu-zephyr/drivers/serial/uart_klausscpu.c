@@ -1,10 +1,14 @@
 /*
  * uart_klausscpu.c — Zephyr UART driver for KlaussCPU.
  *
- * TX: TXCHARMEMR builtin (reads byte from memory, transmits via UART).
- * RX: RXRNB (non-blocking) via inline asm with sentinel detection for
- *     poll_in.  RXRB (blocking) available for explicit use by
- *     uart_klausscpu_start_rx_thread() if timer ISR can preempt it.
+ * The UART is a polled, memory-mapped peripheral at 0xF001_0000:
+ *   +0x00 TX     write  — low byte transmitted; transmitter busy until sent
+ *   +0x08 RX     read   — pops one byte from the RX FIFO
+ *   +0x10 STATUS read   — bit0 TX busy, bit1 RX empty, bit2 RX full
+ *
+ * poll_out waits for TX-idle then writes the byte; poll_in returns -1 when the
+ * RX FIFO is empty.  (Previously used the TXCHARMEMR/RXRNB CPU instructions,
+ * removed now that the UART lives on MMIO.)
  */
 #define DT_DRV_COMPAT klausscpu_uart
 
@@ -12,28 +16,29 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/device.h>
 
-static volatile char _uart_tx_buf;
+/* ── MMIO register definitions (mirrors runtime/mmio.h) ──────────────────── */
 
-/* ── poll_in: RXRNB with sentinel ────────────────────────────────────────── */
+#define UART_BASE             0xF0010000u
+#define REG(a)                (*(volatile uint32_t *)(unsigned long)(a))
+
+#define REG_UART_TX           REG(UART_BASE + 0x0000u)
+#define REG_UART_RX           REG(UART_BASE + 0x0008u)
+#define REG_UART_STATUS       REG(UART_BASE + 0x0010u)
+
+#define UART_STATUS_TX_BUSY   (1u << 0)
+#define UART_STATUS_RX_EMPTY  (1u << 1)
+#define UART_STATUS_RX_FULL   (1u << 2)
+
+/* ── poll_in: pop RX FIFO, -1 when empty ─────────────────────────────────── */
 
 static int uart_klausscpu_poll_in(const struct device *dev, unsigned char *c)
 {
     ARG_UNUSED(dev);
 
-    uint64_t val;
-
-    __asm__ volatile(
-        "setr   %0, 256\n\t"
-        "rxrnb  %0"
-        : "=&r"(val)
-        :
-        :
-    );
-
-    if (val > 0xFF) {
+    if (REG_UART_STATUS & UART_STATUS_RX_EMPTY) {
         return -1;
     }
-    *c = (unsigned char)val;
+    *c = (unsigned char)REG_UART_RX;
     return 0;
 }
 
@@ -41,11 +46,13 @@ static void uart_klausscpu_poll_out(const struct device *dev, unsigned char c)
 {
     ARG_UNUSED(dev);
     if (c == '\n') {
-        _uart_tx_buf = '\r';
-        __builtin_klausscpu_txcharmemr((const void *)&_uart_tx_buf);
+        while (REG_UART_STATUS & UART_STATUS_TX_BUSY) {
+        }
+        REG_UART_TX = '\r';
     }
-    _uart_tx_buf = c;
-    __builtin_klausscpu_txcharmemr((const void *)&_uart_tx_buf);
+    while (REG_UART_STATUS & UART_STATUS_TX_BUSY) {
+    }
+    REG_UART_TX = c;
 }
 
 static int uart_klausscpu_init(const struct device *dev)

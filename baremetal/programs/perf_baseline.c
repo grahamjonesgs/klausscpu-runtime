@@ -58,6 +58,7 @@ typedef struct {
     u64 mul_ops, div_ops, int_ops;
     u64 alu, load, store, branch, taken, jump, call, indirect, other;
     u64 rh, rm, wh, wm, wb, stall;
+    u64 fastpath;               /* P4.1: X_DISPATCH fast-path fires (skipped FETCH2) */
 } snap_t;
 
 /* ── fixed-point printers ────────────────────────────────────────────────── */
@@ -84,6 +85,7 @@ static void report(const char *name, const snap_t *s) {
     printf("\n--- %s ---\n", name);
     printf("time=%lums cycles=%lu instr=%lu CPI=%lu.%03lu\n",
            U(s->ms), U(s->cycles), U(s->instr), U(cpi_m / 1000), U(cpi_m % 1000));
+    printf("FASTPATH=%lu  (instrs that skipped FETCH2)\n", U(s->fastpath));
 
     printf("mix:  ALU=");  pct(s->alu, s->instr);
     printf(" LD=");        pct(s->load, s->instr);
@@ -224,6 +226,7 @@ static void bench(const char *name, void (*fn)(void)) {
     s.branch   = REG_PERF_CNT_BRANCH; s.taken = REG_PERF_CNT_BRANCH_TAKEN;
     s.jump     = REG_PERF_CNT_JUMP; s.call   = REG_PERF_CNT_CALL;
     s.indirect = REG_PERF_CNT_INDIRECT; s.other = REG_PERF_CNT_OTHER;
+    s.fastpath = REG_PERF_FASTPATH;
     s.rh = REG_CACHE_RD_HITS;  s.rm = REG_CACHE_RD_MISSES;
     s.wh = REG_CACHE_WR_HITS;  s.wm = REG_CACHE_WR_MISSES;
     s.wb = REG_CACHE_WRITEBACKS; s.stall = REG_CACHE_STALL_CYC;

@@ -70,10 +70,11 @@ static long long asm_shr(long long a, long long b) {
     return r;
 }
 
-/* ── T3: volatile asm with hardware side effects ─────────────────────────── */
-
+/* ── T3: volatile side effect (MMIO LED write) ───────────────────────────── */
+/* The LEDR opcode was retired (LEDs are MMIO now, 0xF004_0000). A volatile
+   MMIO store keeps T3's intent: a side effect the compiler must not elide. */
 static void asm_leds(long long pattern) {
-    __asm__ volatile("ledr %0" : : "r"(pattern));
+    *(volatile unsigned int *)0xF0040000u = (unsigned int)pattern;
 }
 
 /* ── T4: in-place (tied) constraint ─────────────────────────────────────── */
@@ -155,12 +156,12 @@ int main(void) {
         check("T2 multi-op ALU:        ", ok);
     }
 
-    /* T3: volatile asm side effects (just verify it doesn't crash) */
+    /* T3: volatile MMIO side effect (just verify it doesn't crash) */
     {
         asm_leds(0xAAAA);
         asm_leds(0x5555);
         asm_leds(0x1234);  /* restore */
-        check("T3 volatile asm leds:   ", 1);
+        check("T3 volatile mmio leds:  ", 1);
     }
 
     /* T4: in-place tied constraint */

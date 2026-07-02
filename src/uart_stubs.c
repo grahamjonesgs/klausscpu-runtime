@@ -1,15 +1,19 @@
-// uart_stubs.c — UART I/O implementation using KlaussCPU hardware instructions.
+// uart_stubs.c — UART I/O implementation using the KlaussCPU MMIO UART.
 //
-// Physical memory is little-endian (after April 2026 CPU fix): byte at address
-// X occupies bits[8*(X mod 4)+7 : 8*(X mod 4)] of the 32-bit physical word.
-// LDIDX8/STIDX8, MEMGET8/MEMSET8, and TXSTRMEMR all use LE-lane mapping and
-// are therefore consistent with the physical memory layout.
+// The UART is a polled, memory-mapped peripheral at 0xF001_0000 (see mmio.h):
+//   +0x00 TX     write  — low byte transmitted; transmitter busy until sent
+//   +0x08 RX     read   — pops one byte from the RX FIFO
+//   +0x10 STATUS read   — bit0 TX busy, bit1 RX empty, bit2 RX full
+//
+// (Previously this used the __builtin_klausscpu_{txr,txcharmemr,rxrb,rxrnb}
+//  CPU instructions, which have been removed now that the UART lives on MMIO.)
 //
 // Compile with:
-//   clang -target klausscpu-unknown-elf -O1 -nostdlib -nostdinc \
-//         -ffreestanding -c uart_stubs.c
+//   clang -target klausscpu-unknown-elf -O1 -nostdlib -ffreestanding \
+//         -I<runtime-root> -c uart_stubs.c
 
-typedef unsigned long long uint64_t;
+#include <stdint.h>
+#include "mmio.h"
 
 /* Defined in syscalls.c — set by crt0_loadable before main() to redirect
  * console I/O to an active SSH/telnet session when running under the loader. */
@@ -17,23 +21,14 @@ extern void (*g_console_mirror_fn)(char c);
 extern int  (*g_console_input_fn)(void);
 
 // ---------------------------------------------------------------------------
-// Transmit: send 64-bit register value as 16 hex digits over UART.
+// Transmit: send a 64-bit value as 16 hex digits over the UART (raw, no mirror).
+// Replaces the old TXR instruction.
 // ---------------------------------------------------------------------------
 void uart_tx_hex(uint64_t val) {
-    __builtin_klausscpu_txr(val);
-}
-
-// Scratch buffer for single-character UART transmission.
-// Must be global so TXCHARMEMR gets a SETR-resolved address, not a
-// FrameIndex that eliminateFrameIndex cannot handle for R-format instructions.
-static volatile char _uart_char_buf;
-
-// ---------------------------------------------------------------------------
-// Raw single-byte send — no CR conversion.
-// ---------------------------------------------------------------------------
-static void _uart_raw(char c) {
-    _uart_char_buf = c;
-    __builtin_klausscpu_txcharmemr((const void *)&_uart_char_buf);
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        unsigned nyb = (unsigned)((val >> shift) & 0xFu);
+        uart_tx_byte((uint8_t)(nyb < 10 ? '0' + nyb : 'A' + (nyb - 10)));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -48,8 +43,8 @@ void uart_putc(char c) {
         g_console_mirror_fn(c);
         return;
     }
-    if (c == '\n') _uart_raw('\r');
-    _uart_raw(c);
+    if (c == '\n') uart_tx_byte((uint8_t)'\r');
+    uart_tx_byte((uint8_t)c);
 }
 
 // ---------------------------------------------------------------------------
@@ -67,25 +62,24 @@ void uart_newline(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Receive: blocking — wait for UART byte, return it.
+// Receive: blocking — wait for a UART byte, return it.
 // ---------------------------------------------------------------------------
 uint64_t uart_getc_blocking(void) {
     /* When a remote loader (SSH/telnet) is driving this program, read input
      * from that session instead of the physical UART RX FIFO. */
     if (g_console_input_fn)
         return (uint64_t)(unsigned char)g_console_input_fn();
-    return __builtin_klausscpu_rxrb();
+    return (uint64_t)uart_rx_byte();
 }
 
 // ---------------------------------------------------------------------------
-// Receive: non-blocking.
-// WARNING: RXRNB sets zero_flag when the FIFO is empty but does NOT write the
-// destination register; the returned value is undefined when the FIFO is
-// empty.  The hardware zero_flag cannot be inspected from C without inline
-// assembly.  Use uart_getc_blocking() for reliable receive.
+// Receive: non-blocking.  Returns the byte (0..255) if one was available, or
+// (uint64_t)-1 when the RX FIFO is empty.
 // ---------------------------------------------------------------------------
 uint64_t uart_getc_nonblocking(void) {
-    return __builtin_klausscpu_rxrnb();
+    uint8_t c;
+    if (uart_rx_try(&c)) return (uint64_t)c;
+    return (uint64_t)-1;
 }
 
 // ---------------------------------------------------------------------------
