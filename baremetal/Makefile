@@ -37,6 +37,12 @@
 ifeq ($(strip $(KLAUSSCPU_LLVM_BIN)),)
 $(error KLAUSSCPU_LLVM_BIN is not set. Export it to the built toolchain's bin dir, e.g. `export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin`. See README.md)
 endif
+# Expand a leading `~`/`~/` to $(HOME).  make's $(abspath ...) and prerequisite
+# matching do NOT perform shell tilde expansion, so a value like `~/.../bin`
+# silently breaks the $(BUILTINS) derivation below and the crt-*.o rules fail
+# with "No rule to make target 'crt-addsf3.o'".  (The clang/ld command words
+# still work because the shell expands the leading ~ there.)
+KLAUSSCPU_LLVM_BIN := $(patsubst ~,$(HOME),$(patsubst ~/%,$(HOME)/%,$(KLAUSSCPU_LLVM_BIN)))
 LLVM_BIN ?= $(KLAUSSCPU_LLVM_BIN)
 
 CC  = $(LLVM_BIN)/clang

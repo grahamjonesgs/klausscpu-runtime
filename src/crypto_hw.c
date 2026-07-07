@@ -127,6 +127,8 @@ void aes_hw_decrypt(uint64_t in_lo, uint64_t in_hi,
 
 /* ── AES-128 CTR ─────────────────────────────────────────────────────────── */
 
+static uint64_t bswap64(uint64_t v); /* defined below (GCM section) */
+
 void aes_ctr(uint64_t nonce_lo, uint64_t nonce_hi,
              const uint8_t *in, uint8_t *out, size_t len) {
     uint64_t ctr_lo = nonce_lo, ctr_hi = nonce_hi;
@@ -144,9 +146,16 @@ void aes_ctr(uint64_t nonce_lo, uint64_t nonce_hi,
         memcpy(out,     &a, 8);
         memcpy(out + 8, &b, 8);
 
-        /* 128-bit counter increment. */
-        ctr_lo++;
-        if (ctr_lo == 0) ctr_hi++;
+        /* 128-bit BIG-ENDIAN counter increment (NIST SP 800-38A).
+         * The counter block is a big-endian integer, so its least-significant
+         * byte is byte 15 — the top byte of ctr_hi.  Increment via byte-swapped
+         * arithmetic (bytes 8-15 in ctr_hi, carrying into bytes 0-7 in ctr_lo).
+         * The previous `ctr_lo++` bumped byte 0 (the MOST-significant byte), so
+         * only block 0 (no increment) was correct; blocks 1+ used a bad counter. */
+        uint64_t hi_be = bswap64(ctr_hi) + 1;
+        ctr_hi = bswap64(hi_be);
+        if (hi_be == 0)                        /* carried out of bytes 8-15 */
+            ctr_lo = bswap64(bswap64(ctr_lo) + 1);
         in  += 16; out += 16; len -= 16;
     }
 
@@ -250,11 +259,14 @@ void aes_gcm_encrypt(const uint8_t *iv,
         off += n;
     }
 
-    /* 6. GHASH length block: (lenA_bits || lenC_bits), each 64-bit BE.
-     * Per MMIO_MAP: pass bswap64(lenC_bits) as lo, bswap64(lenA_bits) as hi. */
+    /* 6. GHASH length block: [len(A)]_64 || [len(C)]_64, each 64-bit BE, with
+     * len(A) FIRST (block bytes 0-7).  gcm_ghash_block(lo,hi) loads lo->X0
+     * (bytes 0-7), hi->X1 (bytes 8-15), so lo = bswap64(lenA), hi = bswap64(lenC).
+     * (This was previously swapped — lenC in bytes 0-7 — which corrupted only
+     * the tag; the ciphertext, which doesn't depend on the length block, passed.) */
     uint64_t len_a_bits = (uint64_t)aad_len * 8;
     uint64_t len_c_bits = (uint64_t)len     * 8;
-    gcm_ghash_block(bswap64(len_c_bits), bswap64(len_a_bits));
+    gcm_ghash_block(bswap64(len_a_bits), bswap64(len_c_bits));
 
     /* 7. tag = GHASH ^ AES_K(J0). */
     uint64_t t0 = REG_GCM_TAG0 ^ j0_lo;
@@ -300,8 +312,8 @@ int aes_gcm_decrypt(const uint8_t *iv,
         off += n;
     }
 
-    /* 4. Length block. */
-    gcm_ghash_block(bswap64((uint64_t)len * 8), bswap64((uint64_t)aad_len * 8));
+    /* 4. Length block: [len(A)]_64 || [len(C)]_64, len(A) first (bytes 0-7). */
+    gcm_ghash_block(bswap64((uint64_t)aad_len * 8), bswap64((uint64_t)len * 8));
 
     /* 5. Tag. */
     uint64_t t0 = REG_GCM_TAG0 ^ j0_lo;
@@ -339,8 +351,11 @@ int aes_gcm_decrypt(const uint8_t *iv,
 /* ── SHA-256 (one-shot) ──────────────────────────────────────────────────── */
 
 void sha256_hw(const uint8_t *msg, size_t len, uint8_t out[32]) {
+    /* INIT resets H to the FIPS-180-4 IV; it is a state reset, NOT a block
+     * compression, so it never asserts SHA_STATUS_DONE.  sha_wait() here spun
+     * forever on the first SHA operation (the self-test hang).  The DONE
+     * handshake belongs to SHA_CTRL_START, which every block below waits on. */
     REG_SHA_CTRL = SHA_CTRL_INIT;
-    sha_wait();
 
     /* Full blocks. */
     size_t off = 0;
@@ -360,8 +375,9 @@ void sha256_hw_init(sha256_ctx_t *ctx) {
     ctx->total_bytes = 0;
     ctx->buf_len     = 0;
     ctx->initialized = 1;
+    /* INIT is a state reset, not a compression — no DONE handshake to wait on
+     * (see sha256_hw); waiting here hangs. */
     REG_SHA_CTRL = SHA_CTRL_INIT;
-    sha_wait();
 }
 
 void sha256_hw_update(sha256_ctx_t *ctx, const uint8_t *data, size_t len) {
@@ -424,11 +440,14 @@ void hmac_sha256_hw(const uint8_t *key, size_t key_len,
     REG_HMAC_CTRL = HMAC_CTRL_KEY_LOAD;
     hmac_wait();
 
-    /* Start HMAC operation. */
+    /* Inner hash: START loads H <- inner midstate (the SHA-256 state after the
+     * ipad block, which KEY_LOAD precomputed).  START/FINAL are pure H-loads —
+     * they do NOT compress — so every message block, including the final padded
+     * one, must be driven with SHA_CTRL_START. */
     REG_HMAC_CTRL = HMAC_CTRL_START;
     hmac_wait();
 
-    /* Stream message through SHA_BLOCK registers. */
+    /* Compress the full 64-byte message blocks. */
     size_t off = 0;
     while (off + 64 <= msg_len) {
         sha_write_block(msg + off);
@@ -437,19 +456,49 @@ void hmac_sha256_hw(const uint8_t *key, size_t key_len,
         off += 64;
     }
 
-    /* Final block with HMAC finalization.
-     * Inner message is ipad (64 bytes, handled by hardware) + msg, so the
-     * SHA-256 length field encodes (512 + msg_len*8) bits, big-endian. */
+    /* Final inner block(s): remaining bytes, 0x80, then the 64-bit big-endian
+     * bit length of the inner message = ipad(64) + msg = (512 + msg_len*8) bits.
+     * A tail of >= 56 bytes leaves no room for the length field, so it needs a
+     * second padding block. */
     uint64_t inner_bits = 512ULL + (uint64_t)msg_len * 8ULL;
-    uint8_t fin[64];
-    memset(fin, 0, 64);
-    memcpy(fin, msg + off, msg_len - off);
-    fin[msg_len - off] = 0x80;
+    size_t rem = msg_len - off;
+    uint8_t fin[128];
+    memset(fin, 0, sizeof(fin));
+    memcpy(fin, msg + off, rem);
+    fin[rem] = 0x80;
+    size_t inblocks = (rem < 56) ? 1 : 2;
+    size_t lpos = inblocks * 64 - 8;
     for (int i = 0; i < 8; i++)
-        fin[63 - i] = (uint8_t)(inner_bits >> (i * 8));
-    sha_write_block(fin);
+        fin[lpos + 7 - i] = (uint8_t)(inner_bits >> (i * 8));
+    for (size_t b = 0; b < inblocks; b++) {
+        sha_write_block(fin + b * 64);
+        REG_SHA_CTRL = SHA_CTRL_START;
+        sha_wait();
+    }
+
+    /* H now holds the inner digest = SHA-256(ipad || msg). */
+    uint8_t inner[32];
+    sha_read_digest(inner);
+
+    /* Outer hash: FINAL loads H <- outer midstate (SHA-256 state after the opad
+     * block).  Then compress ONE block = inner_digest(32) || 0x80 || zeros ||
+     * length, where the outer message is opad(64) + inner_digest(32) = 96 bytes
+     * = 768 bits.  The previous code issued FINAL after writing the final inner
+     * block but never SHA_CTRL_START'd it and never hashed this outer block, so
+     * it returned the raw outer midstate instead of the HMAC. */
     REG_HMAC_CTRL = HMAC_CTRL_FINAL;
     hmac_wait();
+
+    uint8_t ob[64];
+    memset(ob, 0, 64);
+    memcpy(ob, inner, 32);
+    ob[32] = 0x80;
+    uint64_t outer_bits = 768ULL; /* (64 opad + 32 inner) * 8 */
+    for (int i = 0; i < 8; i++)
+        ob[63 - i] = (uint8_t)(outer_bits >> (i * 8));
+    sha_write_block(ob);
+    REG_SHA_CTRL = SHA_CTRL_START;
+    sha_wait();
 
     sha_read_digest(out);
 }

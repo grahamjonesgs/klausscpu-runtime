@@ -62,11 +62,11 @@ static void test_aes_ecb(void) {
 
     /* Key:       000102030405060708090a0b0c0d0e0f
      * Plain:     00112233445566778899aabbccddeeff
-     * Cipher:    69c4e0d86a7b04300d8a8b41de7726e7 */
+     * Cipher:    69c4e0d86a7b0430d8cdb78070b4c55a */
     uint8_t key[16], pt[16], ct_exp[16], ct_got[16], pt_dec[16];
     from_hex("000102030405060708090a0b0c0d0e0f", key, 16);
     from_hex("00112233445566778899aabbccddeeff", pt,  16);
-    from_hex("69c4e0d86a7b04300d8a8b41de7726e7", ct_exp, 16);
+    from_hex("69c4e0d86a7b0430d8cdb78070b4c55a", ct_exp, 16);
 
     uint64_t key_lo, key_hi, in_lo, in_hi, out_lo, out_hi;
     memcpy(&key_lo, key,     8); memcpy(&key_hi, key + 8,  8);
@@ -173,7 +173,10 @@ static void test_aes_gcm(void) {
      *        e3aa212f2c02a4e035c17e2329aca12e
      *        21d514b25466931c7d8f6a5aac84aa05
      *        1ba30b396a0aac973d58e091473f5985
-     *      T=4d5c2af327cd64a62cf35abd2ba6fab4  (16 bytes) */
+     *      T=da80ce830cfda02da2a218a1744f4c76  (16 bytes)
+     * NB: this mixes NIST TC3's 64-byte P with TC4's 20-byte AAD, so the tag is
+     * NOT the published TC3 value 4d5c2af3... (that is the no-AAD tag).  The tag
+     * above is the correct GHASH result for this exact (P, AAD) pair. */
 
     uint8_t key[16], iv[12], aad[20], pt[64], ct_exp[64], tag_exp[16];
     from_hex("feffe9928665731c6d6a8f9467308308", key, 16);
@@ -188,7 +191,7 @@ static void test_aes_gcm(void) {
              "e3aa212f2c02a4e035c17e2329aca12e"
              "21d514b25466931c7d8f6a5aac84aa05"
              "1ba30b396a0aac973d58e091473f5985", ct_exp, 64);
-    from_hex("4d5c2af327cd64a62cf35abd2ba6fab4", tag_exp, 16);
+    from_hex("da80ce830cfda02da2a218a1744f4c76", tag_exp, 16);
 
     uint64_t key_lo, key_hi;
     memcpy(&key_lo, key, 8); memcpy(&key_hi, key + 8, 8);
@@ -237,8 +240,8 @@ static void test_sha256(void) {
     check("SHA256(\"\")", got, want, 32);
 
     /* "abc" (3 bytes, single partial block). */
-    from_hex("ba7816bf8f01cfea414140de5dae2ec7"
-             "3b338c0f4b7e9073e37ffe021c64f80b", want, 32);
+    from_hex("ba7816bf8f01cfea414140de5dae2223"
+             "b00361a396177a9cb410ff61f20015ad", want, 32);
     sha256_hw((const uint8_t *)"abc", 3, got);
     check("SHA256(\"abc\")", got, want, 32);
 
@@ -306,11 +309,11 @@ static void test_hmac(void) {
     /* Test Case 2:
      * Key  = "Jefe" (4 bytes)
      * Data = "what do ya want for nothing?" (28 bytes)
-     * MAC  = 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964a86551 */
+     * MAC  = 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843 */
     klen = 4;  memcpy(key, "Jefe", 4);
     dlen = 28; memcpy(data, "what do ya want for nothing?", 28);
     from_hex("5bdcc146bf60754e6a042426089575c7"
-             "5a003f089d2739839dec58b964a86551", want, 32);
+             "5a003f089d2739839dec58b964ec3843", want, 32);
     hmac_sha256_sw(key, klen, data, dlen, got_sw);
     check("HMAC TC2 (sw)", got_sw, want, 32);
     hmac_sha256_hw(key, klen, data, dlen, got_hw);
