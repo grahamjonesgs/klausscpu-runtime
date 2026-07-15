@@ -82,7 +82,12 @@ PICOLIBC ?= $(ROOT)/picolibc-install
 # -D__IEEE_LITTLE_ENDIAN and -D_LDBL_EQ_DBL are needed because the installed
 # machine/ieeefp.h is the generic one; our arch-specific overrides are only
 # applied during the picolibc build itself, not after installation.
-CFLAGS = -target $(TRIPLE) -O1 \
+# Program optimisation level.  Default -O1 (validated); M8 A/B knob: `make OPT=-O2`
+# is now viable because M7's I-cache removed the fetch-bound penalty that made
+# unrolling/inlining a loss (LLVM's partial/runtime unroll only runs at -O2+).
+# The compiler-rt builtins below stay -O1 (stable).
+OPT ?= -O1
+CFLAGS = -target $(TRIPLE) $(OPT) \
          -isystem $(PICOLIBC)/include \
          -nostdlib \
          -ffunction-sections -fdata-sections \
@@ -134,7 +139,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf test_varargs perf_baseline fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs perf_baseline perf_haz fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture
@@ -147,6 +152,14 @@ all: $(addsuffix .elf, $(PROGRAMS))
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+# KlaussCPU assembly (same CC/CFLAGS as objects — routes through the target
+# backend, unlike a hand-run clang with an unset triple).  `make foo.s OPT=-O2`.
+%.s: %.c
+	$(CC) $(CFLAGS) -S -o $@ $<
+
+%.ll: %.c
+	$(CC) $(CFLAGS) -S -emit-llvm -o $@ $<
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -247,6 +260,12 @@ test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 perf_baseline.elf: perf_baseline.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,perf_baseline.o)
+
+perf_haz.elf: perf_haz.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,perf_haz.o)
+
+repro.elf: repro.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,repro.o)
 
 dhrystone.elf: dhrystone.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,dhrystone.o)

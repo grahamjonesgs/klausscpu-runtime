@@ -41,6 +41,10 @@
 #define BLIT_MASK_ADDR     0x50
 #define BLIT_MASK_STRIDE   0x58
 #define BLIT_CYCLES        0x60   /* R: i_Clk cycles of the last completed blit */
+#define BLIT_CHUNK         0x68   /* RW[3:0]: DDR transactions per bus-grant tenure
+                                   * (default 8 = sync-flush optimum; set 1 when the
+                                   * blit overlaps CPU rendering — async flush).
+                                   * Survives program loads; resets on reconfigure. */
 
 #define BLIT_OP_FILL       0u
 #define BLIT_OP_COPY       1u
