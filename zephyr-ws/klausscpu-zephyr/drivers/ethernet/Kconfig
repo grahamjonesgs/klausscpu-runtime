@@ -25,4 +25,24 @@ config ETH_KLAUSSCPU_LOG_LEVEL
 	default 3
 	range 0 4
 
+config ETH_KLAUSSCPU_WIDE_SRAM
+	bool "Copy frames to/from slot SRAM 32 bits at a time"
+	default y
+	help
+	  Copy the aligned middle of each frame between normal memory and the
+	  MAC's slot SRAM with 32-bit accesses instead of one byte at a time
+	  (byte head/tail still handle the unaligned edges).
+
+	  The byte-wise loop it replaces was never a hardware requirement — it
+	  exists only because memcpy() will not accept a volatile pointer.  But
+	  volatile also stops the compiler coalescing the accesses, so each byte
+	  becomes its own uncached MMIO bus transaction: ~4x more round trips than
+	  necessary, which dominates the TX path on full-frame streams (e.g. VNC).
+
+	  Set n to restore the byte-at-a-time loop.  Do that if frames stop
+	  egressing or arrive corrupted, which would mean the slot SRAM does not
+	  decode 32-bit accesses — this MAC has form for such quirks (it transmits
+	  reliably only from slot 0), and only the CSR registers are documented as
+	  32-bit.  The failure mode is loud: no traffic at all.
+
 endif # ETH_KLAUSSCPU

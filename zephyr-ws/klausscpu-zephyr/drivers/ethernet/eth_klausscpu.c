@@ -155,18 +155,81 @@ static void mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
 	ETH_MDIO_W = 0;
 }
 
-/* ── Volatile SRAM helpers ───────────────────────────────────────────────── */
+/* ── Volatile SRAM helpers ─────────────────────────────────────────────────
+ * These copy frames between normal memory and the MAC's slot SRAM.  They exist
+ * as hand-rolled loops because memcpy() won't take a volatile pointer — not for
+ * any hardware reason.
+ *
+ * That distinction matters: a byte-at-a-time volatile loop is pathological here.
+ * volatile forbids the compiler from coalescing, unrolling or vectorising the
+ * accesses, so every byte becomes its own uncached MMIO bus transaction plus
+ * ~5 instructions of loop overhead.  A 1500-byte frame is then ~1500 round trips
+ * instead of ~375, and on a VNC-style full-frame stream (125 KB/update) that
+ * dominates the send path.
+ *
+ * CONFIG_ETH_KLAUSSCPU_WIDE_SRAM copies the aligned middle 32 bits at a time,
+ * with byte head/tail for the edges.  The slot base is 4-byte aligned but the
+ * per-fragment offsets are not (a 54-byte header fragment leaves the payload
+ * fragment at slot+54), so the head loop aligns the SRAM side first.  The core
+ * is little-endian, so a 32-bit access lands bytes in ascending address order —
+ * byte order across the frame is unchanged either way.
+ *
+ * Do NOT use memcpy() for the normal-memory side, however tempting: minimal libc
+ * defaults to CONFIG_MINIMAL_LIBC_OPTIMIZE_STRING_FOR_SIZE=y, i.e. a byte-at-a-
+ * time memcpy, and at -Os the compiler emits a *call* to it rather than inlining.
+ * A 4-byte memcpy per word then costs more than the byte loop it replaced —
+ * measured as a net slowdown (VNC send 175ms -> 212ms/update).  Assemble the
+ * word with explicit shifts instead: no call, no libc dependency, always inline.
+ */
+
+#ifdef CONFIG_ETH_KLAUSSCPU_WIDE_SRAM
+#define SRAM_ALIGNED(p) ((((uintptr_t)(p)) & 3u) == 0u)
+#endif
 
 static void sram_read(uint8_t *dst, volatile const uint8_t *src, uint32_t n)
 {
-	for (uint32_t i = 0; i < n; i++) {
+	uint32_t i = 0;
+
+#ifdef CONFIG_ETH_KLAUSSCPU_WIDE_SRAM
+	while (i < n && !SRAM_ALIGNED(src + i)) {
+		dst[i] = src[i];
+		i++;
+	}
+	while (i + 4u <= n) {
+		uint32_t w = *(volatile const uint32_t *)(src + i);
+
+		dst[i]      = (uint8_t)w;
+		dst[i + 1u] = (uint8_t)(w >> 8);
+		dst[i + 2u] = (uint8_t)(w >> 16);
+		dst[i + 3u] = (uint8_t)(w >> 24);
+		i += 4u;
+	}
+#endif
+	for (; i < n; i++) {
 		dst[i] = src[i];
 	}
 }
 
 static void sram_write(volatile uint8_t *dst, const uint8_t *src, uint32_t n)
 {
-	for (uint32_t i = 0; i < n; i++) {
+	uint32_t i = 0;
+
+#ifdef CONFIG_ETH_KLAUSSCPU_WIDE_SRAM
+	while (i < n && !SRAM_ALIGNED(dst + i)) {
+		dst[i] = src[i];
+		i++;
+	}
+	while (i + 4u <= n) {
+		uint32_t w = (uint32_t)src[i] |
+			     ((uint32_t)src[i + 1u] << 8) |
+			     ((uint32_t)src[i + 2u] << 16) |
+			     ((uint32_t)src[i + 3u] << 24);
+
+		*(volatile uint32_t *)(dst + i) = w;
+		i += 4u;
+	}
+#endif
+	for (; i < n; i++) {
 		dst[i] = src[i];
 	}
 }
