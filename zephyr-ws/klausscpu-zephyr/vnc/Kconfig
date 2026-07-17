@@ -62,3 +62,25 @@ config KLAUSSCPU_VNC_BLIT_SLEEP
 	  while rendering.  Set n to busy-spin (an A/B baseline; also lower wake
 	  latency for the synchronous render benchmark, which has nothing else to
 	  schedule anyway).
+
+config KLAUSSCPU_VNC_BLIT_SEND
+	bool "Offload the VNC send-path copy to the 2D DMA blitter"
+	default n
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  When the client's pixel format is byte-identical to the framebuffer's
+	  (RGB565 LE — the common case), the VNC server copies framebuffer rows
+	  into its send batch buffer with a CPU memcpy.  That copy is a plain
+	  RGB565->RGB565 strided rectangle, so the 2D DMA blitter can do it
+	  instead, freeing the CPU for the rendering thread while the DMA runs.
+
+	  Independent of KLAUSSCPU_VNC_DISPLAY, so apps that own the framebuffer
+	  directly (e.g. doom) can use it without the display driver.  Presence is
+	  probed at server start; without a blitter in the bitstream it falls back
+	  to the memcpy.  Safe alongside the display driver's blitter use: both
+	  blit while holding fb_lock, which serialises the single engine.
+
+	  Default n: it trades a ~20 ms/update memcpy for a DMA plus two blocking
+	  whole-cache FLUSH/INVALIDATE walks, and the INVALIDATE evicts the
+	  renderer's working set.  Whether that nets out is workload-dependent —
+	  A/B it against the "vnc: convert=..ms" profile line before enabling.

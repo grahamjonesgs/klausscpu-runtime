@@ -41,9 +41,14 @@ west build -p always -b nexys_a7 "$MOD/apps/doom" --build-dir build_doom -- \
 #    client to the board's IP on :5900.
 ```
 
-The first bring-up target is **attract mode**: with no input wired yet, Doom
-auto-plays its title-screen demos, which exercises the whole WAD→render→VNC
-pipeline. Keyboard input (VNC `KeyEvent` → `DG_GetKey`) is the next step.
+**Keyboard input is wired**: the VNC server delivers RFB `KeyEvent`s (X11
+keysyms) to `on_key()`, which maps them to Doom key codes and queues them for
+`DG_GetKey()` — so Doom is playable, not just attract-mode demos. The mapping
+mirrors doomgeneric's own X11 backend (`doomgeneric_xlib.c`): arrows move, Ctrl
+fires, Space uses/opens doors, Shift runs, Esc/Enter/y/n drive the menu, and
+1–7 select weapons. (With no VNC client connected, Doom still falls back to its
+auto-playing title-screen demos.) Mouse input is not implemented — doomgeneric's
+platform API is keyboard-only (`DG_GetKey`), so there is no pointer hook.
 
 ## Notes / limits
 

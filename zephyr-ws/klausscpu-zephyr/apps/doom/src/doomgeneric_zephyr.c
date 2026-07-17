@@ -7,9 +7,9 @@
  *
  * Doom renders into DG_ScreenBuffer (640x400, XRGB8888); DG_DrawFrame converts
  * that to the VNC module's RGB565 framebuffer, centred vertically in 640x480.
- * Input (DG_GetKey) is stubbed for now — Doom's attract mode auto-plays demos
- * with no input, which is the first bring-up target.  VNC KeyEvent -> DG_GetKey
- * wiring is the next step.
+ * Keyboard input is wired: the VNC server delivers RFB KeyEvents (X11 keysyms)
+ * to on_key(), which maps them to Doom key codes and queues them for DG_GetKey()
+ * — so the game is playable over VNC, not just attract-mode demos.
  */
 
 #include <zephyr/kernel.h>
@@ -25,6 +25,7 @@
 #include "framebuffer.h"
 #include "vnc_server.h"
 #include "doomgeneric.h"
+#include "doomkeys.h"
 
 LOG_MODULE_REGISTER(doom, LOG_LEVEL_INF);
 
@@ -94,11 +95,95 @@ uint32_t DG_GetTicksMs(void)
 	return (uint32_t)k_uptime_get();
 }
 
+/* ── VNC keyboard input → Doom ───────────────────────────────────────────────
+ * The VNC server calls on_key() from its connection thread for every RFB
+ * KeyEvent (an X11 keysym + press/release).  We map the keysym to a Doom key
+ * code and push (pressed<<8 | key) into a small ring that the Doom thread drains
+ * in DG_GetKey().  This mirrors doomgeneric's own X11 backend
+ * (doomgeneric_xlib.c), which feeds the same shared i_input.c, so the key
+ * handling is identical to a normal Doom build.
+ *
+ * The ring is single-producer (VNC thread) / single-consumer (Doom thread).
+ * Both indices are volatile and word-sized, and the queue slot is written before
+ * its index is advanced — volatile guarantees that ordering — so no lock is
+ * needed on this single core (same approach as the LVGL app's volatile input
+ * globals). */
+#define KEYQUEUE_SIZE 16
+static volatile unsigned short key_queue[KEYQUEUE_SIZE];
+static volatile unsigned int   key_wr;   /* advanced by the VNC thread  */
+static volatile unsigned int   key_rd;   /* advanced by the Doom thread */
+
+/* X11 keysyms — Zephyr's minimal libc has no <X11/keysymdef.h>. */
+#define XK_BackSpace  0xff08u
+#define XK_Return     0xff0du
+#define XK_Escape     0xff1bu
+#define XK_Left       0xff51u
+#define XK_Up         0xff52u
+#define XK_Right      0xff53u
+#define XK_Down       0xff54u
+#define XK_Shift_L    0xffe1u
+#define XK_Shift_R    0xffe2u
+#define XK_Control_L  0xffe3u
+#define XK_Control_R  0xffe4u
+#define XK_space      0x0020u
+
+/* keysym → Doom key code (doomkeys.h).  Same mapping as doomgeneric_xlib.c,
+ * except unmapped keysyms >= 0x80 return 0 (ignored) rather than being passed
+ * through tolower(): the Doom control codes live at 0xa0-0xaf, so a raw high
+ * keysym could otherwise alias KEY_FIRE/arrows and inject phantom input. */
+static unsigned char keysym_to_doom(uint32_t k)
+{
+	switch (k) {
+	case XK_Return:    return KEY_ENTER;
+	case XK_Escape:    return KEY_ESCAPE;
+	case XK_Left:      return KEY_LEFTARROW;
+	case XK_Right:     return KEY_RIGHTARROW;
+	case XK_Up:        return KEY_UPARROW;
+	case XK_Down:      return KEY_DOWNARROW;
+	case XK_Control_L:
+	case XK_Control_R: return KEY_FIRE;      /* Ctrl  = fire        */
+	case XK_space:     return KEY_USE;       /* Space = use / open  */
+	case XK_Shift_L:
+	case XK_Shift_R:   return KEY_RSHIFT;    /* Shift = run         */
+	case XK_BackSpace: return KEY_BACKSPACE;
+	default:
+		if (k >= 'A' && k <= 'Z') {
+			return (unsigned char)(k + 32);  /* tolower: menu y/n etc. */
+		}
+		if (k < 0x80u) {
+			return (unsigned char)k;         /* printable ASCII incl. 1-7 */
+		}
+		return 0;                                /* unmapped keysym → ignore */
+	}
+}
+
+/* RFB KeyEvent handler — runs on the VNC connection thread; keep it short. */
+static void on_key(bool pressed, uint32_t keysym)
+{
+	unsigned char k = keysym_to_doom(keysym);
+
+	if (k == 0) {
+		return;   /* a key Doom doesn't use */
+	}
+
+	unsigned int wr = key_wr;
+
+	key_queue[wr] = (unsigned short)(((unsigned int)pressed << 8) | k);
+	key_wr = (wr + 1u) % KEYQUEUE_SIZE;
+}
+
 int DG_GetKey(int *pressed, unsigned char *key)
 {
-	ARG_UNUSED(pressed);
-	ARG_UNUSED(key);
-	return 0;   /* no input yet — attract mode */
+	if (key_rd == key_wr) {
+		return 0;   /* queue empty */
+	}
+
+	unsigned short kd = key_queue[key_rd];
+
+	key_rd = (key_rd + 1u) % KEYQUEUE_SIZE;
+	*pressed = kd >> 8;
+	*key = (unsigned char)(kd & 0xFFu);
+	return 1;
 }
 
 void DG_SetWindowTitle(const char *title)
@@ -243,6 +328,7 @@ int main(void)
 	}
 
 	vnc_server_start();
+	vnc_register_input(on_key, NULL);   /* keyboard -> Doom; no pointer */
 	LOG_INF("VNC server ready on port 5900 — connect to play");
 
 	k_thread_create(&doom_thread, doom_stack, DOOM_STACK_SIZE,

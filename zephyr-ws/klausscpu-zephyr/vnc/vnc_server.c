@@ -31,6 +31,9 @@
 
 #include "framebuffer.h"
 #include "vnc_server.h"
+#ifdef CONFIG_KLAUSSCPU_VNC_BLIT_SEND
+#include "blitter.h"
+#endif
 
 LOG_MODULE_REGISTER(vncd, LOG_LEVEL_INF);
 
@@ -177,6 +180,13 @@ static void parse_pixfmt(struct pixfmt *f, const uint8_t *p)
 static uint32_t lut_r[32];
 static uint32_t lut_g[64];
 static uint32_t lut_b[32];
+
+#ifdef CONFIG_KLAUSSCPU_VNC_BLIT_SEND
+/* Whether a 2D DMA blitter is present in this bitstream (probed at server
+ * start).  When false the send path falls back to the CPU memcpy, so the same
+ * image runs on a pre-blitter bitstream. */
+static bool send_blit;
+#endif
 
 /* True when the client's format is byte-identical to our native RGB565 LE, so a
  * row can be memcpy'd out with no per-pixel conversion (the common case — it's
@@ -336,6 +346,40 @@ static int send_rect(int s, int x, int y, int w, int h, const struct pixfmt *f)
 #endif
 
 		fb_lock();
+#ifdef CONFIG_KLAUSSCPU_VNC_BLIT_SEND
+		/* Native format: the whole batch is one RGB565->RGB565 strided
+		 * rectangle (framebuffer stride FB_WIDTH -> packed row_bytes), so
+		 * hand it to the 2D DMA blitter as a single copy instead of one
+		 * memcpy per row.  Sleep-poll rather than busy-spin while the DMA
+		 * runs: this thread outranks the rendering thread, so a spin would
+		 * deny it the CPU for the whole copy — the point is to give it away.
+		 * fb_lock is held throughout (the blitter reads the framebuffer),
+		 * which also serialises us against the display driver's blitter use. */
+		if (fmt_native && send_blit) {
+			int rows = (int)(SENDBUF_SZ / row_bytes);
+
+			if (rows > h - row) {
+				rows = h - row;
+			}
+			if (rows > 0) {
+				const uint16_t *src = fb_pixels() +
+					(size_t)(y + row) * FB_WIDTH + x;
+
+				blit_start_copy((uint32_t)(uintptr_t)sendbuf,
+						(uint32_t)row_bytes,
+						(uint32_t)(uintptr_t)src,
+						FB_WIDTH * sizeof(uint16_t),
+						(uint16_t)w, (uint16_t)rows);
+				while (blit_busy()) {
+					k_sleep(K_TICKS(1));
+				}
+				blit_finish();
+				len = (size_t)rows * row_bytes;
+				row += rows;
+			}
+		}
+		if (len == 0)
+#endif
 		while (row < h && len + row_bytes <= SENDBUF_SZ) {
 			const uint16_t *src =
 				fb_pixels() + (size_t)(y + row) * FB_WIDTH + x;
@@ -641,6 +685,11 @@ static void vnc_main(void *a, void *b, void *c)
 
 void vnc_server_start(void)
 {
+#ifdef CONFIG_KLAUSSCPU_VNC_BLIT_SEND
+	/* Probe once, before any blit is in flight (it scribbles a register). */
+	send_blit = blit_probe();
+	LOG_INF("send-path copy: %s", send_blit ? "blitter" : "memcpy (no blitter)");
+#endif
 	(void)k_thread_create(&vnc_thread, vnc_stack,
 			      K_THREAD_STACK_SIZEOF(vnc_stack),
 			      vnc_main, NULL, NULL, NULL,
