@@ -50,13 +50,76 @@ Ranked by measured impact when streaming a changing full-screen image:
    divide**, so 256K pixels × 3 software divides ≈ 0.5 s. Precompute per-channel
    tables when the client format is set → table lookups, no divides.
 
-**Did NOT help (don't bother)**
+4. **2D blitter for the send-path copy** (`CONFIG_KLAUSSCPU_VNC_BLIT_SEND`). On the
+   native path, `send_rect`'s framebuffer→`sendbuf` copy is a plain RGB565→RGB565
+   strided rectangle, so the blitter can do it: **convert 22 ms → 8 ms** per
+   125 KB update. Honest caveat: it did **not** change frame rate — convert was
+   only ~6% of the frame. Default n; it also costs two blocking whole-cache walks
+   whose INVALIDATE evicts the renderer's working set.
+5. **32-bit slot-SRAM copies in the eth driver** (`CONFIG_ETH_KLAUSSCPU_WIDE_SRAM`,
+   default y). See "The byte-loop trap" below. **~17 ms/update** (doom frame time
+   336 → 319 ms).
+
+**Did NOT help (don't bother — all measured on doom @320×200, full-frame VNC)**
 - **Batching sends** (400 per-row `zsock_send` → ~16 chunked): ~9% only. Per-send
   syscall overhead was not the bottleneck.
 - **TCP window size** (`CONFIG_NET_TCP_MAX_SEND_WINDOW_SIZE` 0 → 32 KB): no
   change. We were not stop-and-wait / round-trip-limited.
 - **Bigger net buffers**: no throughput gain, and an aggressive 4–8× bump
   (`NET_PKT/BUF_*`) mysteriously broke the TCP handshake. Keep them modest.
+- **Word-wise libc memcpy** (`CONFIG_MINIMAL_LIBC_OPTIMIZE_STRING_FOR_SIZE=n`):
+  **zero** measurable change to `send` (173 → 174 ms). The send path is not
+  memcpy-bound, so don't cargo-cult this knob. (`apps/gui_lvgl` sets it because
+  its *flush* copy was memcpy-bound — but that copy now goes through the blitter,
+  so even there the original justification is stale.)
+- **TCP checksum offload**: not worth chasing. `net_calc_chksum` is a word-wise
+  sum ≈ **10–15 ms** of a ~175 ms send. The driver declares no
+  `ETHERNET_HW_TX_CHKSUM_OFFLOAD`, so it is software — but it is not the cost.
+- **8bpp *truecolour*** (client asks for `bpp=8`): already works via the LUT path
+  with no code change, and it is a **wash** — send halves (180 → 90 ms) but
+  convert *quadruples* (22 → 85 ms), netting ~27 ms and no fps change. Clients
+  also pick ugly formats for it (one offered RGB222 — 64 colours). See the
+  pixel-format note under "Levers".
+
+## Why `send` is what it is (and what it is not)
+
+For a 125 KB update, `send ≈ 175 ms` = **86 segments at ~2 ms each**. That is
+**Zephyr's TCP stack** (net_pkt alloc, header build, checksum, retransmit queue,
+window management) — *not* copies. Three copy-based theories were tested and all
+rejected: libc memcpy (0 ms), checksum (10–15 ms), driver byte loop (17 ms, real
+but minor). **Copy optimisation is exhausted.**
+
+The consequence: send cost scales with **byte count** (segment count), not with
+copy speed. The only remaining levers are fewer bytes, or moving convert+send off
+the CPU entirely (lever 6 below).
+
+**Measurement trap — `send=` is wall-clock, not CPU.** It wraps `send_all()`,
+which *blocks* on TCP flow control. Making the copy cheaper frees CPU **during**
+that block without shortening it, so `send=` stays flat while the win shows up in
+the *renderer's* frame time. Judge send-path work by the consumer's frame time
+(`doom: tick=`), never by `send=` alone.
+
+**Measurement trap — let the workload reach steady state.** doom's first profile
+line (`tick=125ms`, 8 fps) is the *title screen*; the real steady state is
+`tick≈177ms` (~5.6 fps). A "ceiling" derived from the first sample is wrong by
+40%. Likewise, take VNC samples well after connect: the first update is larger
+(172 KB) and the next is distorted by TCP slow-start.
+
+## The byte-loop trap (bit us twice, in opposite directions)
+
+`eth_klausscpu.c` / `src/eth.c` copy frames to the MAC's slot SRAM through
+hand-rolled loops that exist **only because `memcpy()` won't take a `volatile`
+pointer** — never for a hardware reason. But `volatile` also stops the compiler
+coalescing, so a byte loop emits one uncached MMIO transaction *per byte*: ~4×
+more round trips than needed on every transmitted frame. Widening to 32-bit
+accesses is worth ~17 ms/update.
+
+The trap on the way out: **do not reach for `memcpy()` to fix it.** Minimal libc
+defaults to `OPTIMIZE_STRING_FOR_SIZE=y` (a byte-at-a-time memcpy) and at `-Os`
+the compiler emits a **call** to it — so a 4-byte memcpy per word costs *more*
+than the byte loop it replaced (measured: send 175 → **212 ms**, a regression).
+Assemble the word with explicit shifts: no call, no libc dependency, always
+inlined.
 
 ## Reference numbers (Nexys A7 soft core, 100 Mbit LiteEth)
 
@@ -76,12 +139,26 @@ Ranked by measured impact when streaming a changing full-screen image:
    equals the streamed width, the whole region is one block → a single fast
    memcpy, or a true **zero-copy send straight from the framebuffer** (accept
    minor tearing, or double-buffer).
-4. **8bpp palette mode** (`SetColourMapEntries`). Halves bytes vs 16bpp and, for
-   natively-paletted content (e.g. Doom), removes conversion entirely. Not
-   implemented in the server yet — this is the next software win.
+4. **8bpp palette mode** (`SetColourMapEntries`) — *re-assessed; read before
+   starting.* The bytes-halving half of this is **already available with no code**:
+   the LUT path is format-agnostic, so if the client requests `bpp=8` truecolour
+   the server sends 1 byte/pixel today. Measured, it is a **wash** (send 180→90 ms
+   but convert 22→85 ms) and clients choose ugly formats (one picked RGB222 — 64
+   colours, visibly bad).
+
+   A colour *map* would add the other half — sending Doom's native palette indices
+   to skip conversion — but it is **gated on the client**, not on us: per RFB the
+   client dictates the format via `SetPixelFormat`, the server only *advertises* a
+   preference, and real clients request `truecolour=1` (the server already logs
+   `client requested palette mode (unsupported)` for the other case). It would also
+   need an 8bpp framebuffer path plus tapping `I_VideoBuffer`+palette inside the
+   gitignored doom engine. **Verify your client will actually request
+   `truecolour=0` before writing any of it.**
 5. **Compression encoding (Hextile / RRE)** — pure C, no deps; good for flat UI,
-   modest for noisy 3D. Trades CPU for bytes, so only worth it once genuinely
-   bandwidth-bound (which, per above, we were not).
+   modest for noisy 3D. Trades CPU for bytes. Note the nuance: `send` is CPU-bound
+   *in the TCP stack, proportional to segment count*, so fewer bytes **does** cut
+   CPU here — but Doom's noisy textured view compresses poorly, so the CPU traded
+   may exceed the CPU saved. Measure on the real content.
 6. **FPGA offload (the real path to smooth, 10+ fps).** Move convert + send off
    the CPU: a fabric block that DMAs the framebuffer (with palette/format
    conversion and TCP checksum) into LiteEth, so the core only renders. This is

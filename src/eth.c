@@ -12,16 +12,56 @@ const uint8_t g_eth_mac[6] = ETH_MAC_ADDR;
 // TX_LEVEL==0 guard prevents double-transmission from the 2-entry TX FIFO.
 
 // ── Volatile SRAM helpers ─────────────────────────────────────────────────
-// Standard memcpy won't accept volatile pointers; these loops do.
+// Standard memcpy won't accept volatile pointers; these loops do.  That is the
+// *only* reason they are hand-rolled — the slot SRAM has no byte-access
+// requirement.  It matters because volatile also stops the compiler coalescing:
+// a byte loop emits one uncached MMIO transaction per byte, ~4x more bus round
+// trips than needed, on the path every frame takes.  Copy the aligned middle 32
+// bits at a time instead; byte head/tail handle the edges (the slot base is
+// 4-byte aligned but callers pass arbitrary offsets/lengths).  The core is
+// little-endian, so byte order across the frame is unchanged.
+//
+// Worth ~17 ms per 125 KB on the Zephyr twin of this driver (see
+// zephyr-ws/klausscpu-zephyr/vnc/PERFORMANCE.md, "The byte-loop trap").
+// Define ETH_NARROW_SRAM to fall back to the byte loop if a bitstream ever
+// turns out not to decode 32-bit slot accesses (failure is loud: no traffic).
+//
+// Do NOT use memcpy() for the normal-memory side: on the size-optimised libc it
+// is itself byte-at-a-time and gets *called*, costing more than the byte loop it
+// replaces (measured there as a 175 -> 212 ms regression).  Explicit shifts only.
+
+#define SRAM_ALIGNED(p) ((((uintptr_t)(p)) & 3u) == 0u)
 
 static void sram_read(void *dst, volatile const uint8_t *src, uint32_t n) {
     uint8_t *d = (uint8_t *)dst;
-    for (uint32_t i = 0; i < n; i++) d[i] = src[i];
+    uint32_t i = 0;
+#ifndef ETH_NARROW_SRAM
+    while (i < n && !SRAM_ALIGNED(src + i)) { d[i] = src[i]; i++; }
+    while (i + 4u <= n) {
+        uint32_t w = *(volatile const uint32_t *)(src + i);
+        d[i]      = (uint8_t)w;
+        d[i + 1u] = (uint8_t)(w >> 8);
+        d[i + 2u] = (uint8_t)(w >> 16);
+        d[i + 3u] = (uint8_t)(w >> 24);
+        i += 4u;
+    }
+#endif
+    for (; i < n; i++) d[i] = src[i];
 }
 
 static void sram_write(volatile uint8_t *dst, const void *src, uint32_t n) {
     const uint8_t *s = (const uint8_t *)src;
-    for (uint32_t i = 0; i < n; i++) dst[i] = s[i];
+    uint32_t i = 0;
+#ifndef ETH_NARROW_SRAM
+    while (i < n && !SRAM_ALIGNED(dst + i)) { dst[i] = s[i]; i++; }
+    while (i + 4u <= n) {
+        uint32_t w = (uint32_t)s[i] | ((uint32_t)s[i + 1u] << 8) |
+                     ((uint32_t)s[i + 2u] << 16) | ((uint32_t)s[i + 3u] << 24);
+        *(volatile uint32_t *)(dst + i) = w;
+        i += 4u;
+    }
+#endif
+    for (; i < n; i++) dst[i] = s[i];
 }
 
 // ── PHY initialisation ────────────────────────────────────────────────────
