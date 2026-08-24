@@ -18,8 +18,18 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* Geometry is configurable so an app can match the framebuffer to its content
+ * (e.g. doom at 320x200 instead of centred inside 640x480): ¼ the pixels
+ * quarters render, convert and send, and when the streamed width equals
+ * FB_WIDTH the region is contiguous, enabling the zero-copy send path
+ * (see PERFORMANCE.md "Levers"). */
+#ifdef CONFIG_KLAUSSCPU_VNC_FB_WIDTH
+#define FB_WIDTH  CONFIG_KLAUSSCPU_VNC_FB_WIDTH
+#define FB_HEIGHT CONFIG_KLAUSSCPU_VNC_FB_HEIGHT
+#else
 #define FB_WIDTH  640
 #define FB_HEIGHT 480
+#endif
 
 /* Lock/unlock around a batch of reads or writes.  Never hold across a network
  * send — copy the pixels out, unlock, then send (see send_rect in

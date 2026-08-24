@@ -38,7 +38,8 @@ BUILD_ASSERT(DOOMGENERIC_RESX <= FB_WIDTH, "Doom width must fit framebuffer");
 BUILD_ASSERT(DOOMGENERIC_RESY <= FB_HEIGHT, "Doom height must fit framebuffer");
 
 #ifdef CONFIG_DOOM_PROFILE
-/* Wall-clock ms timing (k_cycle_get_32 is unreliable on this core).  tick =
+/* Wall-clock ms timing (ms resolution is enough; k_cycle_get_32/64 now read
+ * the free-running PERF_CYCLES counter and work too).  tick =
  * whole doomgeneric_Tick (includes any preemption by the VNC send thread);
  * convert = the ARGB->RGB565 loop; draws counts actual DG_DrawFrame calls so we
  * can see how many ticks actually paint. */

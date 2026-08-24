@@ -11,9 +11,11 @@
  *   - ProtocolVersion 3.8, security type None.
  *   - ServerInit advertising the native RGB565 format.
  *   - Client messages: SetPixelFormat, SetEncodings, FramebufferUpdateRequest;
- *     KeyEvent/PointerEvent/ClientCutText are parsed and discarded (no input
- *     handling yet — milestone 6).
- *   - Server messages: FramebufferUpdate, Raw encoding only.
+ *     KeyEvent/PointerEvent are forwarded to registered input handlers.
+ *   - Server messages: FramebufferUpdate — Raw always; Hextile when the client
+ *     offers it (with an adaptive fallback to Raw for poorly-compressing
+ *     content, see send_rect_hextile).  Full-width native-format Raw updates
+ *     go out zero-copy straight from the framebuffer.
  *
  * Pixel conversion: the framebuffer is RGB565, but clients commonly request a
  * 32-bpp true-colour format via SetPixelFormat.  convert_pixel() honours the
@@ -193,6 +195,16 @@ static bool send_blit;
  * the standard VNC 16bpp format).  Set by build_luts(). */
 static bool fmt_native;
 
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+/* Whether the connected client listed Hextile (5) in SetEncodings (reset per
+ * client), and the adaptive fallback: when an update compresses poorly the
+ * tile scan costs more CPU than the bytes it saves, so send Raw for the next
+ * HT_RETRY updates before probing Hextile again. */
+static bool client_hextile;
+static uint32_t ht_skip;
+#define HT_RETRY 32
+#endif
+
 static void build_luts(const struct pixfmt *f)
 {
 	fmt_native = (f->bpp == 16 && !f->big_endian &&
@@ -337,6 +349,29 @@ static int send_rect(int s, int x, int y, int w, int h, const struct pixfmt *f)
 	size_t row_bytes = (size_t)w * bytes;
 	int row = 0;
 
+#ifdef CONFIG_KLAUSSCPU_VNC_ZERO_COPY
+	/* Full-width native rect: the region is one contiguous block, so send
+	 * it straight from the framebuffer — no staging copy, and no lock
+	 * (never hold fb_lock across a send; see above).  A concurrent writer
+	 * can tear a frame mid-send but never a pixel (16-bit stores are
+	 * single stores), and the next dirty update repaints the tear. */
+	if (fmt_native && x == 0 && w == FB_WIDTH) {
+		const uint8_t *src = (const uint8_t *)(fb_pixels() +
+						       (size_t)y * FB_WIDTH);
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+		int64_t s0 = k_uptime_get();
+#endif
+		if (send_all(s, src, (size_t)h * row_bytes)) {
+			return -1;
+		}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+		vnc_prof_account(0, (uint32_t)(k_uptime_get() - s0),
+				 (uint64_t)w * h * bytes);
+#endif
+		return 0;
+	}
+#endif /* CONFIG_KLAUSSCPU_VNC_ZERO_COPY */
+
 	while (row < h) {
 		/* Convert as many whole scanlines as fit into the batch buffer
 		 * (under one lock), then send the whole chunk unlocked. */
@@ -418,6 +453,236 @@ static int send_rect(int s, int x, int y, int w, int h, const struct pixfmt *f)
 	return 0;
 }
 
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+/* ── Hextile encoding (RFC 6143 §7.7.4) ─────────────────────────────────────
+ * The update is split into 16x16 tiles, each encoded as one of:
+ *   solid       — background colour only: 1 subencoding byte + 1 pixel;
+ *   two-colour  — background + foreground + per-row foreground runs as
+ *                 subrectangles (text and flat-UI tiles);
+ *   raw         — 1 byte + the tile's pixels (anything multicolour).
+ * Worst case is Raw + 1 byte per tile (~0.2%); flat tiles collapse to a few
+ * bytes.  Send cost on this platform is TCP-stack CPU proportional to byte
+ * count (PERFORMANCE.md), so shrinking bytes directly shrinks send time.
+ * Background/foreground are re-specified in every tile, so the RFC's
+ * "colours undefined after a raw tile" rule never applies. */
+
+#define HT_RAW      0x01
+#define HT_BG       0x02
+#define HT_FG       0x04
+#define HT_SUBRECTS 0x08
+
+/* Largest single encoded tile: raw 16x16 at 4 bytes/pixel, + subencoding. */
+#define HT_TILE_MAX (1 + 16 * 16 * 4)
+
+/* Emit one pixel value in the client's format; returns the advanced cursor. */
+static inline uint8_t *emit_px(uint8_t *o, uint16_t px, int bytes,
+			       const struct pixfmt *f)
+{
+	put_pixel_bytes(o, convert_pixel(px), bytes, f->big_endian);
+	return o + bytes;
+}
+
+/* Encode the tile at [tx,ty,tw,th] into out (caller guarantees HT_TILE_MAX
+ * of room and holds fb_lock).  Returns the encoded length. */
+static size_t hextile_tile(uint8_t *out, int tx, int ty, int tw, int th,
+			   int bytes, const struct pixfmt *f)
+{
+	const uint16_t *fbp = fb_pixels();
+	uint16_t c0 = fbp[(size_t)ty * FB_WIDTH + tx];
+	uint16_t c1 = 0;
+	int n0 = 0, ncol = 1;
+
+	/* Classify: count distinct colours, bailing out at the third. */
+	for (int r = 0; r < th && ncol <= 2; r++) {
+		const uint16_t *rp = fbp + (size_t)(ty + r) * FB_WIDTH + tx;
+
+		for (int c = 0; c < tw; c++) {
+			uint16_t px = rp[c];
+
+			if (px == c0) {
+				n0++;
+			} else if (ncol == 1) {
+				c1 = px;
+				ncol = 2;
+			} else if (px != c1) {
+				ncol = 3;
+				break;
+			}
+		}
+	}
+
+	if (ncol == 1) {
+		out[0] = HT_BG;
+		(void)emit_px(out + 1, c0, bytes, f);
+		return 1 + (size_t)bytes;
+	}
+
+	if (ncol == 2) {
+		/* Majority colour as background — fewer foreground runs. */
+		uint16_t bg = c0, fg = c1;
+
+		if (2 * n0 < tw * th) {
+			bg = c1;
+			fg = c0;
+		}
+
+		uint8_t *o = out + 1;
+
+		o = emit_px(o, bg, bytes, f);
+		o = emit_px(o, fg, bytes, f);
+
+		uint8_t *nrun = o++;
+		int runs = 0;          /* <= 8 runs/row * 16 rows = 128, fits */
+
+		for (int r = 0; r < th; r++) {
+			const uint16_t *rp =
+				fbp + (size_t)(ty + r) * FB_WIDTH + tx;
+
+			for (int c = 0; c < tw; ) {
+				if (rp[c] != fg) {
+					c++;
+					continue;
+				}
+				int c2 = c + 1;
+
+				while (c2 < tw && rp[c2] == fg) {
+					c2++;
+				}
+				/* Subrect: x/y then (w-1)/(h-1), nibble-packed. */
+				*o++ = (uint8_t)((c << 4) | r);
+				*o++ = (uint8_t)((c2 - c - 1) << 4);
+				runs++;
+				c = c2;
+			}
+		}
+		*nrun = (uint8_t)runs;
+		out[0] = HT_BG | HT_FG | HT_SUBRECTS;
+		return (size_t)(o - out);
+	}
+
+	out[0] = HT_RAW;
+	uint8_t *o = out + 1;
+
+	for (int r = 0; r < th; r++) {
+		const uint16_t *rp = fbp + (size_t)(ty + r) * FB_WIDTH + tx;
+
+		if (fmt_native) {
+			memcpy(o, rp, (size_t)tw * sizeof(uint16_t));
+			o += (size_t)tw * sizeof(uint16_t);
+		} else {
+			for (int c = 0; c < tw; c++) {
+				o = emit_px(o, rp[c], bytes, f);
+			}
+		}
+	}
+	return (size_t)(o - out);
+}
+
+/* Hextile counterpart of send_rect: batches encoded tiles into sendbuf,
+ * flushing unlocked whenever the next tile might not fit.  Sets ht_skip when
+ * the update compressed poorly (see the adaptive-fallback note above). */
+static int send_rect_hextile(int s, int x, int y, int w, int h,
+			     const struct pixfmt *f)
+{
+	int bytes = f->bpp / 8;
+
+	if (bytes < 1 || bytes > 4 || w <= 0 || h <= 0) {
+		return -1;
+	}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	uint32_t conv_ms = 0, send_ms = 0;
+	int64_t c0;
+#endif
+
+	uint8_t hdr[4] = { 0, 0, 0, 1 };
+	uint8_t rh[12];
+
+	be16(rh + 0, (uint16_t)x);
+	be16(rh + 2, (uint16_t)y);
+	be16(rh + 4, (uint16_t)w);
+	be16(rh + 6, (uint16_t)h);
+	be32(rh + 8, 5);                        /* encoding 5 = Hextile */
+
+	if (send_all(s, hdr, sizeof(hdr)) || send_all(s, rh, sizeof(rh))) {
+		return -1;
+	}
+
+	size_t len = 0;
+	uint64_t total = 0;
+
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	c0 = k_uptime_get();
+#endif
+	fb_lock();
+	for (int ty = y; ty < y + h; ty += 16) {
+		int th = MIN(16, y + h - ty);
+
+		for (int tx = x; tx < x + w; tx += 16) {
+			int tw = MIN(16, x + w - tx);
+
+			if (len + HT_TILE_MAX > SENDBUF_SZ) {
+				fb_unlock();
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+				conv_ms += (uint32_t)(k_uptime_get() - c0);
+				int64_t s0 = k_uptime_get();
+#endif
+				if (send_all(s, sendbuf, len)) {
+					return -1;
+				}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+				send_ms += (uint32_t)(k_uptime_get() - s0);
+				c0 = k_uptime_get();
+#endif
+				total += len;
+				len = 0;
+				fb_lock();
+			}
+			len += hextile_tile(sendbuf + len, tx, ty, tw, th,
+					    bytes, f);
+		}
+	}
+	fb_unlock();
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	conv_ms += (uint32_t)(k_uptime_get() - c0);
+	int64_t s0 = k_uptime_get();
+#endif
+	if (len && send_all(s, sendbuf, len)) {
+		return -1;
+	}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	send_ms += (uint32_t)(k_uptime_get() - s0);
+#endif
+	total += len;
+
+	/* Compressed by less than ~12%?  The tile scan cost more CPU than the
+	 * bytes saved (doom's textured view) — send Raw for a while. */
+	uint64_t raw_bytes = (uint64_t)w * h * bytes;
+
+	if (total * 8 > raw_bytes * 7) {
+		ht_skip = HT_RETRY;
+	}
+#ifdef CONFIG_KLAUSSCPU_VNC_PROFILE
+	vnc_prof_account(conv_ms, send_ms, total);
+#endif
+	return 0;
+}
+#endif /* CONFIG_KLAUSSCPU_VNC_HEXTILE */
+
+/* Send one update for [x,y,w,h] in the best encoding the client allows. */
+static int send_update(int s, int x, int y, int w, int h,
+		       const struct pixfmt *f)
+{
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+	if (client_hextile) {
+		if (ht_skip == 0) {
+			return send_rect_hextile(s, x, y, w, h, f);
+		}
+		ht_skip--;
+	}
+#endif
+	return send_rect(s, x, y, w, h, f);
+}
+
 /* RFB client->server message types. */
 enum {
 	MSG_SET_PIXEL_FORMAT = 0,
@@ -460,6 +725,10 @@ static void serve_client(int s)
 
 	LOG_INF("VNC client connected");
 	build_luts(&fmt);   /* conversion tables for the initial (native) format */
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+	client_hextile = false;   /* until this client's SetEncodings says so */
+	ht_skip = 0;
+#endif
 
 	/* Incremental-update state: the client requests a region and expects an
 	 * update only once something changes (RFB lets the server delay).  We
@@ -478,7 +747,7 @@ static void serve_client(int s)
 			if (fb_take_dirty(&dx, &dy, &dw, &dh) &&
 			    rect_isect(dx, dy, dw, dh, rq_x, rq_y, rq_w, rq_h,
 				       &ix, &iy, &iw, &ih)) {
-				if (send_rect(s, ix, iy, iw, ih, &fmt)) {
+				if (send_update(s, ix, iy, iw, ih, &fmt)) {
 					return;
 				}
 				last_send = k_uptime_get();
@@ -529,10 +798,19 @@ static void serve_client(int s)
 			uint16_t n = rd16(b + 1);
 
 			for (uint16_t i = 0; i < n; i++) {
-				if (recv_all(s, b, 4)) {  /* ignore: Raw only */
+				if (recv_all(s, b, 4)) {
 					return;
 				}
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+				if (rd32(b) == 5) {       /* Hextile */
+					client_hextile = true;
+				}
+#endif
 			}
+#ifdef CONFIG_KLAUSSCPU_VNC_HEXTILE
+			LOG_INF("client encodings: raw%s",
+				client_hextile ? " + hextile" : " only");
+#endif
 			break;
 		}
 
@@ -557,7 +835,7 @@ static void serve_client(int s)
 				 * dirt we just covered so it isn't re-sent. */
 				int dx, dy, dw, dh;
 
-				if (send_rect(s, x, y, w, h, &fmt)) {
+				if (send_update(s, x, y, w, h, &fmt)) {
 					return;
 				}
 				last_send = k_uptime_get();

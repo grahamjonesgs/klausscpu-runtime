@@ -164,7 +164,7 @@ bool vncd_blit_active(void)
  * Both clean                  => the blitter is fine; look elsewhere.
  */
 #ifdef CONFIG_KLAUSSCPU_VNC_BLITTER
-#define ST_W      640                 /* same row width/stride as the framebuffer */
+#define ST_W      FB_WIDTH            /* same row width/stride as the framebuffer */
 #define ST_H      32
 #define ST_STRIDE (ST_W * (int)sizeof(uint16_t))
 #define ST_POISON 0xDEADu

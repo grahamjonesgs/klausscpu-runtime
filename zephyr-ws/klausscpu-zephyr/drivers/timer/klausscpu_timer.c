@@ -19,6 +19,14 @@ extern void arch_switch(void *switch_to, void **switched_from);
 #define REG_TIMER_PER   (*(volatile uint32_t *)0xF00F0030u)
 #define REG_TIMER_CNT   (*(volatile uint32_t *)0xF00F0038u)
 
+/* Free-running cycle counter (PERF_CYCLES, perf-counter block at 0xF00D).
+ * 48 bits wide (upper 16 read 0), ticks every CPU cycle, unaffected by
+ * CPU_RESETN or program load.  This — not REG_TIMER_CNT, which wraps every
+ * tick period — is what backs k_cycle_get_32/64().  Caveat: PERF_CTRL[0]
+ * (write-1-clear-all, used by perf profiling tools) zeroes it, so cycle
+ * timestamps taken across a perf-counter clear are invalid. */
+#define REG_PERF_CYCLES (*(volatile uint64_t *)0xF00D0008u)
+
 /* Declared in swap.S — the actual ISR entry point. */
 extern void z_klausscpu_timer_isr(void);
 
@@ -56,7 +64,12 @@ uint32_t sys_clock_elapsed(void)
 
 uint32_t sys_clock_cycle_get_32(void)
 {
-    return REG_TIMER_CNT;
+    return (uint32_t)REG_PERF_CYCLES;
+}
+
+uint64_t sys_clock_cycle_get_64(void)
+{
+    return REG_PERF_CYCLES;
 }
 
 /* Called from swap.S timer ISR entry point — announce one tick to the kernel.

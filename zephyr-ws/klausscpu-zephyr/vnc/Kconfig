@@ -27,6 +27,47 @@ config KLAUSSCPU_VNC_PROFILE
 	  Print periodic per-update send time, bytes/update and throughput to the
 	  console.  Diagnostic only.
 
+config KLAUSSCPU_VNC_FB_WIDTH
+	int "Framebuffer width (pixels)"
+	default 640
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  Width of the in-RAM framebuffer.  Match it to the content instead of
+	  centring inside a larger buffer (e.g. 320 for doom): fewer pixels cut
+	  render, convert and send proportionally, and full-width updates become
+	  contiguous, enabling the zero-copy send path.
+
+config KLAUSSCPU_VNC_FB_HEIGHT
+	int "Framebuffer height (pixels)"
+	default 480
+	depends on KLAUSSCPU_VNC_SERVER
+
+config KLAUSSCPU_VNC_ZERO_COPY
+	bool "Zero-copy send for full-width native-format updates"
+	default y
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  When the client's pixel format matches the framebuffer (RGB565 LE —
+	  the common case) and an update spans the full framebuffer width, the
+	  region is one contiguous block: send it straight from the framebuffer
+	  with no staging copy and no lock held.  A concurrent writer can tear
+	  a frame mid-send (never a pixel); the next dirty update repaints it.
+	  This removes the whole convert/copy stage for full-frame streaming.
+
+config KLAUSSCPU_VNC_HEXTILE
+	bool "Hextile encoding (RFC 6143) with adaptive Raw fallback"
+	default y
+	depends on KLAUSSCPU_VNC_SERVER
+	help
+	  Encode updates as 16x16 Hextile tiles when the client offers the
+	  encoding: solid tiles collapse to ~3 bytes and two-colour tiles (text,
+	  flat UI) to a few dozen, and since send cost on this platform is TCP-
+	  stack CPU proportional to byte count, fewer bytes directly cut send
+	  time.  Flat LVGL screens compress dramatically; noisy content (doom's
+	  textured view) does not — so the server self-measures: when an update
+	  shrinks by less than ~12%, it falls back to Raw (and the zero-copy
+	  path) for the next 32 updates before re-probing.
+
 config KLAUSSCPU_VNC_DISPLAY
 	bool "Expose the VNC framebuffer as a Zephyr display device"
 	default n

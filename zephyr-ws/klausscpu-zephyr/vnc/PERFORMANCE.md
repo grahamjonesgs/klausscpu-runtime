@@ -26,9 +26,13 @@ Always instrument per-stage (render / convert / send) before changing anything.
 
 Two platform gotchas that corrupted our first measurements:
 
-- **`k_cycle_get_32()` is unreliable here** — it does not behave as a clean
-  100 MHz free-running counter (gave 26 s "frame times"). **Use `k_uptime_get()`
-  (ms).** Frames are >1 ms so ms resolution is fine.
+- **`k_cycle_get_32()` was broken here until 2026-08** — the timer driver
+  returned the MMIO timer's *per-tick* count register, which wraps every tick
+  (hence 26 s "frame times").  It now reads the free-running `PERF_CYCLES`
+  counter (0xF00D_0008, 100 MHz; `k_cycle_get_64()` also works), so
+  cycle-resolution profiling is usable.  One caveat: a perf-counter clear
+  (`PERF_CTRL[0]`) zeroes it, invalidating in-flight deltas.  For frame-scale
+  timing `k_uptime_get()` (ms) remains the simple choice.
 - **`printk`/cbprintf garbles multi-argument lines** on this core (e.g. a 6-arg
   line prints the later fields as scrambled/zero). Keep profiling prints to 1–2
   args, or trust only the **first** field of a multi-arg line.
@@ -139,6 +143,14 @@ inlined.
    equals the streamed width, the whole region is one block → a single fast
    memcpy, or a true **zero-copy send straight from the framebuffer** (accept
    minor tearing, or double-buffer).
+
+   *IMPLEMENTED (2026-08):* `CONFIG_KLAUSSCPU_VNC_FB_WIDTH/HEIGHT` size the
+   framebuffer to the content (doom's prj.conf now sets 320×200 — ¼ the pixels
+   AND contiguous), and full-width native-format updates go out **zero-copy**
+   (`CONFIG_KLAUSSCPU_VNC_ZERO_COPY`, default y): no staging copy, no blit, no
+   cache walks, no lock held across the send (frame tearing accepted — the
+   next dirty update repaints).  The whole `convert=` stage disappears for
+   full-frame native streaming.
 4. **8bpp palette mode** (`SetColourMapEntries`) — *re-assessed; read before
    starting.* The bytes-halving half of this is **already available with no code**:
    the LUT path is format-agnostic, so if the client requests `bpp=8` truecolour
@@ -159,6 +171,20 @@ inlined.
    *in the TCP stack, proportional to segment count*, so fewer bytes **does** cut
    CPU here — but Doom's noisy textured view compresses poorly, so the CPU traded
    may exceed the CPU saved. Measure on the real content.
+
+   *IMPLEMENTED (2026-08):* **Hextile** (`CONFIG_KLAUSSCPU_VNC_HEXTILE`,
+   default y), used when the client lists encoding 5 in SetEncodings.  16×16
+   tiles: solid → 3 bytes, two-colour (text / flat UI) → bg + fg + per-row
+   runs, anything else → raw (worst case = Raw + 1 byte/tile ≈ 0.2%).  In the
+   host-side harness a solid 640×480 frame encodes to **3.6 KB vs 614 KB Raw
+   (170×)**.  The doom caveat above is handled *adaptively at runtime*: an
+   update that shrinks by less than ~12% switches the server back to Raw (and
+   the zero-copy path) for the next 32 updates before re-probing, so noisy
+   content pays the tile scan on ~3% of frames only.  Encoder verified by a
+   200k-tile fuzz against a reference RFC 6143 decoder (all client formats,
+   all tile sizes): `tests/host/test_hextile.c` compiles the real
+   vnc_server.c against stub Zephyr headers and runs on any dev host —
+   `cd vnc/tests/host && ./run.sh`.
 6. **FPGA offload (the real path to smooth, 10+ fps).** Move convert + send off
    the CPU: a fabric block that DMAs the framebuffer (with palette/format
    conversion and TCP checksum) into LiteEth, so the core only renders. This is
@@ -187,7 +213,9 @@ convert+send path entirely. VNC only wins when the display must be remote.
 
 ## RFB subset implemented (vnc_server.c)
 
-- ProtocolVersion 3.8, security type **None**, **Raw** encoding only.
+- ProtocolVersion 3.8, security type **None**; **Raw** always, **Hextile**
+  when the client offers it (adaptive fallback to Raw for poorly-compressing
+  content; full-width native Raw updates are zero-copy).
 - Honours the client's `SetPixelFormat` (LUT conversion; native-format memcpy
-  fast path). `KeyEvent`/`PointerEvent` are parsed but currently discarded
-  (input plumbing is the next feature). No auth, no TLS — trusted LAN only.
+  fast path). `KeyEvent`/`PointerEvent` are forwarded to handlers registered
+  via `vnc_register_input()`. No auth, no TLS — trusted LAN only.
