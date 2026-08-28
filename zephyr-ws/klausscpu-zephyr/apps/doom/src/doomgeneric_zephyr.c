@@ -17,13 +17,20 @@
 #include <zephyr/storage/disk_access.h>
 #include <zephyr/fs/fs.h>
 #include <ff.h>
+#ifdef CONFIG_NETWORKING
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/dhcpv4.h>
+#endif
 
 #include "framebuffer.h"
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 #include "vnc_server.h"
+#endif
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+#include "amp_host.h"        /* VNC served by AMP core 2 (P4b) */
+#endif
 #include "doomgeneric.h"
 #include "doomkeys.h"
 
@@ -83,7 +90,12 @@ void DG_DrawFrame(void)
 #endif
 	fb_unlock();
 
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+	/* AMP: the frame is served by core 2 — publish it (cache FLUSH + seq++). */
+	amp_post_frame(FB_XOFF, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+#else
 	fb_mark_dirty(FB_XOFF, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+#endif
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -114,6 +126,7 @@ static volatile unsigned short key_queue[KEYQUEUE_SIZE];
 static volatile unsigned int   key_wr;   /* advanced by the VNC thread  */
 static volatile unsigned int   key_rd;   /* advanced by the Doom thread */
 
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 /* X11 keysyms — Zephyr's minimal libc has no <X11/keysymdef.h>. */
 #define XK_BackSpace  0xff08u
 #define XK_Return     0xff0du
@@ -172,6 +185,7 @@ static void on_key(bool pressed, uint32_t keysym)
 	key_queue[wr] = (unsigned short)(((unsigned int)pressed << 8) | k);
 	key_wr = (wr + 1u) % KEYQUEUE_SIZE;
 }
+#endif /* CONFIG_KLAUSSCPU_VNC_SERVER — AMP builds: no key input path yet */
 
 int DG_GetKey(int *pressed, unsigned char *key)
 {
@@ -218,6 +232,7 @@ static int mount_sd(void)
 	return 0;
 }
 
+#ifdef CONFIG_NETWORKING
 static struct net_mgmt_event_callback dhcp_cb;
 static struct k_sem dhcp_sem;
 
@@ -251,6 +266,8 @@ static int wait_for_dhcp(void)
 	}
 	return 0;
 }
+
+#endif /* CONFIG_NETWORKING */
 
 /* ── Doom game-loop thread ──────────────────────────────────────────────── */
 
@@ -324,6 +341,12 @@ int main(void)
 	if (mount_sd() != 0) {
 		LOG_ERR("no SD card — cannot load WAD");
 	}
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+	/* P4b: core 2 owns the network and serves VNC; this core only renders. */
+	if (amp_host_init() != 0) {
+		LOG_ERR("AMP core 2 failed to start — no display");
+	}
+#else
 	if (wait_for_dhcp() != 0) {
 		LOG_WRN("no network — VNC will be unreachable");
 	}
@@ -331,6 +354,7 @@ int main(void)
 	vnc_server_start();
 	vnc_register_input(on_key, NULL);   /* keyboard -> Doom; no pointer */
 	LOG_INF("VNC server ready on port 5900 — connect to play");
+#endif
 
 	k_thread_create(&doom_thread, doom_stack, DOOM_STACK_SIZE,
 			doom_entry, NULL, NULL, NULL, DOOM_PRIO, 0, K_NO_WAIT);

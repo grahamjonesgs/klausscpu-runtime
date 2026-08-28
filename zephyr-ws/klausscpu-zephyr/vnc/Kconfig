@@ -1,7 +1,28 @@
+config KLAUSSCPU_FRAMEBUFFER
+	bool "In-RAM RGB565 framebuffer (dirty tracking, lock)"
+	default n
+	help
+	  framebuffer.c: the RGB565 framebuffer that either the on-core VNC
+	  server (KLAUSSCPU_VNC_SERVER) or AMP core 2 (KLAUSSCPU_AMP_VNC)
+	  streams.  Selected by whichever consumer is enabled.
+
+config KLAUSSCPU_AMP_VNC
+	bool "VNC served by AMP core 2 (this core only renders)"
+	default n
+	depends on !KLAUSSCPU_VNC_SERVER
+	select KLAUSSCPU_FRAMEBUFFER
+	help
+	  Boot the second KlaussCPU core with the embedded lwIP+VNC image
+	  (baremetal/core2_image.h), hand it the LiteEth, and post each
+	  rendered frame through the shared-memory descriptor (amp/amp_proto.h):
+	  render -> cache FLUSH -> seq++.  Networking is OFF on this core.
+	  See AMP_CORE2_PLAN.md P4.
+
 config KLAUSSCPU_VNC_SERVER
 	bool "KlaussCPU VNC (RFB) server"
 	default n
 	depends on NET_SOCKETS
+	select KLAUSSCPU_FRAMEBUFFER
 	help
 	  Minimal RFB (VNC) server on port 5900 exposing an in-RAM RGB565
 	  framebuffer to standard VNC clients (macOS Screen Sharing, TigerVNC,
@@ -30,7 +51,7 @@ config KLAUSSCPU_VNC_PROFILE
 config KLAUSSCPU_VNC_FB_WIDTH
 	int "Framebuffer width (pixels)"
 	default 640
-	depends on KLAUSSCPU_VNC_SERVER
+	depends on KLAUSSCPU_FRAMEBUFFER
 	help
 	  Width of the in-RAM framebuffer.  Match it to the content instead of
 	  centring inside a larger buffer (e.g. 320 for doom): fewer pixels cut
@@ -40,7 +61,7 @@ config KLAUSSCPU_VNC_FB_WIDTH
 config KLAUSSCPU_VNC_FB_HEIGHT
 	int "Framebuffer height (pixels)"
 	default 480
-	depends on KLAUSSCPU_VNC_SERVER
+	depends on KLAUSSCPU_FRAMEBUFFER
 
 config KLAUSSCPU_VNC_ZERO_COPY
 	bool "Zero-copy send for full-width native-format updates"

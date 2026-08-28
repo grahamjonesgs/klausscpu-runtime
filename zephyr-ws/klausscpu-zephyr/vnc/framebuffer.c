@@ -9,7 +9,9 @@
 #include "framebuffer.h"
 
 /* ~600 KiB in SRAM (the board has ~128 MiB, so this is negligible). */
-static uint16_t fb[FB_WIDTH * FB_HEIGHT];
+/* 8-byte aligned: AMP core 2 reads the fb through its uncached DDR window
+ * with 64-bit loads (vnc_c2.c fb_fetch) — one burst per 4 px instead of 4. */
+static uint16_t fb[FB_WIDTH * FB_HEIGHT] __attribute__((aligned(8)));
 
 /* Guards both the pixels and the dirty box below. */
 static K_MUTEX_DEFINE(fb_mutex);

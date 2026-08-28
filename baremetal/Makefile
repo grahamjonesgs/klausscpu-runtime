@@ -543,3 +543,64 @@ clean:
 	      $(ROOT)/src/uart_stubs.o $(ROOT)/src/crt0.o $(ROOT)/src/eth.o \
 	      $(ROOT)/src/mdio.o $(ROOT)/src/diskio.o $(ROOT)/src/sd.o \
 	      $(ROOT)/fatfs/ff.o $(ROOT)/fatfs/ffsystem.o $(ROOT)/fatfs/ffunicode.o 2>/dev/null; true
+
+# ── AMP core 2 (AMP_CORE2_PLAN.md) ──────────────────────────────────────────
+# core2.elf: the second core's image — its own lwipopts (core2/ is FIRST on
+# the include path so core2/lwipopts.h shadows lwip_port/lwipopts.h), its own
+# linker script (text in the DDR window, data in local BRAM) and crt0.
+# core1_amp_host: the core-1 program that embeds core2.bin and boots core 2.
+CORE2_DIR   = $(ROOT)/core2
+CORE2_FLAGS = $(CFLAGS) -I$(CORE2_DIR) -I$(LWIP_DIR)/src/include -I$(LWIP_PORT)
+CORE2_LWIP_OBJS = $(patsubst %, c2lwip_%.o, \
+    $(LWIP_CORE_NAMES) $(LWIP_IPV4_NAMES) $(LWIP_NETIF_NAMES) $(LWIP_PORT_NAMES))
+
+c2lwip_%.o: $(LWIP_DIR)/src/core/%.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2lwip_%.o: $(LWIP_DIR)/src/core/ipv4/%.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2lwip_%.o: $(LWIP_DIR)/src/netif/%.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2lwip_%.o: $(LWIP_PORT)/%.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2_eth.o:  $(ROOT)/src/eth.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2_mdio.o: $(ROOT)/src/mdio.c
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2_crt0.o: $(CORE2_DIR)/crt0_core2.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+c2_main.o: $(CORE2_DIR)/main.c $(CORE2_DIR)/vnc_c2.h $(ROOT)/amp/amp_proto.h
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+
+core2.elf: c2_crt0.o c2_main.o c2_vnc.o c2_eth.o c2_mdio.o $(CORE2_LWIP_OBJS) $(LIBC_OBJS) uart_stubs.o
+	$(LLD) -T $(CORE2_DIR)/core2.ld --gc-sections -o $@ \
+	    c2_crt0.o uart_stubs.o $(LIBC_OBJS) c2_main.o c2_vnc.o c2_eth.o c2_mdio.o \
+	    $(CORE2_LWIP_OBJS) $(LIBC_LINK)
+	@echo "==> $@ built"
+	$(LLVM_BIN)/llvm-size $@
+
+core2.bin: core2.elf
+	$(LLVM_BIN)/llvm-objcopy -O binary $< $@
+
+core2_image.h: core2.bin
+	python3 -c "import sys; d=open('core2.bin','rb').read(); \
+	  print('/* generated from core2.bin — do not edit */'); \
+	  print('static const unsigned char core2_image[] = {' + ','.join(str(b) for b in d) + '};'); \
+	  print('static const unsigned core2_image_len = %d;' % len(d))" > $@
+
+core1_amp_host.o: programs/core1_amp_host.c core2_image.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+core1_amp_host.elf: core1_amp_host.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,core1_amp_host.o)
+core1_amp_host: core1_amp_host.elf
+core2: core2.elf
+.PHONY: core2 core1_amp_host
+
+# P4: VNC server on core 2 + the baremetal demo host.
+c2_vnc.o: $(CORE2_DIR)/vnc_c2.c $(CORE2_DIR)/vnc_c2.h $(ROOT)/amp/amp_proto.h
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+core1_amp_vnc.o: programs/core1_amp_vnc.c core2_image.h $(ROOT)/amp/amp_proto.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+core1_amp_vnc.elf: core1_amp_vnc.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,core1_amp_vnc.o)
+core1_amp_vnc: core1_amp_vnc.elf
+.PHONY: core1_amp_vnc
