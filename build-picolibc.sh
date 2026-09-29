@@ -20,12 +20,23 @@ PICOLIBC_SRC="$(pwd)/picolibc-src"
 PICOLIBC_BUILD="$(pwd)/picolibc-build"
 PICOLIBC_INSTALL="$(pwd)/picolibc-install"
 
+# Pinned picolibc commit (2026-09-28). Upstream HEAD is not tracked: picolibc
+# reshuffles its config headers (e64aae7 broke the machine/ieeefp.h shadow
+# below), so bump this deliberately and re-run the board regression.
+PICOLIBC_REV="7bebd93bea40b7438f06ac70536e2e6642753796"
+
 # ── 1. Clone picolibc ─────────────────────────────────────────────────────────
 if [ ! -d "$PICOLIBC_SRC" ]; then
-    echo "==> Cloning picolibc..."
-    git clone --depth 1 https://github.com/picolibc/picolibc.git "$PICOLIBC_SRC"
+    echo "==> Cloning picolibc @ ${PICOLIBC_REV:0:12}..."
+    git init -q "$PICOLIBC_SRC"
+    git -C "$PICOLIBC_SRC" remote add origin https://github.com/picolibc/picolibc.git
 else
-    echo "==> picolibc source already present, skipping clone"
+    echo "==> picolibc source already present"
+fi
+if [ "$(git -C "$PICOLIBC_SRC" rev-parse HEAD 2>/dev/null)" != "$PICOLIBC_REV" ]; then
+    echo "==> Checking out picolibc ${PICOLIBC_REV:0:12}..."
+    git -C "$PICOLIBC_SRC" fetch -q --depth 1 origin "$PICOLIBC_REV"
+    git -C "$PICOLIBC_SRC" checkout -q --detach "$PICOLIBC_REV"
 fi
 
 # ── 2. Generate cross file with absolute tool paths ───────────────────────────
@@ -54,20 +65,21 @@ CROSSEOF
 # picolibc requires libc/machine/<cpu_family>/meson.build.
 # We use cpu_family='none' in the cross file; create a minimal machine dir.
 MACHINE_DIR="$PICOLIBC_SRC/libc/machine/none"
-if [ ! -d "$MACHINE_DIR" ]; then
-    echo "==> Adding picolibc machine/none (KlaussCPU generic port)..."
-    mkdir -p "$MACHINE_DIR"
-    # Empty machine: use all-C generic implementations from picolibc.
-    # setjmp/longjmp are provided by our own setjmp.S linked alongside.
-    cat > "$MACHINE_DIR/meson.build" <<'MBEOF'
+# Rewritten on every run (not just first clone) so fixes to these headers
+# reach an existing picolibc-src checkout.
+echo "==> Writing picolibc machine/none (KlaussCPU generic port)..."
+mkdir -p "$MACHINE_DIR"
+# Empty machine: use all-C generic implementations from picolibc.
+# setjmp/longjmp are provided by our own setjmp.S linked alongside.
+cat > "$MACHINE_DIR/meson.build" <<'MBEOF'
 # KlaussCPU machine port — all-C generic implementations.
 # Architecture-specific code (setjmp/longjmp) is in the application's
 # setjmp.S, not compiled into picolibc itself.
 src_machine = files()
 MBEOF
-    # Declare little-endian for picolibc's ieeefp.h, which requires this.
-    # Also define _LDBL_EQ_DBL: on KlaussCPU long double == double (both 64-bit).
-    cat > "$MACHINE_DIR/ieeefp.h" <<'IEOF'
+# Declare little-endian for picolibc's ieeefp.h, which requires this.
+# Also define _LDBL_EQ_DBL: on KlaussCPU long double == double (both 64-bit).
+cat > "$MACHINE_DIR/ieeefp.h" <<'IEOF'
 /* KlaussCPU: little-endian IEEE 754 */
 #ifndef __IEEE_LITTLE_ENDIAN
 #define __IEEE_LITTLE_ENDIAN
@@ -79,14 +91,14 @@ MBEOF
 #define _LDBL_EQ_DBL
 #endif
 IEOF
-    # machine/ieeefp.h + machine/setjmp.h — placed in machine/none/machine/ so
-    # they shadow libc/include/machine/ when picolibc searches include paths.
-    mkdir -p "$MACHINE_DIR/machine"
+# machine/ieeefp.h + machine/setjmp.h — placed in machine/none/machine/ so
+# they shadow libc/include/machine/ when picolibc searches include paths.
+mkdir -p "$MACHINE_DIR/machine"
 
-    # machine/ieeefp.h: little-endian + _LDBL_EQ_DBL (long double == double).
-    # Without _LDBL_EQ_DBL, math_config.h creates conflicting declarations for
-    # _cosl/_sinl/_powl when __SIZEOF_LONG_DOUBLE__==8 && _NEED_FLOAT64.
-    cat > "$MACHINE_DIR/machine/ieeefp.h" <<'IEOF2'
+# machine/ieeefp.h: little-endian + _LDBL_EQ_DBL (long double == double).
+# Without _LDBL_EQ_DBL, math_config.h creates conflicting declarations for
+# _cosl/_sinl/_powl when __SIZEOF_LONG_DOUBLE__==8 && _NEED_FLOAT64.
+cat > "$MACHINE_DIR/machine/ieeefp.h" <<'IEOF2'
 #ifndef _MACHINE_IEEEFP_H
 #define _MACHINE_IEEEFP_H
 #ifndef __IEEE_LITTLE_ENDIAN
@@ -96,13 +108,24 @@ IEOF
 #ifndef _LDBL_EQ_DBL
 #define _LDBL_EQ_DBL
 #endif
+/* This header shadows picolibc's libc/include/machine/ieeefp.h, whose whole
+ * body is skipped once __IEEE_LITTLE_ENDIAN is set. Since picolibc e64aae7
+ * (2026-09) that body is the only place defining the long double support
+ * flags math.h needs to declare the *l functions (asinl etc.) — define them
+ * here. (Older picolibc also sets them in sys/config.h; identical, harmless.) */
+#ifndef __HAVE_LONG_DOUBLE
+#define __HAVE_LONG_DOUBLE
+#endif
+#ifndef __HAVE_LONG_DOUBLE_MATH
+#define __HAVE_LONG_DOUBLE_MATH
+#endif
 #endif /* _MACHINE_IEEEFP_H */
 IEOF2
 
-    # machine/setjmp.h — defines jmp_buf for KlaussCPU.
-    # Placed in machine/none/machine/ so it is found before the generic
-    # libc/include/machine/setjmp.h (which has no __klausscpu__ block).
-    cat > "$MACHINE_DIR/machine/setjmp.h" <<'SJEOF'
+# machine/setjmp.h — defines jmp_buf for KlaussCPU.
+# Placed in machine/none/machine/ so it is found before the generic
+# libc/include/machine/setjmp.h (which has no __klausscpu__ block).
+cat > "$MACHINE_DIR/machine/setjmp.h" <<'SJEOF'
 /*
  * KlaussCPU machine/setjmp.h
  *
@@ -122,7 +145,6 @@ typedef _JBTYPE jmp_buf[_JBLEN];
 
 #endif /* _MACHINE_SETJMP_H */
 SJEOF
-fi
 
 # ── 3. Configure with meson ───────────────────────────────────────────────────
 echo "==> Configuring picolibc..."
