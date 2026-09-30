@@ -3,7 +3,7 @@
 //
 //  T1  INT_PENDING[2] follows the MAC's TX event while masked (level).
 //  T2  An unmasked TX-done event dispatches the source-2 ISR exactly once;
-//      the ISR's W1C leaves INT_PENDING[2] clear.
+//      the ISR's W1C leaves INT_PENDING[2] clear; PERF_INT_OPS counts it (T2b).
 //  T3  ICACHE_INV: a cached function is rewritten in DDR by the blitter (DMA —
 //      not snooped by the core). Without the fence the stale copy still runs
 //      (informational: an unrelated eviction can refresh it); after
@@ -78,15 +78,19 @@ static void test_eth_irq(void) {
     // T2: unmasked — one TX-done event, one ISR run.
     tx_irqs = rx_irqs = 0;
     REG_INT_VEC(INT_SRC_ETH) = (uint32_t)(uintptr_t)eth_isr;
+    REG_PERF_CTRL = PERF_CTRL_CLEAR;
     REG_INT_MASK = 1u << INT_SRC_ETH;
     eth_tx(frame, sizeof frame);
     for (int i = 0; i < 100 && !tx_irqs; i++) wait_ms(1);
     wait_ms(5);
     REG_INT_MASK = 0;
+    uint64_t int_ops = REG_PERF_INT_OPS;
     REG_INT_VEC(INT_SRC_ETH) = 0;
-    printf("   tx_irqs=%lu rx_irqs=%lu\n", (unsigned long)tx_irqs, (unsigned long)rx_irqs);
+    printf("   tx_irqs=%lu rx_irqs=%lu PERF_INT_OPS=%lu\n", (unsigned long)tx_irqs,
+           (unsigned long)rx_irqs, (unsigned long)int_ops);
     check("T2 TX-done dispatches source 2 once",
           tx_irqs == 1 && !((REG_INT_PEND >> INT_SRC_ETH) & 1u));
+    check("T2b PERF_INT_OPS counts the dispatch", int_ops == 1);
 }
 
 // ── T3: I-cache invalidate against a DMA code write ───────────────────────
