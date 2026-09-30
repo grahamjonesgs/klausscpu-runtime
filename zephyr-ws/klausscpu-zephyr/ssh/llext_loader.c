@@ -35,6 +35,15 @@
 
 LOG_MODULE_REGISTER(llext_loader, LOG_LEVEL_INF);
 
+/* fence.i before running freshly loaded code: CACHE_CTRL (0xF005_0000) bit 3
+ * drops every fetch-side copy (I-cache, prefetch buffers). CPU stores are
+ * snooped per line already; this is the explicit loader fence (and covers
+ * code that arrived by DMA or from core 2). */
+static inline void code_fence(void)
+{
+	*(volatile uint32_t *)0xF0050000u = 1u << 3;
+}
+
 #define EXT_MAX_SIZE    (8UL * 1024 * 1024)
 
 /* Console redirect hooks (declared in arch/klausscpu/core/irq.c and
@@ -212,6 +221,8 @@ int llext_run_from_sd(const char *filename, const struct shell *sh)
 		return -2;
 	}
 
+	code_fence();
+
 	ext_entry_fn entry =
 		(ext_entry_fn)llext_find_sym(&ext->sym_tab, "main");
 
@@ -312,6 +323,8 @@ int llext_service_load(const char *filename, const char *name)
 		k_free(buf);
 		return -ENOEXEC;
 	}
+
+	code_fence();
 
 	svc_fn start = (svc_fn)llext_find_sym(&ext->sym_tab, "svc_start");
 	svc_fn stop  = (svc_fn)llext_find_sym(&ext->sym_tab, "svc_stop");

@@ -125,6 +125,14 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 
 /* CACHE_CTRL: bit 0 is write-1-auto-clear; clears all six counters. */
 #define CACHE_CTRL_CLEAR      (1u << 0)
+#define CACHE_CTRL_ICACHE_INV (1u << 3)   /* fence.i: drop every fetch-side code copy */
+/* (CACHE_CTRL_FLUSH / _INVALIDATE and REG_CACHE_STATUS are defined below.) */
+
+/* Make code written as data visible to instruction fetch. CPU stores are
+ * snooped per I-cache line already; call this after code arrives by DMA
+ * (blitter, Ethernet), from core 2, or as the loader's final fence before
+ * jumping to freshly written code. */
+static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_INV; }
 
 /* Field extractors for the read-only CACHE_INFO register.
  * Expected value for current build: 0x0001_0000_1008_0002
@@ -184,12 +192,12 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 #define REG_CLOCK_MS    (*(volatile uint64_t *)(INTC_BASE + 0x0040u))  /* atomic 64-bit */
 
 #define INT_SRC_TIMER   0u
-#define INT_SRC_ETH     1u   /* LiteEth RX/TX combined — wired in Phase 6 */
+#define INT_SRC_BLIT    1u   /* 2D blitter DONE (level; ISR W1Cs BLIT_STATUS.DONE) */
+#define INT_SRC_ETH     2u   /* LiteEth RX/TX combined (level; ISR W1Cs RX_/TX_EV_PENDING) */
 
-/* INT_MASK value covering all enabled sources.
- * Update this when new interrupt sources are connected:
- *   Phase 1-5 (polling only): INTMASK_ALL = 1  (timer only)
- *   Phase 6+  (ETH IRQ wired): change to 3     (timer + eth)   */
+/* INT_MASK value the lwIP port restores after a critical section. The
+ * network stacks still poll the MAC, so only the timer is enabled; a
+ * program that takes the ETH interrupt ORs in (1u << INT_SRC_ETH).        */
 #define INTMASK_ALL     1u
 
 /* ── Ethernet (LiteEth) — CSRs 0xF006_xxxx, slot SRAM 0xF008_xxxx ───────── */
@@ -419,6 +427,7 @@ static inline void delay_ms(uint32_t ms) {
 #endif
 #define CACHE_CTRL_FLUSH      2u   /* write-back every dirty line          */
 #define CACHE_CTRL_INVALIDATE 4u   /* flush, then clear valid on all lines */
+#define CACHE_STATUS_MNT_BUSY 1u   /* REG_CACHE_STATUS[0] */
 
 /* ── AMP core 2 mailbox — 0xF010_xxxx ──────────────────────────────────────
  * Core 1's control window over the second pipeline_core (effective 50 MHz).

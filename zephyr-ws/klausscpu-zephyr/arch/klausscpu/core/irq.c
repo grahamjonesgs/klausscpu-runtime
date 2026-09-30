@@ -3,10 +3,11 @@
  *
  * KlaussCPU has a flat MMIO interrupt controller:
  *   REG_INT_MASK  (0xF00F_0000): write 0 = all off, write 1 = timer on,
- *                                write 3 = timer+ethernet on.
+ *                                bit n = source n (2 = ethernet).
  *   REG_INT_VEC(n): 32-bit function pointer for source n.
  *
- * Zephyr treats IRQ numbers as small integers (0 = timer, 1 = ethernet).
+ * Zephyr treats IRQ numbers as small integers: 0 = timer, 1 = blitter DONE,
+ * 2 = ethernet (LiteEth RX/TX; level, the driver still polls).
  * We maintain a per-source enable bitmask and write the whole mask each time.
  */
 

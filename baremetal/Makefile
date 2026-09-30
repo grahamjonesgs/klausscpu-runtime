@@ -355,6 +355,13 @@ test_eth.o: programs/test_eth.c
 test_eth.elf: test_eth.o $(ETH_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) test_eth.o)
 
+# test_irq_ext: ETH interrupt (source 2) + ICACHE_INV board test (M13)
+test_irq_ext.o: programs/test_irq_ext.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_irq_ext.elf: test_irq_ext.o $(ETH_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(ETH_OBJS) test_irq_ext.o)
+
 # lwip_demo: full TCP/IP stack (DHCP + ping + TCP echo)
 lwip_demo.o: programs/lwip_demo.c
 	$(CC) $(LWIP_FLAGS) -c -o $@ $<
@@ -474,6 +481,7 @@ test_fatfs_printf: test_fatfs_printf.elf
 test_sd:           test_sd.elf
 test_big:          test_big.elf
 test_eth:          test_eth.elf
+test_irq_ext:      test_irq_ext.elf
 eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
 ping_demo:         ping_demo.elf
