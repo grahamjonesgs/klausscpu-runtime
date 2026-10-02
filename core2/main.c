@@ -25,6 +25,8 @@
 #include "../amp/amp_proto.h"
 #include "vnc_c2.h"
 
+void c2_netutil_selftest(void);
+
 #define DHCP_TIMEOUT_MS   15000u
 #define HEARTBEAT_MS      5000u
 
@@ -97,26 +99,37 @@ int main(int argc, char **argv)
     printf("core2: fb %ux%u @0x%08x stride %u\n", AMP_FB_DESC->width,
            AMP_FB_DESC->height, (unsigned)AMP_FB_DESC->fb_base,
            (unsigned)AMP_FB_DESC->stride);
+    c2_netutil_selftest();
     vnc_c2_init();
 
+    static const char *const prof_names[PROF_N] = {
+        "other", "fetch", "encode", "tcp_write", "tcp_out",
+        "chksum", "tx_wait", "tx_copy", "rx_copy", "rx_stack",
+    };
     uint64_t next_beat = REG_CLOCK_MS + HEARTBEAT_MS;
     unsigned beats = 0;
+    uint32_t last_upd = AMP_FB_DESC->updates;
+    c2_prof_t = REG_CLOCK_MS;
+    for (int i = 0; i < PROF_N; i++) c2_prof_ms[i] = 0;
     for (;;) {
-        uint64_t t0 = REG_CLOCK_MS;
+        PROF_PUSH(PROF_RX_STACK);
         ethernetif_input(&g_netif);
+        PROF_POP();
         sys_check_timeouts();
-        AMP_FB_DESC->prof_rx_ms += (uint32_t)(REG_CLOCK_MS - t0);
         vnc_c2_poll();
         if (REG_CLOCK_MS >= next_beat) {
             amp_fb_desc_t *d = AMP_FB_DESC;
             next_beat += HEARTBEAT_MS;
+            c2_prof_charge();
             /* <=2 args per printf: multi-arg lines garble on this platform */
             printf("core2: alive %u upd=%u\n", ++beats, (unsigned)d->updates);
             printf("core2: boot=%u vnc=%d\n", (unsigned)d->pad1, vnc_c2_status());
-            printf("core2: prof enc=%u tx=%u\n", (unsigned)d->prof_enc_ms,
-                   (unsigned)d->prof_tx_ms);
-            printf("core2: prof rx=%u (ms per 5 s)\n", (unsigned)d->prof_rx_ms);
-            d->prof_enc_ms = 0; d->prof_tx_ms = 0; d->prof_rx_ms = 0;
+            printf("core2: prof updates=%u (per 5 s)\n", (unsigned)(d->updates - last_upd));
+            last_upd = d->updates;
+            for (int i = 0; i < PROF_N; i++) {
+                printf("core2: prof %s=%u\n", prof_names[i], (unsigned)c2_prof_ms[i]);
+                c2_prof_ms[i] = 0;
+            }
         }
     }
     return 0;

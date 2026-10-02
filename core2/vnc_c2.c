@@ -237,7 +237,7 @@ static struct {
     uint32_t  upd_bytes;            /* payload bytes so far (adaptive check) */
 } C;
 
-static uint8_t stage[STAGE_SZ];
+static uint8_t stage[STAGE_SZ] __attribute__((aligned(8)));  /* fb_fetch writes u64s */
 static uint16_t rowbuf[1024] __attribute__((aligned(8)));   /* u64-filled by fb_fetch */
 
 static void conn_reset(void)
@@ -253,8 +253,14 @@ static void conn_reset(void)
 static err_t send_bytes(const void *p, size_t n)
 {
     uint64_t t0 = REG_CLOCK_MS;
+    PROF_PUSH(PROF_TCP_WRITE);
     err_t e = tcp_write(C.pcb, p, (u16_t)n, TCP_WRITE_FLAG_COPY);
-    if (e == ERR_OK) tcp_output(C.pcb);
+    PROF_POP();
+    if (e == ERR_OK) {
+        PROF_PUSH(PROF_TCP_OUT);
+        tcp_output(C.pcb);
+        PROF_POP();
+    }
     AMP_FB_DESC->prof_tx_ms += (uint32_t)(REG_CLOCK_MS - t0);
     return e;
 }
@@ -318,12 +324,21 @@ static void pump(void)
         if (!C.upd_hex) {
             size_t row_bytes = (size_t)C.uw * bytes;
             while (C.cur_y < C.uy + C.uh && len + row_bytes <= STAGE_SZ) {
-                fb_fetch(rowbuf, C.ux, C.cur_y, C.uw);
-                if (fmt_native) {
-                    memcpy(stage + len, rowbuf, row_bytes);
+                if (fmt_native && (((uintptr_t)(stage + len)) & 7u) == 0) {
+                    /* Rows go straight into stage (fb_fetch stores u64s, so
+                     * only when 8-aligned — always, for full-width doom
+                     * frames): no rowbuf -> stage memcpy. */
+                    PROF_PUSH(PROF_FETCH);
+                    fb_fetch((uint16_t *)(void *)(stage + len), C.ux, C.cur_y, C.uw);
+                    PROF_POP();
                 } else {
+                    PROF_PUSH(PROF_FETCH);
+                    fb_fetch(rowbuf, C.ux, C.cur_y, C.uw);
+                    PROF_POP();
+                    PROF_PUSH(PROF_ENCODE);
                     uint8_t *o = stage + len;
                     for (int c = 0; c < C.uw; c++) o = emit_px(o, rowbuf[c], bytes, &C.fmt);
+                    PROF_POP();
                 }
                 len += row_bytes;
                 C.cur_y++;
@@ -333,7 +348,9 @@ static void pump(void)
             while (C.cur_y < C.uy + C.uh && len + HT_TILE_MAX <= STAGE_SZ) {
                 int th = MIN(16, C.uy + C.uh - C.cur_y);
                 int tw = MIN(16, C.ux + C.uw - C.cur_tx);
+                PROF_PUSH(PROF_ENCODE);
                 len += hextile_tile(stage + len, C.cur_tx, C.cur_y, tw, th, bytes, &C.fmt);
+                PROF_POP();
                 C.cur_tx += 16;
                 if (C.cur_tx >= C.ux + C.uw) { C.cur_tx = C.ux; C.cur_y += 16; }
             }

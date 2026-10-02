@@ -72,4 +72,23 @@ int rand(void);
 #define LWIP_DBG_MIN_LEVEL          LWIP_DBG_LEVEL_ALL
 #define LWIP_DBG_TYPES_ON           LWIP_DBG_OFF
 
+// Per-bucket time profile (c2_prof.h); also hooks lwip_port/ethernetif.c.
+#include "c2_prof.h"
+
+// Internet checksum and lwIP's copies via c2_netutil.c: 64-bit versions of
+// paths that were byte-at-a-time (the LWIP_CHKSUM_ALGORITHM 1 routine above
+// stays compiled as the reference for the boot self-test and the fallback).
+#include <stddef.h>
+uint16_t c2_chksum(const void *dataptr, int len);
+void *c2_memcpy(void *dst, const void *src, size_t n);
+#define LWIP_CHKSUM                 c2_chksum
+#define MEMCPY(dst, src, len)       c2_memcpy(dst, src, len)
+#define SMEMCPY(dst, src, len)      c2_memcpy(dst, src, len)
+
+// lwip_port/ethernetif.c: copy TX frames into the MAC's slot SRAM as aligned
+// 64-bit writes.  Frames start 2 bytes off a 4-byte boundary (lwIP aligns the
+// transport payload; the 54 header bytes sit in front), so the 32-bit path
+// never engaged and every byte was its own MMIO transaction.
+#define ETH_TX_WIDE64               1
+
 #endif // LWIP_LWIPOPTS_H

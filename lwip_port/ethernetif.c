@@ -21,6 +21,13 @@
 #include "../src/eth.h"   // g_eth_mac, sram helpers via eth.h declarations
 #include <string.h>
 
+// Profiling hooks: defined by core2/lwipopts.h (c2_prof.h) in the AMP core-2
+// build only; no-ops everywhere else (the bucket names are never evaluated).
+#ifndef PROF_PUSH
+#define PROF_PUSH(b) ((void)0)
+#define PROF_POP()   ((void)0)
+#endif
+
 // Always transmit from slot 0.  Slot 1 is reserved for a future DMA path.
 // TX_READY means "room in the 2-entry TX FIFO", not "wire idle", so we wait
 // for TX_LEVEL==0 (FIFO empty) before each send to prevent back-to-back
@@ -59,6 +66,39 @@ static inline void sram_copy_to(volatile uint8_t *dst, const uint8_t *src, uint3
     }
 }
 
+#ifdef ETH_TX_WIDE64
+// TX copy as aligned 64-bit writes (the MMIO bridge splits each into two
+// 32-bit Wishbone cycles), shift-merging a misaligned source.  Outgoing
+// frames start 2 bytes off a 4-byte boundary — lwIP aligns the transport
+// payload and the 54 header bytes sit in front — so sram_copy_to's 4-aligned
+// test never passed and every byte went out as its own MMIO transaction.
+// The merge may read up to 7 bytes past the source end, within the last
+// aligned 8-byte word only (plain RAM, no MMU).  Little-endian, so the byte
+// layout on the wire is unchanged.
+static void sram_copy_to64(volatile uint8_t *dst, const uint8_t *src, uint32_t n) {
+    while (n && (((uintptr_t)dst) & 7u)) { *dst++ = *src++; n--; }
+    uint32_t w = n >> 3;
+    volatile uint64_t *dw = (volatile uint64_t *)(void *)dst;
+    unsigned k = (unsigned)(((uintptr_t)src) & 7u);
+    if (k == 0) {
+        const uint64_t *sw = (const uint64_t *)(const void *)src;
+        for (uint32_t i = 0; i < w; i++) dw[i] = sw[i];
+    } else {
+        const uint64_t *sw = (const uint64_t *)(const void *)(src - k);
+        unsigned sh = 8u * k;
+        uint64_t lo = *sw++;
+        for (uint32_t i = 0; i < w; i++) {
+            uint64_t hi = *sw++;
+            dw[i] = (lo >> sh) | (hi << (64u - sh));
+            lo = hi;
+        }
+    }
+    dst += w << 3; src += w << 3; n &= 7u;
+    while (n--) *dst++ = *src++;
+}
+#define sram_copy_to sram_copy_to64
+#endif
+
 static void sram_to_pbuf(struct pbuf *p, volatile const uint8_t *src) {
     uint32_t offset = 0;
     for (struct pbuf *q = p; q != NULL; q = q->next) {
@@ -95,9 +135,13 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p) {
         return ERR_BUF;
     }
 
+    PROF_PUSH(PROF_TX_WAIT);
     while (!REG_ETH_TX_READY) {}   // wait if TX FIFO full
+    PROF_POP();
 
+    PROF_PUSH(PROF_TX_COPY);
     pbuf_to_sram(ETH_TX_SLOT_PTR(0), p);
+    PROF_POP();
     REG_ETH_TX_SLOT   = 0;
     REG_ETH_TX_LENGTH = p->tot_len;
     REG_ETH_TX_START  = 1;
@@ -130,7 +174,9 @@ static struct pbuf *low_level_input(struct netif *netif) {
         return NULL;
     }
 
+    PROF_PUSH(PROF_RX_COPY);
     sram_to_pbuf(p, ETH_RX_SLOT_PTR(slot));
+    PROF_POP();
     REG_ETH_RX_EV_PENDING = 1;   // W1C — release slot to MAC
 
     LINK_STATS_INC(link.recv);

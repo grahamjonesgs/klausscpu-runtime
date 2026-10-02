@@ -578,10 +578,12 @@ c2_crt0.o: $(CORE2_DIR)/crt0_core2.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 c2_main.o: $(CORE2_DIR)/main.c $(CORE2_DIR)/vnc_c2.h $(ROOT)/amp/amp_proto.h
 	$(CC) $(CORE2_FLAGS) -c -o $@ $<
+c2_netutil.o: $(CORE2_DIR)/c2_netutil.c $(CORE2_DIR)/c2_prof.h $(CORE2_DIR)/lwipopts.h
+	$(CC) $(CORE2_FLAGS) -c -o $@ $<
 
-core2.elf: c2_crt0.o c2_main.o c2_vnc.o c2_eth.o c2_mdio.o $(CORE2_LWIP_OBJS) $(LIBC_OBJS) uart_stubs.o
+core2.elf: c2_crt0.o c2_main.o c2_vnc.o c2_netutil.o c2_eth.o c2_mdio.o $(CORE2_LWIP_OBJS) $(LIBC_OBJS) uart_stubs.o
 	$(LLD) -T $(CORE2_DIR)/core2.ld --gc-sections -o $@ \
-	    c2_crt0.o uart_stubs.o $(LIBC_OBJS) c2_main.o c2_vnc.o c2_eth.o c2_mdio.o \
+	    c2_crt0.o uart_stubs.o $(LIBC_OBJS) c2_main.o c2_vnc.o c2_netutil.o c2_eth.o c2_mdio.o \
 	    $(CORE2_LWIP_OBJS) $(LIBC_LINK)
 	@echo "==> $@ built"
 	$(LLVM_BIN)/llvm-size $@
