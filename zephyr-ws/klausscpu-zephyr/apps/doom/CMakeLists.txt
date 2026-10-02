@@ -45,6 +45,12 @@ target_include_directories(app BEFORE PRIVATE ${DG} compat)
 # scales it up for display.
 target_compile_definitions(app PRIVATE DOOMGENERIC_RESX=320 DOOMGENERIC_RESY=200)
 
+# Hand frames over as Doom's native 8-bit palette indices (doomgeneric's
+# CMAP256 mode): I_FinishUpdate is then a 64 KB memcpy instead of a per-pixel
+# palette -> XRGB8888 expansion (256 KB written), and DG_DrawFrame maps index ->
+# RGB565 through a 256-entry table rebuilt when the palette changes.
+target_compile_definitions(app PRIVATE CMAP256)
+
 # Doom is full of intentional old-C idioms; silence its warnings rather than
 # patch vendored sources, and force-include our stdio shim so the file
 # functions minimal libc lacks (fopen/fread/...) have correct prototypes.

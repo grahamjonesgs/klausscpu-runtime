@@ -33,6 +33,9 @@
 #endif
 #include "doomgeneric.h"
 #include "doomkeys.h"
+#ifdef CMAP256
+#include "i_video.h"         /* colors[], palette_changed */
+#endif
 
 LOG_MODULE_REGISTER(doom, LOG_LEVEL_INF);
 
@@ -64,15 +67,39 @@ void DG_Init(void)
 {
 }
 
+#ifdef CMAP256
+/* Doom's current palette as RGB565, rebuilt when the engine changes palette
+ * (damage/pickup flashes, menus) — see CMAP256 in CMakeLists.txt. */
+static uint16_t pal565[256];
+#endif
+
 void DG_DrawFrame(void)
 {
-	const uint32_t *src = (const uint32_t *)DG_ScreenBuffer;
-
 	fb_lock();
 	uint16_t *dst = fb_pixels();
 #ifdef CONFIG_DOOM_PROFILE
 	int64_t c0 = k_uptime_get();
 #endif
+
+#ifdef CMAP256
+	const uint8_t *src = (const uint8_t *)DG_ScreenBuffer;
+
+	if (palette_changed) {
+		for (int i = 0; i < 256; i++) {
+			pal565[i] = fb_rgb(colors[i].r, colors[i].g, colors[i].b);
+		}
+		palette_changed = false;
+	}
+	for (int y = 0; y < DOOMGENERIC_RESY; y++) {
+		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
+		const uint8_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
+
+		for (int x = 0; x < DOOMGENERIC_RESX; x++) {
+			drow[x] = pal565[srow[x]];
+		}
+	}
+#else
+	const uint32_t *src = (const uint32_t *)DG_ScreenBuffer;
 
 	for (int y = 0; y < DOOMGENERIC_RESY; y++) {
 		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
@@ -84,6 +111,7 @@ void DG_DrawFrame(void)
 			drow[x] = fb_rgb((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
 		}
 	}
+#endif
 #ifdef CONFIG_DOOM_PROFILE
 	prof_conv_ms += k_uptime_get() - c0;
 	prof_draws++;
