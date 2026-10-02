@@ -39,10 +39,16 @@ set(_PICOLIBC     "${_RUNTIME_DIR}/picolibc-install")
 set(_FREERTOS_INC "${_FREERTOS_DIR}")
 
 # ── Compiler and tools ────────────────────────────────────────────────────────
-set(CMAKE_C_COMPILER   "${_LLVM_BUILD}/bin/clang"    CACHE FILEPATH "" FORCE)
-set(CMAKE_CXX_COMPILER "${_LLVM_BUILD}/bin/clang++"  CACHE FILEPATH "" FORCE)
-set(CMAKE_AR           "${_LLVM_BUILD}/bin/llvm-ar"  CACHE FILEPATH "" FORCE)
-set(CMAKE_RANLIB       "${_LLVM_BUILD}/bin/llvm-ranlib" CACHE FILEPATH "" FORCE)
+# CMake needs the full file name, so add .exe when building on a Windows host.
+if(CMAKE_HOST_WIN32)
+    set(_EXE ".exe")
+else()
+    set(_EXE "")
+endif()
+set(CMAKE_C_COMPILER   "${_LLVM_BUILD}/bin/clang${_EXE}"    CACHE FILEPATH "" FORCE)
+set(CMAKE_CXX_COMPILER "${_LLVM_BUILD}/bin/clang++${_EXE}"  CACHE FILEPATH "" FORCE)
+set(CMAKE_AR           "${_LLVM_BUILD}/bin/llvm-ar${_EXE}"  CACHE FILEPATH "" FORCE)
+set(CMAKE_RANLIB       "${_LLVM_BUILD}/bin/llvm-ranlib${_EXE}" CACHE FILEPATH "" FORCE)
 
 set(_TRIPLE "klausscpu-unknown-elf")
 
