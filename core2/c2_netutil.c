@@ -104,6 +104,74 @@ static void *memcpy_fast(void *dst, const void *src, size_t n)
     return dst;
 }
 
+/* Copy + Internet checksum of the copied bytes in one pass (lwIP's
+ * LWIP_CHKSUM_COPY, used by tcp_write with LWIP_CHECKSUM_ON_COPY).  Same
+ * structure as memcpy_fast; each 64-bit word is summed as it is stored.
+ * Address parity is taken from dst (the sum is start-relative, so either
+ * buffer works; dst is the one we align). */
+static uint16_t chksum_copy_fast(void *dst, const void *src, size_t n)
+{
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    int odd_start = (int)((uintptr_t)d & 1u);
+    uint64_t acc = 0;
+
+    while (n && ((uintptr_t)d & 7u)) {
+        uint8_t b = *s++;
+        acc += ((uintptr_t)d & 1u) ? ((uint64_t)b << 8) : (uint64_t)b;
+        *d++ = b; n--;
+    }
+    size_t w = n >> 3;
+    uint64_t *dw = (uint64_t *)(void *)d;
+    unsigned k = (unsigned)((uintptr_t)s & 7u);
+    if (k == 0) {
+        const uint64_t *sw = (const uint64_t *)(const void *)s;
+        for (size_t i = 0; i < w; i++) {
+            uint64_t v = sw[i];
+            dw[i] = v;
+            acc += (v & 0xFFFFFFFFu) + (v >> 32);
+        }
+    } else {
+        const uint64_t *sw = (const uint64_t *)(const void *)(s - k);
+        unsigned sh = 8u * k;
+        uint64_t lo = *sw++;
+        for (size_t i = 0; i < w; i++) {
+            uint64_t hi = *sw++;
+            uint64_t v = (lo >> sh) | (hi << (64u - sh));
+            dw[i] = v;
+            acc += (v & 0xFFFFFFFFu) + (v >> 32);
+            lo = hi;
+        }
+    }
+    d += w << 3; s += w << 3; n &= 7u;
+    while (n--) {
+        uint8_t b = *s++;
+        acc += ((uintptr_t)d & 1u) ? ((uint64_t)b << 8) : (uint64_t)b;
+        *d++ = b;
+    }
+    acc = (acc & 0xFFFFFFFFu) + (acc >> 32);
+    acc = (acc & 0xFFFFFFFFu) + (acc >> 32);
+    acc = (acc & 0xFFFFu) + (acc >> 16);
+    acc = (acc & 0xFFFFu) + (acc >> 16);
+    acc = (acc & 0xFFFFu) + (acc >> 16);
+    uint16_t r = (uint16_t)acc;
+    return odd_start ? (uint16_t)((r << 8) | (r >> 8)) : r;
+}
+
+static int fast_chksum_copy_ok;
+
+uint16_t c2_chksum_copy(void *dst, const void *src, uint16_t len)
+{
+    if (fast_chksum_copy_ok) {
+        PROF_PUSH(PROF_TCP_WRITE);
+        uint16_t r = chksum_copy_fast(dst, src, len);
+        PROF_POP();
+        return r;
+    }
+    c2_memcpy(dst, src, len);
+    return c2_chksum(dst, len);
+}
+
 static void *memcpy_bytes(void *dst, const void *src, size_t n)
 {
     uint8_t *d = (uint8_t *)dst;
@@ -166,4 +234,28 @@ void c2_netutil_selftest(void)
     fast_memcpy_ok = (bad == 0);
     printf("core2: memcpy self-test %s\n", bad ? "FAIL (using byte copy)" : "pass");
     printf("core2: memcpy cases=%u bad=%u\n", cases, bad);
+
+    /* Copy+checksum: bytes must match, and the sum must equal lwIP's
+     * reference checksum of the destination. */
+    bad = 0; cases = 0;
+    for (int so = 0; so < 8; so++) {
+        for (int dof = 0; dof < 8; dof++) {
+            for (unsigned li = 0; li < sizeof(lens) / sizeof(lens[0]); li++) {
+                int len = lens[li];
+                if (so + len > (int)sizeof(st_a) - 8 || dof + len > (int)sizeof(st_b) - 8) continue;
+                cases++;
+                for (int i = 0; i < (int)sizeof(st_b); i++) st_b[i] = 0xA5;
+                uint16_t got = chksum_copy_fast(st_b + dof, st_a + so, (size_t)len);
+                int ok = (got == lwip_standard_chksum(st_b + dof, len));
+                for (int i = 0; ok && i < (int)sizeof(st_b); i++) {
+                    uint8_t want = (i >= dof && i < dof + len) ? st_a[so + i - dof] : 0xA5;
+                    if (st_b[i] != want) ok = 0;
+                }
+                if (!ok) bad++;
+            }
+        }
+    }
+    fast_chksum_copy_ok = (bad == 0) && fast_chksum_ok;
+    printf("core2: chksum_copy self-test %s\n", fast_chksum_copy_ok ? "pass" : "FAIL (two-pass)");
+    printf("core2: chksum_copy cases=%u bad=%u\n", cases, bad);
 }

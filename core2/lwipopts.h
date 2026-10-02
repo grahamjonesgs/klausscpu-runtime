@@ -85,6 +85,12 @@ void *c2_memcpy(void *dst, const void *src, size_t n);
 #define MEMCPY(dst, src, len)       c2_memcpy(dst, src, len)
 #define SMEMCPY(dst, src, len)      c2_memcpy(dst, src, len)
 
+// tcp_write(COPY) checksums the payload while copying it in; segments then
+// only checksum their headers at output time.
+uint16_t c2_chksum_copy(void *dst, const void *src, uint16_t len);
+#define LWIP_CHECKSUM_ON_COPY       1
+#define LWIP_CHKSUM_COPY(dst, src, len) c2_chksum_copy(dst, src, len)
+
 // lwip_port/ethernetif.c: copy TX frames into the MAC's slot SRAM as aligned
 // 64-bit writes.  Frames start 2 bytes off a 4-byte boundary (lwIP aligns the
 // transport payload; the 54 header bytes sit in front), so the 32-bit path

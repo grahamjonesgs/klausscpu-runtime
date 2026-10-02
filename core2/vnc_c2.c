@@ -321,6 +321,22 @@ static void pump(void)
         size_t len = 0;
         int bytes = C.fmt.bpp / 8;
         uint64_t t_enc = REG_CLOCK_MS;
+        if (!C.upd_hex && fmt_native && C.ux == 0 &&
+            AMP_FB_DESC->stride == (uint32_t)C.uw * 2u) {
+            /* Full-width native rows are contiguous in the framebuffer: hand
+             * them straight to tcp_write, whose copy-with-checksum
+             * (LWIP_CHECKSUM_ON_COPY) reads DDR once — no stage pass. */
+            size_t row_bytes = (size_t)C.uw * 2u;
+            int rows = (int)(STAGE_SZ / row_bytes);
+            if (rows > C.uy + C.uh - C.cur_y) rows = C.uy + C.uh - C.cur_y;
+            if (rows <= 0) { update_end(); break; }
+            len = (size_t)rows * row_bytes;
+            if (send_bytes(fb_row(C.cur_y), len) != ERR_OK) return;   /* retry on sent() */
+            C.cur_y += rows;
+            C.upd_bytes += (uint32_t)len;
+            if (C.cur_y >= C.uy + C.uh) update_end();
+            continue;
+        }
         if (!C.upd_hex) {
             size_t row_bytes = (size_t)C.uw * bytes;
             while (C.cur_y < C.uy + C.uh && len + row_bytes <= STAGE_SZ) {
