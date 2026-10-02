@@ -3,8 +3,9 @@
  * both images).  Both cores see DDR at the same addresses, so shared state
  * is a plain struct at an agreed address.  Cache rule: core 1 writes fields
  * then CACHE-FLUSHes (the whole descriptor sits in one 32 B line, so a
- * single flush publishes it atomically); core 1 INVALIDATEs before reading
- * fields core 2 wrote.  Core 2's accesses are uncached — no maintenance.
+ * single flush publishes it atomically); core 1 drops its cached copy before
+ * reading fields core 2 wrote (INVALIDATE, or the eviction read in
+ * amp_host.c).  Core 2's accesses are uncached — no maintenance.
  *
  * Shared block: 0x07D0_0000 (below the core-2 text window at 0x07E0_0000,
  * above anything core 1's baremetal/Zephyr images or heaps reach).
@@ -46,8 +47,28 @@ typedef struct {
     volatile uint32_t prof_tx_ms; /* core 2: ms in tcp_write/tcp_output       */
     volatile uint32_t prof_rx_ms; /* core 2: ms in ethernetif_input+timeouts  */
     volatile uint32_t pad1;
-} amp_fb_desc_t;                  /* 64 B = exactly two cache lines          */
+    /* ---- line 2: written by core 1 only — optional 8-bit indexed source ----
+     * A producer that renders palette-indexed pixels (doom) publishes them
+     * here so core 2 can serve VNC clients in 8-bit colour-map format (half
+     * the bytes, no conversion anywhere).  idx_base == 0: not available.     */
+    volatile uint32_t idx_base;   /* DDR address of index (0,0), 1 B/pixel,
+                                     same width/height/dirty rect as fb      */
+    volatile uint32_t idx_stride; /* bytes per row                            */
+    volatile uint32_t pal_base;   /* DDR address of 256 x u32 0x00RRGGBB      */
+    volatile uint32_t pal_seq;    /* core 1: ++ whenever the palette changes  */
+    volatile uint32_t pad2[4];
+    /* ---- line 3: written by core 2 only ----
+     * want_rgb565 != 0 while a client that needs the RGB565 framebuffer is
+     * connected; a producer with an indexed source may skip filling fb
+     * otherwise.  Core 1 never writes this line, so its cached copy stays
+     * clean and can be dropped by eviction (see amp_host.c).                */
+    volatile uint32_t want_rgb565;
+    volatile uint32_t pad3[7];
+} amp_fb_desc_t;                  /* 128 B = exactly four cache lines        */
 
 #define AMP_FB_DESC  ((amp_fb_desc_t *)(uintptr_t)AMP_SHM_BASE)
+
+/* 256 x u32 palette for the indexed source, right after the descriptor. */
+#define AMP_PALETTE  ((volatile uint32_t *)(uintptr_t)(AMP_SHM_BASE + 0x100u))
 
 #endif /* AMP_PROTO_H */

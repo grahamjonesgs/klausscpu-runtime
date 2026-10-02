@@ -108,6 +108,47 @@ int amp_host_init(void)
 	return 0;
 }
 
+int amp_set_indexed(const void *idx, uint32_t stride)
+{
+	amp_fb_desc_t *d = AMP_FB_DESC;
+	uint32_t base = (uint32_t)(uintptr_t)idx;
+
+	if (base < C2_LRAM_SIZE) {
+		LOG_ERR("index buffer at 0x%08x is inside core 2's BRAM shadow", base);
+		return -EINVAL;
+	}
+	d->idx_stride = stride;
+	d->pal_base   = (uint32_t)(uintptr_t)AMP_PALETTE;
+	d->idx_base   = base;
+	cache_flush();
+	LOG_INF("indexed source @0x%08x stride %u", base, (unsigned)stride);
+	return 0;
+}
+
+void amp_set_palette(const uint32_t rgb[256])
+{
+	for (int i = 0; i < 256; i++) {
+		AMP_PALETTE[i] = rgb[i];
+	}
+	AMP_FB_DESC->pal_seq++;          /* published by the next post's FLUSH */
+}
+
+/* Read core 2's want_rgb565 without a whole-cache INVALIDATE.  The D-cache is
+ * 2-way LRU with 32 KB per way (CACHE_INFO: 1024 sets x 32 B), so addresses
+ * 32 KB apart share a set.  Core 1 never writes descriptor line 3, so its
+ * cached copy is clean: touching three other lines of the same set evicts it
+ * without a writeback, and the following read misses and comes from DDR.
+ * The conflict addresses are unused shared-block memory. */
+bool amp_want_rgb565(void)
+{
+	volatile const uint32_t *p = &AMP_FB_DESC->want_rgb565;
+
+	for (uintptr_t k = 1; k <= 3; k++) {
+		(void)*(volatile const uint32_t *)((uintptr_t)p + k * 0x8000u);
+	}
+	return *p != 0;
+}
+
 void amp_post_frame(int x, int y, int w, int h)
 {
 	amp_fb_desc_t *d = AMP_FB_DESC;

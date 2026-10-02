@@ -18,7 +18,10 @@
  * (native RGB565 LE), SetPixelFormat, SetEncodings (Hextile detected),
  * FramebufferUpdateRequest (incremental: served when core 1 posts a new
  * seq; non-incremental: served immediately), Key/Pointer/CutText parsed
- * and dropped.
+ * and dropped.  8-bit colour-map pixel format when core 1 publishes an
+ * indexed source (descriptor idx_base): indices sent raw, the palette as
+ * SetColourMapEntries whenever pal_seq changes; descriptor want_rgb565
+ * tells core 1 whether the RGB565 framebuffer is needed at all.
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,6 +36,14 @@
 #define VNC_PORT      5900
 #define DESKTOP_NAME  "KlaussCPU core2"
 #define STAGE_SZ      4096
+/* Direct (no stage) sends of 8-bit colour-map rows: bytes per tcp_write.
+ * Small chunks return to the main loop sooner, so the MAC's two RX slots are
+ * drained more often while a frame streams — at 3840 B the client's
+ * back-to-back ACK+request frames overflowed them (~200 ms retransmit
+ * stalls; 8-bit 15.7 -> 20.6 fps with 1280).  RGB565 keeps STAGE_SZ: it
+ * didn't drop, and its 2x bytes made the extra per-call cost a net loss
+ * (16.4 -> 13.4 fps at 1280). */
+#define DIRECT_SZ     1280
 #define HT_TILE_MAX   (1 + 16 * 16 * 4)
 #define HT_RETRY      32
 
@@ -55,6 +66,10 @@ static const struct pixfmt native_fmt = {
 };
 static uint32_t lut_r[32], lut_g[64], lut_b[32];
 static bool     fmt_native;
+/* Client asked for 8-bit colour-map pixels and core 1 publishes an indexed
+ * source (descriptor idx_base): serve the indices as-is, with the palette
+ * sent as SetColourMapEntries whenever pal_seq changes. */
+static bool     fmt_cmap;
 
 static void be16(uint8_t *p, uint16_t v) { p[0] = v >> 8; p[1] = (uint8_t)v; }
 static void be32(uint8_t *p, uint32_t v)
@@ -235,16 +250,35 @@ static struct {
     int       cur_y;                /* raw: next row; hex: next tile row     */
     int       cur_tx;               /* hex: next tile column                 */
     uint32_t  upd_bytes;            /* payload bytes so far (adaptive check) */
+
+    bool      pal_sent;             /* colour map: palette sent at least once */
+    uint32_t  pal_seq;              /* colour map: pal_seq last sent          */
 } C;
 
 static uint8_t stage[STAGE_SZ] __attribute__((aligned(8)));  /* fb_fetch writes u64s */
 static uint16_t rowbuf[1024] __attribute__((aligned(8)));   /* u64-filled by fb_fetch */
+static uint8_t palmsg[6 + 256 * 6];                         /* SetColourMapEntries */
+
+/* Tell core 1 whether the RGB565 framebuffer is needed (amp_proto.h line 3):
+ * yes while a connected client takes any format but the colour map. */
+static void publish_want(void)
+{
+    AMP_FB_DESC->want_rgb565 = (C.pcb && C.st == S_MSG && !fmt_cmap) ? 1u : 0u;
+}
 
 static void conn_reset(void)
 {
     memset(&C, 0, sizeof(C));
     C.fmt = native_fmt;
     build_luts(&C.fmt);
+    fmt_cmap = false;
+    publish_want();
+}
+
+static inline const uint8_t *idx_row(int y)
+{
+    const amp_fb_desc_t *d = AMP_FB_DESC;
+    return (const uint8_t *)(uintptr_t)(d->idx_base + (uint32_t)y * d->idx_stride);
 }
 
 /* Coarse profile (REG_CLOCK_MS granularity, summed per 5 s heartbeat): where
@@ -277,15 +311,39 @@ static void conn_close(void)
     printf("core2 vnc: client disconnected\n");
 }
 
+/* Colour map: (re)send the palette ahead of an update when core 1 has bumped
+ * pal_seq.  seq is read before the entries, so a change racing this send is
+ * caught by the next update.  tcp_write is all-or-nothing: on failure the
+ * palette simply goes with a later update. */
+static void send_palette_if_changed(void)
+{
+    uint32_t seq = AMP_FB_DESC->pal_seq;
+    if (C.pal_sent && seq == C.pal_seq) return;
+    palmsg[0] = 1; palmsg[1] = 0;
+    be16(palmsg + 2, 0); be16(palmsg + 4, 256);
+    for (int i = 0; i < 256; i++) {
+        uint32_t v = AMP_PALETTE[i];
+        uint8_t *p = palmsg + 6 + i * 6;
+        be16(p + 0, (uint16_t)(((v >> 16) & 0xFFu) * 257u));
+        be16(p + 2, (uint16_t)(((v >> 8) & 0xFFu) * 257u));
+        be16(p + 4, (uint16_t)((v & 0xFFu) * 257u));
+    }
+    if (send_bytes(palmsg, sizeof(palmsg)) == ERR_OK) {
+        C.pal_sent = true;
+        C.pal_seq = seq;
+    }
+}
+
 /* ── update pump ───────────────────────────────────────────────────────── */
 static void update_begin(int x, int y, int w, int h)
 {
     const amp_fb_desc_t *d = AMP_FB_DESC;
+    if (fmt_cmap) send_palette_if_changed();
     C.active = true;
     C.ux = x; C.uy = y; C.uw = w; C.uh = h;
     C.cur_y = y; C.cur_tx = x;
     C.upd_bytes = 0;
-    C.upd_hex = C.hextile && (C.ht_skip == 0);
+    C.upd_hex = C.hextile && !fmt_cmap && (C.ht_skip == 0);
     if (C.hextile && C.ht_skip) C.ht_skip--;
     C.served_seq = d->seq;
 
@@ -321,17 +379,22 @@ static void pump(void)
         size_t len = 0;
         int bytes = C.fmt.bpp / 8;
         uint64_t t_enc = REG_CLOCK_MS;
-        if (!C.upd_hex && fmt_native && C.ux == 0 &&
-            AMP_FB_DESC->stride == (uint32_t)C.uw * 2u) {
-            /* Full-width native rows are contiguous in the framebuffer: hand
-             * them straight to tcp_write, whose copy-with-checksum
-             * (LWIP_CHECKSUM_ON_COPY) reads DDR once — no stage pass. */
-            size_t row_bytes = (size_t)C.uw * 2u;
-            int rows = (int)(STAGE_SZ / row_bytes);
+        bool direct565 = fmt_native && AMP_FB_DESC->stride == (uint32_t)C.uw * 2u;
+        bool directidx = fmt_cmap && AMP_FB_DESC->idx_stride == (uint32_t)C.uw;
+        if (!C.upd_hex && C.ux == 0 && (direct565 || directidx)) {
+            /* Full-width rows (RGB565 framebuffer, or 8-bit indices for a
+             * colour-map client) are contiguous: hand them straight to
+             * tcp_write, whose copy-with-checksum (LWIP_CHECKSUM_ON_COPY)
+             * reads DDR once — no stage pass. */
+            size_t row_bytes = (size_t)C.uw * (directidx ? 1u : 2u);
+            int rows = (int)((directidx ? DIRECT_SZ : STAGE_SZ) / row_bytes);
+            if (rows < 1) rows = 1;
             if (rows > C.uy + C.uh - C.cur_y) rows = C.uy + C.uh - C.cur_y;
             if (rows <= 0) { update_end(); break; }
             len = (size_t)rows * row_bytes;
-            if (send_bytes(fb_row(C.cur_y), len) != ERR_OK) return;   /* retry on sent() */
+            const void *src = directidx ? (const void *)idx_row(C.cur_y)
+                                        : (const void *)fb_row(C.cur_y);
+            if (send_bytes(src, len) != ERR_OK) return;   /* retry on sent() */
             C.cur_y += rows;
             C.upd_bytes += (uint32_t)len;
             if (C.cur_y >= C.uy + C.uh) update_end();
@@ -340,7 +403,12 @@ static void pump(void)
         if (!C.upd_hex) {
             size_t row_bytes = (size_t)C.uw * bytes;
             while (C.cur_y < C.uy + C.uh && len + row_bytes <= STAGE_SZ) {
-                if (fmt_native && (((uintptr_t)(stage + len)) & 7u) == 0) {
+                if (fmt_cmap) {
+                    /* Partial-width colour-map rect: copy the index span. */
+                    PROF_PUSH(PROF_FETCH);
+                    c2_memcpy(stage + len, idx_row(C.cur_y) + C.ux, row_bytes);
+                    PROF_POP();
+                } else if (fmt_native && (((uintptr_t)(stage + len)) & 7u) == 0) {
                     /* Rows go straight into stage (fb_fetch stores u64s, so
                      * only when 8-aligned — always, for full-width doom
                      * frames): no rowbuf -> stage memcpy. */
@@ -446,13 +514,29 @@ static void handle_msg(void)
         C.st = S_MSG;
         printf("core2 vnc: client connected\n");
         AMP_FB_DESC->clients = 1;
+        publish_want();
         break;
     default:
         switch (C.rx[0]) {
         case 0:
             parse_pixfmt(&C.fmt, C.rx + 4);
-            build_luts(&C.fmt);
-            printf("core2 vnc: fmt %u bpp %s\n", C.fmt.bpp, fmt_native ? "native" : "conv");
+            if (C.fmt.bpp == 8 && !C.fmt.true_colour) {
+                if (d->idx_base == 0) {
+                    /* Colour map needs core 1's indexed source. */
+                    printf("core2 vnc: colour-map format unsupported here\n");
+                    conn_close();
+                    return;
+                }
+                fmt_cmap = true;
+                fmt_native = false;
+                C.pal_sent = false;
+                printf("core2 vnc: fmt 8 bpp colour map\n");
+            } else {
+                fmt_cmap = false;
+                build_luts(&C.fmt);
+                printf("core2 vnc: fmt %u bpp %s\n", C.fmt.bpp, fmt_native ? "native" : "conv");
+            }
+            publish_want();
             break;
         case 2: {
             uint16_t n = rd16(C.rx + 2);
@@ -520,9 +604,13 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 {
     (void)arg; (void)err;
     if (p == NULL) { conn_close(); return ERR_OK; }
-    for (struct pbuf *q = p; q; q = q->next) {
+    for (struct pbuf *q = p; q && C.pcb == pcb; q = q->next) {
         const uint8_t *d = (const uint8_t *)q->payload;
-        for (u16_t i = 0; i < q->len; i++) feed(d[i]);
+        for (u16_t i = 0; i < q->len && C.pcb == pcb; i++) feed(d[i]);
+    }
+    if (C.pcb != pcb) {             /* a message handler closed the connection */
+        pbuf_free(p);
+        return ERR_OK;
     }
     tcp_recved(pcb, p->tot_len);
     pbuf_free(p);

@@ -83,14 +83,40 @@ void DG_DrawFrame(void)
 
 #ifdef CMAP256
 	const uint8_t *src = (const uint8_t *)DG_ScreenBuffer;
+	bool convert = true;
+
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+	/* AMP: also publish Doom's 8-bit frame + palette, so core 2 can serve
+	 * colour-map VNC clients directly (needs the framebuffer's geometry).
+	 * Fill the RGB565 framebuffer only while a client needs it. */
+	static bool idx_published;
+	const bool same_geometry = FB_XOFF == 0 && FB_YOFF == 0 &&
+				   FB_WIDTH == DOOMGENERIC_RESX && FB_HEIGHT == DOOMGENERIC_RESY;
+
+	if (same_geometry) {
+		if (!idx_published) {
+			idx_published = (amp_set_indexed(src, DOOMGENERIC_RESX) == 0);
+		}
+		convert = !idx_published || amp_want_rgb565();
+	}
+#endif
 
 	if (palette_changed) {
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+		uint32_t rgb[256];
+#endif
 		for (int i = 0; i < 256; i++) {
 			pal565[i] = fb_rgb(colors[i].r, colors[i].g, colors[i].b);
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+			rgb[i] = ((uint32_t)colors[i].r << 16) | ((uint32_t)colors[i].g << 8) | colors[i].b;
+#endif
 		}
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+		amp_set_palette(rgb);
+#endif
 		palette_changed = false;
 	}
-	for (int y = 0; y < DOOMGENERIC_RESY; y++) {
+	for (int y = 0; convert && y < DOOMGENERIC_RESY; y++) {
 		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
 		const uint8_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
 		int x = 0;
