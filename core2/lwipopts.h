@@ -97,4 +97,13 @@ uint16_t c2_chksum_copy(void *dst, const void *src, uint16_t len);
 // never engaged and every byte was its own MMIO transaction.
 #define ETH_TX_WIDE64               1
 
+// lwip_port/ethernetif.c: move received frames out of the MAC's two RX slots
+// into an ordered FIFO before processing and on every transmit, so a peer's
+// back-to-back frames aren't dropped.
+#define ETH_RX_QUEUE                1
+
+// lwip_port/ethernetif.c: wait for slot 0 to drain before reusing it, and pad
+// runt frames to 60 bytes (the switch drops shorter ones).
+#define ETH_TX_SAFE                 1
+
 #endif // LWIP_LWIPOPTS_H

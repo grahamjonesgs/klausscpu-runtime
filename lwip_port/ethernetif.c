@@ -125,6 +125,31 @@ static err_t low_level_init(struct netif *netif) {
     return ERR_OK;
 }
 
+#ifdef ETH_RX_QUEUE
+// RX queue.  The MAC has only two RX slots, and lwIP takes far longer to
+// process a frame than the next ones take to arrive: a peer sending 3+ frames
+// back to back (e.g. ACKs + a request) loses the third, which costs it a
+// ~200 ms retransmission timeout.  So frames are moved out of the slots as
+// soon as possible — before each one is processed, and on every transmit
+// (transmits happen inside processing) — into one FIFO.  Every frame goes
+// through it, so lwIP still sees them in arrival order (TCP_QUEUE_OOSEQ is
+// 0: out-of-order segments would simply be dropped).  Bounded below
+// PBUF_POOL_SIZE so RX pbufs remain available.
+#define RX_Q_LEN 6
+static struct pbuf *rx_q[RX_Q_LEN];
+static unsigned rx_q_head, rx_q_count;
+static struct pbuf *low_level_input(struct netif *netif);
+
+static void rx_drain(void) {
+    while (rx_q_count < RX_Q_LEN) {
+        struct pbuf *p = low_level_input(NULL);
+        if (p == NULL) break;
+        rx_q[(rx_q_head + rx_q_count) % RX_Q_LEN] = p;
+        rx_q_count++;
+    }
+}
+#endif
+
 // ── low_level_output — pbuf chain → TX slot SRAM → kick MAC ──────────────
 
 static err_t low_level_output(struct netif *netif, struct pbuf *p) {
@@ -135,15 +160,39 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p) {
         return ERR_BUF;
     }
 
+#ifdef ETH_RX_QUEUE
+    rx_drain();
+#endif
+
     PROF_PUSH(PROF_TX_WAIT);
+#ifdef ETH_TX_SAFE
+    // Every frame goes through slot 0, so the previous frame must have left
+    // it before we overwrite it: LiteEth's SRAM reader pops its command FIFO
+    // only after reading the frame out, so LEVEL == 0 means slot 0 is free.
+    // (TX_READY only means "FIFO not full" — with a fast copy that let us
+    // rewrite slot 0 mid-transmit.)
+    while (REG_ETH_TX_LEVEL != 0) {}
+#else
     while (!REG_ETH_TX_READY) {}   // wait if TX FIFO full
+#endif
     PROF_POP();
 
     PROF_PUSH(PROF_TX_COPY);
     pbuf_to_sram(ETH_TX_SLOT_PTR(0), p);
     PROF_POP();
+    uint32_t tx_len = p->tot_len;
+#ifdef ETH_TX_SAFE
+    // Pad runts to the 60-byte Ethernet minimum: this MAC doesn't, and the
+    // switch silently drops shorter frames — e.g. every 54-byte pure TCP ACK
+    // (the Zephyr driver, eth_klausscpu.c, already pads for the same reason).
+    if (tx_len < 60u) {
+        volatile uint8_t *slot = ETH_TX_SLOT_PTR(0);
+        for (uint32_t i = tx_len; i < 60u; i++) slot[i] = 0;
+        tx_len = 60u;
+    }
+#endif
     REG_ETH_TX_SLOT   = 0;
-    REG_ETH_TX_LENGTH = p->tot_len;
+    REG_ETH_TX_LENGTH = tx_len;
     REG_ETH_TX_START  = 1;
 
     LINK_STATS_INC(link.xmit);
@@ -194,6 +243,17 @@ static struct pbuf *low_level_input(struct netif *netif) {
 
 void ethernetif_input(struct netif *netif) {
     struct pbuf *p;
+
+#ifdef ETH_RX_QUEUE
+    for (;;) {
+        rx_drain();                 // newest frames join the tail first
+        if (rx_q_count == 0) return;
+        p = rx_q[rx_q_head];
+        rx_q_head = (rx_q_head + 1) % RX_Q_LEN;
+        rx_q_count--;
+        if (netif->input(p, netif) != ERR_OK) pbuf_free(p);
+    }
+#endif
 
     while ((p = low_level_input(netif)) != NULL) {
         err_t err = netif->input(p, netif);
