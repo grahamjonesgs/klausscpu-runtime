@@ -93,8 +93,28 @@ void DG_DrawFrame(void)
 	for (int y = 0; y < DOOMGENERIC_RESY; y++) {
 		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
 		const uint8_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
+		int x = 0;
 
-		for (int x = 0; x < DOOMGENERIC_RESX; x++) {
+		/* 8 pixels per step: one u64 load of indices, two u64 stores
+		 * (little-endian: pixel 0 in the low 16 bits). */
+		if ((((uintptr_t)drow | (uintptr_t)srow) & 7u) == 0) {
+			const uint64_t *s64 = (const uint64_t *)(const void *)srow;
+			uint64_t *d64 = (uint64_t *)(void *)drow;
+
+			for (; x + 8 <= DOOMGENERIC_RESX; x += 8) {
+				uint64_t i = *s64++;
+
+				*d64++ = (uint64_t)pal565[i & 0xFF] |
+					 ((uint64_t)pal565[(i >> 8) & 0xFF] << 16) |
+					 ((uint64_t)pal565[(i >> 16) & 0xFF] << 32) |
+					 ((uint64_t)pal565[(i >> 24) & 0xFF] << 48);
+				*d64++ = (uint64_t)pal565[(i >> 32) & 0xFF] |
+					 ((uint64_t)pal565[(i >> 40) & 0xFF] << 16) |
+					 ((uint64_t)pal565[(i >> 48) & 0xFF] << 32) |
+					 ((uint64_t)pal565[i >> 56] << 48);
+			}
+		}
+		for (; x < DOOMGENERIC_RESX; x++) {
 			drow[x] = pal565[srow[x]];
 		}
 	}
