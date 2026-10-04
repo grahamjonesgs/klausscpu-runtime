@@ -247,8 +247,22 @@ struct eth_klausscpu_data {
 
 /* ── PHY + MAC init ──────────────────────────────────────────────────────── */
 
+/* AMP core 2's mailbox (runtime mmio.h REG_C2_*).  The LiteEth ownership bit
+ * lives in core 2's subsystem and survives a core-1 program reload, so after
+ * any AMP image has run, core 2 still owns the MAC and this driver would see
+ * an all-zero window (PHY ID 0x0000).  This image drives the MAC itself:
+ * stop core 2 and take ownership back before touching it. */
+#define C2_CTRL        (*(volatile uint64_t *)(unsigned long)0xF0100000u)
+#define C2_ETH_OWNER   (*(volatile uint64_t *)(unsigned long)0xF0100038u)
+
 static void eth_hw_init(void)
 {
+	if (C2_ETH_OWNER & 1u) {
+		LOG_INF("reclaiming LiteEth from AMP core 2");
+	}
+	C2_CTRL = 0;           /* hold core 2 in reset */
+	C2_ETH_OWNER = 0;      /* core 1 owns the MAC */
+
 	ETH_CTRL_RESET = 1;
 	k_busy_wait(10000);
 	ETH_CTRL_RESET = 0;
