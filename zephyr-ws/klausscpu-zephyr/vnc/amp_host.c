@@ -117,11 +117,15 @@ int amp_set_indexed(const void *idx, uint32_t stride)
 		LOG_ERR("index buffer at 0x%08x is inside core 2's BRAM shadow", base);
 		return -EINVAL;
 	}
+	bool first = (d->idx_base == 0);
+
 	d->idx_stride = stride;
 	d->pal_base   = (uint32_t)(uintptr_t)AMP_PALETTE;
 	d->idx_base   = base;
 	cache_flush();
-	LOG_INF("indexed source @0x%08x stride %u", base, (unsigned)stride);
+	if (first) {   /* callers may re-point it per frame (double buffering) */
+		LOG_INF("indexed source @0x%08x stride %u", base, (unsigned)stride);
+	}
 	return 0;
 }
 
