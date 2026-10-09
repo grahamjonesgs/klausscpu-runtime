@@ -1,13 +1,14 @@
 /*
  * framebuffer.h — in-RAM RGB565 framebuffer for the VNC server.
  *
- * The framebuffer lives in normal SRAM (no VGA scanout hardware involved): a
- * VGA controller would read this and drive a monitor's RGB pins, but here the
- * VNC server (vnc_server.c) reads it and ships pixels over the network instead.
+ * The framebuffer lives in normal RAM.  The VNC server (vnc_server.c) or AMP
+ * core 2 reads it and ships pixels over the network; with CONFIG_KLAUSSCPU_VGA
+ * the board's VGA port also scans it straight out of DDR to a monitor
+ * (vga_out.c — which needs it flushed from the CPU cache; fb_mark_dirty()
+ * arranges that).
  *
  * Native format is RGB565, little-endian, one uint16_t per pixel.  Drawing code
- * (and, later, an FPGA framebuffer region) writes pixels; the VNC server reads
- * them.  Because both run on different threads, batch accesses under fb_lock();
+ * writes pixels; the VNC server and VGA read them.  Because both run on different threads, batch accesses under fb_lock();
  * the VNC server copies pixels out under the lock and sends them *unlocked*.
  */
 

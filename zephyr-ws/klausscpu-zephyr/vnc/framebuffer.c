@@ -7,11 +7,16 @@
 #include <string.h>
 
 #include "framebuffer.h"
+#ifdef CONFIG_KLAUSSCPU_VGA
+#include "vga_out.h"
+#endif
 
 /* ~600 KiB in SRAM (the board has ~128 MiB, so this is negligible). */
 /* 8-byte aligned: AMP core 2 reads the fb through its uncached DDR window
- * with 64-bit loads (vnc_c2.c fb_fetch) — one burst per 4 px instead of 4. */
-static uint16_t fb[FB_WIDTH * FB_HEIGHT] __attribute__((aligned(8)));
+ * with 64-bit loads (vnc_c2.c fb_fetch) — one burst per 4 px instead of 4.
+ * 32-byte aligned: the VGA scanout (CONFIG_KLAUSSCPU_VGA) reads whole 32 B
+ * DDR lines. */
+static uint16_t fb[FB_WIDTH * FB_HEIGHT] __attribute__((aligned(32)));
 
 /* Guards both the pixels and the dirty box below. */
 static K_MUTEX_DEFINE(fb_mutex);
@@ -39,6 +44,9 @@ static void dirty_add_locked(int x, int y, int w, int h)
 		return;
 	}
 
+#ifdef CONFIG_KLAUSSCPU_VGA
+	vga_out_kick();                   /* VGA: flush to DDR on the next frame */
+#endif
 	if (dirty_x0 >= dirty_x1) {       /* box was empty */
 		dirty_x0 = x;  dirty_y0 = y;
 		dirty_x1 = x1; dirty_y1 = y1;

@@ -1,8 +1,9 @@
-# Doom on KlaussCPU (over VNC)
+# Doom on KlaussCPU (over VNC and VGA)
 
 A port of [doomgeneric](https://github.com/ozkl/doomgeneric) to KlaussCPU/Zephyr
 that renders into the VNC module's in-RAM framebuffer — so Doom is playable over
-a VNC client with no VGA hardware.
+a VNC client — and shows on a monitor through the board's VGA port (see
+"VGA output" below).
 
 ## What's tracked vs fetched
 
@@ -49,6 +50,27 @@ fires, Space uses/opens doors, Shift runs, Esc/Enter/y/n drive the menu, and
 1–7 select weapons. (With no VNC client connected, Doom still falls back to its
 auto-playing title-screen demos.) Mouse input is not implemented — doomgeneric's
 platform API is keyboard-only (`DG_GetKey`), so there is no pointer hook.
+
+## VGA output
+
+Every build also drives the board's **VGA port** (`CONFIG_KLAUSSCPU_VGA=y` in
+`prj.conf`; KlaussCPU `VGA_PLAN.md`). Doom's 8-bit frames go straight to the
+VGA's palette mode through `vga_out_show_indexed()`. They are double-buffered
+and flipped at vblank, so there is no tearing, letterboxed 320×200 → 640×400
+in the 640×480 picture. VNC and VGA show the same game.
+
+For the fastest Doom, build the VGA-only variant: no networking, no VNC and
+no RGB565 conversion.
+
+```sh
+west build -p always -b nexys_a7 "$MOD/apps/doom" --build-dir build_doom_vga --   -DEXTRA_CONF_FILE=vga.conf <the usual -D... flags from step 2>
+```
+
+Measured on the board: about 52 fps on the title screen and 16–25 fps in the
+attract-mode demos. The VGA copy and flush cost about 2 ms per frame, with 0
+display underflows; the profile line prints `vga_underflows`. **VGA-only has
+no keyboard** (input arrives via VNC), so Doom plays its demos. To play, use a
+VNC build; the game appears on both screens.
 
 ## Notes / limits
 
