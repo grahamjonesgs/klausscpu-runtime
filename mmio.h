@@ -202,17 +202,20 @@ static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_
 #define INTMASK_ALL     1u
 
 /* ── VGA output — 0xF011_xxxx (KlaussCPU VGA_PLAN.md) ───────────────────── */
-/* 640x480@60 (59.5 Hz). All registers 64-bit, 8 B apart.                  */
+/* 640x480@60 (59.5 Hz). All registers 64-bit, 8 B apart. CTRL scanout   */
+/* bits, FB_BASE, STRIDE (32 B multiple), HEIGHT and VSTART take effect at  */
+/* the next vblank; flush the cache before handing a frame to the display. */
 
 #define VGA_BASE              (MMIO_BASE + 0x00110000u)
 
 #define REG_VGA_CTRL          (*(volatile uint64_t *)(VGA_BASE + 0x0000u))
-#define REG_VGA_FB_BASE       (*(volatile uint64_t *)(VGA_BASE + 0x0008u))  /* latched at vblank */
+#define REG_VGA_FB_BASE       (*(volatile uint64_t *)(VGA_BASE + 0x0008u))  /* 32 B aligned; latched at vblank */
 #define REG_VGA_STRIDE        (*(volatile uint64_t *)(VGA_BASE + 0x0010u))
 #define REG_VGA_STATUS        (*(volatile uint64_t *)(VGA_BASE + 0x0018u))
 #define REG_VGA_BORDER        (*(volatile uint64_t *)(VGA_BASE + 0x0020u))
 #define REG_VGA_VSTART        (*(volatile uint64_t *)(VGA_BASE + 0x0028u))
 #define REG_VGA_FB_ACTIVE     (*(volatile uint64_t *)(VGA_BASE + 0x0030u))
+#define REG_VGA_HEIGHT        (*(volatile uint64_t *)(VGA_BASE + 0x0038u))  /* source lines */
 #define REG_VGA_PALETTE(n)    (*(volatile uint64_t *)(uintptr_t)(VGA_BASE + 0x0800u + 8u*(n)))  /* [11:0] RGB444 */
 
 #define VGA_CTRL_SCANOUT_EN   (1u << 0)

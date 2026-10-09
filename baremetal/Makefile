@@ -369,6 +369,13 @@ test_vga.o: programs/test_vga.c
 test_vga.elf: test_vga.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_vga.o)
 
+# test_vga_scan: VGA DDR scanout modes, page flips, underflow under stress (VGA_PLAN P2)
+test_vga_scan.o: programs/test_vga_scan.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_vga_scan.elf: test_vga_scan.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_vga_scan.o)
+
 # lwip_demo: full TCP/IP stack (DHCP + ping + TCP echo)
 lwip_demo.o: programs/lwip_demo.c
 	$(CC) $(LWIP_FLAGS) -c -o $@ $<
@@ -490,6 +497,7 @@ test_big:          test_big.elf
 test_eth:          test_eth.elf
 test_irq_ext:      test_irq_ext.elf
 test_vga:          test_vga.elf
+test_vga_scan:     test_vga_scan.elf
 eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
 ping_demo:         ping_demo.elf
