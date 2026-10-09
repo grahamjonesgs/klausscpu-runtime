@@ -10,7 +10,7 @@
  * changes (gui_demo, mandel, LVGL via display_vnc, doom over VNC).
  *
  * Apps that already render 8-bit palette indices (doom) can instead hand the
- * frame to vga_out_show_indexed(): it is double-buffered into the VGA's 8-bit
+ * frame to vga_out_show_indexed(): it is triple-buffered into the VGA's 8-bit
  * palette mode and flipped at vblank (no tearing, no RGB565 conversion).
  */
 #ifndef KLAUSSCPU_VGA_OUT_H_
@@ -27,6 +27,14 @@ void vga_out_kick(void);
  * once.  `pal_rgb888` (256 x 0x00RRGGBB) updates the palette when non-NULL.
  * Returns 0, or -EINVAL / -ENOMEM.  The first call switches VGA to this mode. */
 int vga_out_show_indexed(const uint8_t *src, int w, int h, const uint32_t *pal_rgb888);
+
+/* Zero-copy variant: render the next w x h 8-bit frame straight into a VGA
+ * buffer.  vga_out_indexed_buffer() returns one that is neither on screen nor
+ * waiting to flip (triple-buffered); write the WHOLE frame into it, then
+ * vga_out_present_indexed() it (flush + flip at vblank).  Returns NULL /
+ * -EINVAL / -ENOMEM on bad geometry, a foreign buffer, or no memory. */
+uint8_t *vga_out_indexed_buffer(int w, int h);
+int vga_out_present_indexed(uint8_t *buf, const uint32_t *pal_rgb888);
 
 /* Go back to scanning the RGB565 framebuffer. */
 void vga_out_show_fb(void);
