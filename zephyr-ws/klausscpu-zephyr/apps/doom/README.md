@@ -55,20 +55,32 @@ platform API is keyboard-only (`DG_GetKey`), so there is no pointer hook.
 
 Every build also drives the board's **VGA port** (`CONFIG_KLAUSSCPU_VGA=y` in
 `prj.conf`; KlaussCPU `VGA_PLAN.md`). Doom's 8-bit frames go straight to the
-VGA's palette mode through `vga_out_show_indexed()`. They are double-buffered
-and flipped at vblank, so there is no tearing, letterboxed 320×200 → 640×400
-in the 640×480 picture. VNC and VGA show the same game.
+VGA's palette mode, letterboxed 320×200 → 640×400 in the 640×480 picture.
+They are triple-buffered and flipped at vblank, so there is no tearing, and
+they are **zero-copy**: `DG_ScreenBuffer` is pointed at a free VGA buffer
+each frame, so `I_FinishUpdate` renders straight into it. AMP builds copy
+instead, because core 2 reads the buffer at a fixed address. VNC and VGA
+show the same game.
 
 For the fastest Doom, build the VGA-only variant: no networking, no VNC and
 no RGB565 conversion.
 
 ```sh
-west build -p always -b nexys_a7 "$MOD/apps/doom" --build-dir build_doom_vga --   -DEXTRA_CONF_FILE=vga.conf <the usual -D... flags from step 2>
+west build -p always -b nexys_a7 "$MOD/apps/doom" --build-dir build_doom_vga -- \
+  -DEXTRA_CONF_FILE=vga.conf <the usual -D... flags from step 2>
 ```
 
-Measured on the board: about 52 fps on the title screen and 16–25 fps in the
-attract-mode demos. The VGA copy and flush cost about 2 ms per frame, with 0
-display underflows; the profile line prints `vga_underflows`. **VGA-only has
+Measured on the board, averaged over the same 27 attract-mode demo windows:
+
+| Build | Gameplay fps |
+|---|---|
+| `vga.conf` (zero-copy) | **24.7** |
+| AMP + VNC, no VGA | 23.7 |
+| AMP + VNC + VGA (copy) | 20.8 |
+
+The VGA hand-off costs under 1 ms per frame (one cache flush), with 0
+display underflows; the profile line prints `vga_underflows`. The title
+screen runs at about 52 fps. **VGA-only has
 no keyboard** (input arrives via VNC), so Doom plays its demos. To play, use a
 VNC build; the game appears on both screens.
 

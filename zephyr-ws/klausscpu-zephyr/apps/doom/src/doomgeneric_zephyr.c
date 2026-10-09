@@ -87,7 +87,7 @@ void DG_DrawFrame(void)
 #ifdef CMAP256
 	const uint8_t *src = (const uint8_t *)DG_ScreenBuffer;
 	/* The RGB565 framebuffer only feeds VNC.  VGA takes Doom's 8-bit frame
-	 * directly (vga_out_show_indexed below), so a VGA-only build skips the
+	 * directly (zero-copy, below), so a VGA-only build skips the
 	 * per-pixel conversion entirely. */
 #if defined(CONFIG_KLAUSSCPU_VNC_SERVER) || defined(CONFIG_KLAUSSCPU_AMP_VNC)
 	bool convert = true;
@@ -130,9 +130,6 @@ void DG_DrawFrame(void)
 #endif
 		palette_changed = false;
 	}
-#ifdef CONFIG_KLAUSSCPU_VGA
-	vga_out_show_indexed(src, DOOMGENERIC_RESX, DOOMGENERIC_RESY, rgb_new ? rgb : NULL);
-#endif
 	for (int y = 0; convert && y < DOOMGENERIC_RESY; y++) {
 		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
 		const uint8_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
@@ -161,6 +158,29 @@ void DG_DrawFrame(void)
 			drow[x] = pal565[srow[x]];
 		}
 	}
+#ifdef CONFIG_KLAUSSCPU_VGA
+	{
+		const uint32_t *pal = rgb_new ? rgb : NULL;
+#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+		/* AMP: core 2 reads Doom's buffer at the address published once
+		 * (amp_set_indexed), so DG_ScreenBuffer must not move — copy. */
+		vga_out_show_indexed(src, DOOMGENERIC_RESX, DOOMGENERIC_RESY, pal);
+#else
+		/* Zero-copy: I_FinishUpdate rewrites the whole of DG_ScreenBuffer
+		 * every frame, so point it at a free VGA buffer and present that
+		 * buffer as-is (triple-buffered: never one on screen).  The first
+		 * frame is still in doomgeneric's own buffer — copy it once. */
+		if (vga_out_present_indexed((uint8_t *)src, pal) != 0) {
+			vga_out_show_indexed(src, DOOMGENERIC_RESX, DOOMGENERIC_RESY, pal);
+		}
+		uint8_t *next = vga_out_indexed_buffer(DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+
+		if (next != NULL) {
+			DG_ScreenBuffer = (pixel_t *)next;
+		}
+#endif
+	}
+#endif
 #else
 	const uint32_t *src = (const uint32_t *)DG_ScreenBuffer;
 

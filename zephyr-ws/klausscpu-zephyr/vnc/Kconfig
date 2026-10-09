@@ -16,8 +16,9 @@ config KLAUSSCPU_VGA
 	  centred vertically — and a low-priority thread flushes the CPU cache
 	  once per frame while the framebuffer is dirty.  Works alongside the
 	  VNC server or AMP VNC (same framebuffer).  Apps rendering 8-bit
-	  palette frames can use vga_out_show_indexed() (double-buffered,
-	  tear-free; needs ~2 x w x h bytes of CONFIG_HEAP_MEM_POOL_SIZE).
+	  palette frames can use vga_out_show_indexed() or the zero-copy
+	  vga_out_indexed_buffer()/vga_out_present_indexed() (triple-buffered,
+	  tear-free; needs 3 x w x h bytes of CONFIG_HEAP_MEM_POOL_SIZE).
 
 config KLAUSSCPU_AMP_VNC
 	bool "VNC served by AMP core 2 (this core only renders)"
