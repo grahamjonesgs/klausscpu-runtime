@@ -37,6 +37,9 @@
 #ifdef CONFIG_KLAUSSCPU_AMP_VNC
 #include "amp_host.h"
 #endif
+#ifdef CONFIG_KLAUSSCPU_VGA
+#include "vga_out.h"
+#endif
 
 LOG_MODULE_REGISTER(mandel, LOG_LEVEL_INF);
 
@@ -218,6 +221,11 @@ static void post(void)
 		}
 	}
 
+#ifdef CONFIG_KLAUSSCPU_VGA
+	/* VGA shows the 8-bit post directly (its own double buffer + palette),
+	 * so it does not depend on the RGB565 framebuffer being filled. */
+	(void)vga_out_show_indexed(d, W, H, pal);
+#endif
 #ifdef CONFIG_KLAUSSCPU_AMP_VNC
 	(void)amp_set_indexed(d, W);
 	amp_set_palette(pal);

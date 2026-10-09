@@ -31,6 +31,9 @@
 #ifdef CONFIG_KLAUSSCPU_AMP_VNC
 #include "amp_host.h"        /* VNC served by AMP core 2 (P4b) */
 #endif
+#ifdef CONFIG_KLAUSSCPU_VGA
+#include "vga_out.h"         /* KlaussCPU VGA port: 8-bit frames + palette */
+#endif
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #ifdef CMAP256
@@ -83,7 +86,18 @@ void DG_DrawFrame(void)
 
 #ifdef CMAP256
 	const uint8_t *src = (const uint8_t *)DG_ScreenBuffer;
+	/* The RGB565 framebuffer only feeds VNC.  VGA takes Doom's 8-bit frame
+	 * directly (vga_out_show_indexed below), so a VGA-only build skips the
+	 * per-pixel conversion entirely. */
+#if defined(CONFIG_KLAUSSCPU_VNC_SERVER) || defined(CONFIG_KLAUSSCPU_AMP_VNC)
 	bool convert = true;
+#else
+	bool convert = false;
+#endif
+#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
+	uint32_t rgb[256];
+	bool rgb_new = false;
+#endif
 
 #ifdef CONFIG_KLAUSSCPU_AMP_VNC
 	/* AMP: also publish Doom's 8-bit frame + palette, so core 2 can serve
@@ -102,20 +116,23 @@ void DG_DrawFrame(void)
 #endif
 
 	if (palette_changed) {
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-		uint32_t rgb[256];
-#endif
 		for (int i = 0; i < 256; i++) {
 			pal565[i] = fb_rgb(colors[i].r, colors[i].g, colors[i].b);
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
+#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
 			rgb[i] = ((uint32_t)colors[i].r << 16) | ((uint32_t)colors[i].g << 8) | colors[i].b;
 #endif
 		}
+#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
+		rgb_new = true;
+#endif
 #ifdef CONFIG_KLAUSSCPU_AMP_VNC
 		amp_set_palette(rgb);
 #endif
 		palette_changed = false;
 	}
+#ifdef CONFIG_KLAUSSCPU_VGA
+	vga_out_show_indexed(src, DOOMGENERIC_RESX, DOOMGENERIC_RESY, rgb_new ? rgb : NULL);
+#endif
 	for (int y = 0; convert && y < DOOMGENERIC_RESY; y++) {
 		uint16_t *drow = dst + (size_t)(y + FB_YOFF) * FB_WIDTH + FB_XOFF;
 		const uint8_t *srow = src + (size_t)y * DOOMGENERIC_RESX;
@@ -381,11 +398,19 @@ static void doom_entry(void *a, void *b, void *c)
 			uint32_t wall = (uint32_t)(now - prof_t0_ms);
 
 			printk("doom: drawfps=%u tick=%ums convert=%ums "
-			       "(draws=%u/%u ticks in %ums)\n",
+			       "(draws=%u/%u ticks in %ums)"
+#ifdef CONFIG_KLAUSSCPU_VGA
+			       " vga_underflows=%u"
+#endif
+			       "\n",
 			       wall ? (prof_draws * 1000U / wall) : 0U,
 			       (uint32_t)(prof_tick_ms / prof_ticks),
 			       prof_draws ? (uint32_t)(prof_conv_ms / prof_draws) : 0U,
-			       prof_draws, prof_ticks, wall);
+			       prof_draws, prof_ticks, wall
+#ifdef CONFIG_KLAUSSCPU_VGA
+			       , vga_out_underflows()
+#endif
+			       );
 
 			prof_tick_ms = 0;
 			prof_conv_ms = 0;
@@ -420,7 +445,7 @@ int main(void)
 	if (amp_host_init() != 0) {
 		LOG_ERR("AMP core 2 failed to start — no display");
 	}
-#else
+#elif defined(CONFIG_KLAUSSCPU_VNC_SERVER)
 	if (wait_for_dhcp() != 0) {
 		LOG_WRN("no network — VNC will be unreachable");
 	}
@@ -428,6 +453,8 @@ int main(void)
 	vnc_server_start();
 	vnc_register_input(on_key, NULL);   /* keyboard -> Doom; no pointer */
 	LOG_INF("VNC server ready on port 5900 — connect to play");
+#else
+	LOG_INF("VGA only (no VNC): no keyboard input — attract-mode demos");
 #endif
 
 	k_thread_create(&doom_thread, doom_stack, DOOM_STACK_SIZE,

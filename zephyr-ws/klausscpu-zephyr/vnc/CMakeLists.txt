@@ -6,6 +6,11 @@ zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_VNC_DISPLAY display_vnc.c)
 # AMP: core 2 serves VNC; this core boots it and posts frames.  The core-2
 # image is the baremetal build's core2_image.h (make core2 in baremetal/).
 zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_AMP_VNC amp_host.c)
+zephyr_library_sources_ifdef(CONFIG_KLAUSSCPU_VGA vga_out.c)
+# vga_out.c / amp_host.c use the runtime-root headers (mmio.h, vga.h).
+if(CONFIG_KLAUSSCPU_VGA)
+  zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+endif()
 if(CONFIG_KLAUSSCPU_AMP_VNC)
   zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../baremetal)
   zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../..)
