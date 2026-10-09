@@ -194,11 +194,40 @@ static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_
 #define INT_SRC_TIMER   0u
 #define INT_SRC_BLIT    1u   /* 2D blitter DONE (level; ISR W1Cs BLIT_STATUS.DONE) */
 #define INT_SRC_ETH     2u   /* LiteEth RX/TX combined (level; ISR W1Cs RX_/TX_EV_PENDING) */
+#define INT_SRC_VGA     3u   /* VGA vsync, start of vblank (level; ISR W1Cs VGA_STATUS bit 1) */
 
 /* INT_MASK value the lwIP port restores after a critical section. The
  * network stacks still poll the MAC, so only the timer is enabled; a
  * program that takes the ETH interrupt ORs in (1u << INT_SRC_ETH).        */
 #define INTMASK_ALL     1u
+
+/* ── VGA output — 0xF011_xxxx (KlaussCPU VGA_PLAN.md) ───────────────────── */
+/* 640x480@60 (59.5 Hz). All registers 64-bit, 8 B apart.                  */
+
+#define VGA_BASE              (MMIO_BASE + 0x00110000u)
+
+#define REG_VGA_CTRL          (*(volatile uint64_t *)(VGA_BASE + 0x0000u))
+#define REG_VGA_FB_BASE       (*(volatile uint64_t *)(VGA_BASE + 0x0008u))  /* latched at vblank */
+#define REG_VGA_STRIDE        (*(volatile uint64_t *)(VGA_BASE + 0x0010u))
+#define REG_VGA_STATUS        (*(volatile uint64_t *)(VGA_BASE + 0x0018u))
+#define REG_VGA_BORDER        (*(volatile uint64_t *)(VGA_BASE + 0x0020u))
+#define REG_VGA_VSTART        (*(volatile uint64_t *)(VGA_BASE + 0x0028u))
+#define REG_VGA_FB_ACTIVE     (*(volatile uint64_t *)(VGA_BASE + 0x0030u))
+#define REG_VGA_PALETTE(n)    (*(volatile uint64_t *)(uintptr_t)(VGA_BASE + 0x0800u + 8u*(n)))  /* [11:0] RGB444 */
+
+#define VGA_CTRL_SCANOUT_EN   (1u << 0)
+#define VGA_CTRL_DOUBLE       (1u << 1)
+#define VGA_CTRL_BPP8         (1u << 2)
+#define VGA_CTRL_TEST_PATTERN (1u << 3)   /* reset value */
+#define VGA_CTRL_VSYNC_IRQ_EN (1u << 4)
+#define VGA_CTRL_PALETTE_VIEW (1u << 5)
+
+#define VGA_STATUS_IN_VBLANK  (1u << 0)
+#define VGA_STATUS_VSYNC      (1u << 1)   /* W1C */
+#define VGA_STATUS_UNDERFLOW_CLR (1u << 2) /* write 1: clear the underflow count */
+#define VGA_STATUS_FRAME(s)   ((uint32_t)(((s) >> 16) & 0xFFFFu))
+#define VGA_STATUS_LINE(s)    ((uint32_t)(((s) >> 32) & 0x3FFu))
+#define VGA_STATUS_UNDERFLOW(s) ((uint32_t)(((s) >> 48) & 0xFFFFu))
 
 /* ── Ethernet (LiteEth) — CSRs 0xF006_xxxx, slot SRAM 0xF008_xxxx ───────── */
 /* All CSR registers are 32-bit, 4-byte spaced (NOT 8 like other peripherals) */

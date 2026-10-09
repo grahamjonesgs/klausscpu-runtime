@@ -362,6 +362,13 @@ test_irq_ext.o: programs/test_irq_ext.c
 test_irq_ext.elf: test_irq_ext.o $(ETH_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) test_irq_ext.o)
 
+# test_vga: VGA registers, palette, vsync IRQ (source 3), FB_BASE latch (VGA_PLAN P1)
+test_vga.o: programs/test_vga.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_vga.elf: test_vga.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_vga.o)
+
 # lwip_demo: full TCP/IP stack (DHCP + ping + TCP echo)
 lwip_demo.o: programs/lwip_demo.c
 	$(CC) $(LWIP_FLAGS) -c -o $@ $<
@@ -482,6 +489,7 @@ test_sd:           test_sd.elf
 test_big:          test_big.elf
 test_eth:          test_eth.elf
 test_irq_ext:      test_irq_ext.elf
+test_vga:          test_vga.elf
 eth_test:          eth_test.elf
 lwip_demo:         lwip_demo.elf
 ping_demo:         ping_demo.elf
