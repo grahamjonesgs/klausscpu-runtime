@@ -86,6 +86,12 @@ VNC build; the game appears on both screens.
 
 ## Notes / limits
 
+- **Engine patches:** `patches/*.patch` are our fixes to the fetched engine.
+  CMake applies each one once at configure time.
+  - `0001-64bit-game-timer.patch`: stock doomgeneric computes game time as
+    `ms * 35` in 32 bits, so Doom **froze after ~17 h** of uptime (34 h for
+    `I_GetTime`). The display kept redrawing the same frame. The patch makes
+    the clock 64-bit, wrap-extended across the 49.7-day 32-bit tick wrap.
 - Engine is the bare-metal "soso" source set: no sound (generic dummy
   `i_sound.c`), no music, no SDL.
 - The WAD path is passed explicitly (`-iwad /SD:/doom1.wad`), so the IWAD

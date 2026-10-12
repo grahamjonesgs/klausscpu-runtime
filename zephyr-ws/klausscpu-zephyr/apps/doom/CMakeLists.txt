@@ -10,6 +10,26 @@ if(NOT EXISTS ${DG}/doomgeneric.c)
     "doomgeneric sources not found. Run apps/doom/fetch-doomgeneric.sh first.")
 endif()
 
+# Our fixes to the fetched engine (patches/*.patch, git-apply format), applied
+# once at configure time: a patch whose reverse already applies is in place.
+#   0001: 64-bit game timer — stock Doom froze after ~17 h of uptime.
+file(GLOB DOOM_PATCHES ${CMAKE_CURRENT_SOURCE_DIR}/patches/*.patch)
+list(SORT DOOM_PATCHES)
+foreach(p ${DOOM_PATCHES})
+  execute_process(COMMAND git apply --reverse --check ${p}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/doomgeneric-src
+    RESULT_VARIABLE already OUTPUT_QUIET ERROR_QUIET)
+  if(NOT already EQUAL 0)
+    execute_process(COMMAND git apply ${p}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/doomgeneric-src
+      RESULT_VARIABLE rc)
+    if(NOT rc EQUAL 0)
+      message(FATAL_ERROR "doom: failed to apply ${p} to doomgeneric-src")
+    endif()
+    message(STATUS "doom: applied ${p}")
+  endif()
+endforeach()
+
 # Doom engine sources (the bare-metal "soso" set: no SDL, generic dummy sound),
 # minus its platform backend (doomgeneric_soso.c) which we replace with our own.
 set(DOOM_SRCS
