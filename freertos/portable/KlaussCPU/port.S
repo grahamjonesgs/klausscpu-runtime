@@ -30,38 +30,64 @@
 #define INT_MASK_ADDR   0xF00F0000
 
     .text
+    /* Call frame information goes to .debug_frame (not loaded), like the C
+       code's, so debuggers can unwind through the entry points below. */
+    .cfi_sections .debug_frame
 
-/* ── portSAVE_CONTEXT ─────────────────────────────────────────────────────
+/* ── Unwind annotations ────────────────────────────────────────────────────
+ *
+ * vPortTickISR and vPortYield are entered with one 64-bit word pushed (the
+ * IRET frame or the CALL return slot), so the default rule CFA = SP+8,
+ * PC = low 32 bits of [CFA-8] holds at their first instruction.  The 16
+ * register pushes put Rn at CFA-16-8n.  Before switching to the kernel
+ * stack they copy the task's saved SP into callee-saved R4 (its own value is
+ * already on the task stack), so CFA = R4+136 while the kernel runs, until
+ * portRESTORE_CONTEXT_CFI moves SP to the (possibly new) task's frame.
+ */
+.macro push_cfi reg, n
+    push    \reg
+    .cfi_adjust_cfa_offset 8
+    .cfi_offset \reg, -16-8*\n
+.endm
+
+.macro pop_cfi reg
+    pop     \reg
+    .cfi_adjust_cfa_offset -8
+    .cfi_same_value \reg
+.endm
+
+/* ── portSAVE_CONTEXT_CFI ─────────────────────────────────────────────────
  *
  * Push R0–R15 onto the current (interrupted) task's stack, then save the
  * resulting SP into pxCurrentTCB->pxTopOfStack.
  *
  * On entry: hardware has already pushed the 64-bit IRET frame.
- * On exit:  R0 = saved SP (for kernel-stack switch in the caller).
+ * On exit:  R0 = R4 = saved SP (R4 keeps it across calls for the unwinder).
  *           R1 clobbered.
  */
-.macro portSAVE_CONTEXT
-    push    r0
-    push    r1
-    push    r2
-    push    r3
-    push    r4
-    push    r5
-    push    r6
-    push    r7
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    push    r12
-    push    r13
-    push    r14
-    push    r15
-    /* SP now points to the R15 slot. Save it to pxCurrentTCB->pxTopOfStack. */
+.macro portSAVE_CONTEXT_CFI
+    push_cfi r0, 0
+    push_cfi r1, 1
+    push_cfi r2, 2
+    push_cfi r3, 3
+    push_cfi r4, 4
+    push_cfi r5, 5
+    push_cfi r6, 6
+    push_cfi r7, 7
+    push_cfi r8, 8
+    push_cfi r9, 9
+    push_cfi r10, 10
+    push_cfi r11, 11
+    push_cfi r12, 12
+    push_cfi r13, 13
+    push_cfi r14, 14
+    push_cfi r15, 15
     getsp   r0
-    setr    r1, pxCurrentTCB        /* r1 = &pxCurrentTCB (32-bit MMIO addr) */
-    ldidx64 r1, r1, 0              /* r1 = pxCurrentTCB (64-bit TCB pointer) */
-    stidx64 r0, r1, 0              /* pxCurrentTCB->pxTopOfStack = SP (8 bytes) */
+    setr    r1, pxCurrentTCB
+    ldidx64 r1, r1, 0
+    stidx64 r0, r1, 0
+    copy    r4, r0                 /* task's saved SP, kept across the calls */
+    .cfi_def_cfa r4, 136
 .endm
 
 /* ── portRESTORE_CONTEXT ──────────────────────────────────────────────────
@@ -96,6 +122,32 @@
     pop     r0
 .endm
 
+/* portRESTORE_CONTEXT with unwind annotations: once SP is the task's saved
+   SP the CFA is SP+136 again, and each pop hands a register back. */
+.macro portRESTORE_CONTEXT_CFI
+    setr    r0, pxCurrentTCB
+    ldidx64 r0, r0, 0
+    ldidx64 r1, r0, 0
+    setsp   r1
+    .cfi_def_cfa sp, 136
+    pop_cfi r15
+    pop_cfi r14
+    pop_cfi r13
+    pop_cfi r12
+    pop_cfi r11
+    pop_cfi r10
+    pop_cfi r9
+    pop_cfi r8
+    pop_cfi r7
+    pop_cfi r6
+    pop_cfi r5
+    pop_cfi r4
+    pop_cfi r3
+    pop_cfi r2
+    pop_cfi r1
+    pop_cfi r0
+.endm
+
 
 /* ── vPortTickISR ─────────────────────────────────────────────────────────
  *
@@ -113,7 +165,9 @@
     .globl  vPortTickISR
     .type   vPortTickISR, @function
 vPortTickISR:
-    portSAVE_CONTEXT
+    .cfi_startproc
+    .cfi_signal_frame
+    portSAVE_CONTEXT_CFI
     /* r0 = saved SP (from the macro); switch to kernel stack. */
     setr    r0, g_freertos_kernel_sp
     ldidx32 r0, r0, 0              /* kernel stack top (32-bit value) */
@@ -126,8 +180,9 @@ vPortTickISR:
     jmpe    .Ltick_no_switch
     call    vTaskSwitchContext      /* updates pxCurrentTCB */
 .Ltick_no_switch:
-    portRESTORE_CONTEXT
+    portRESTORE_CONTEXT_CFI
     iret
+    .cfi_endproc
     .size vPortTickISR, . - vPortTickISR
 
 
@@ -178,31 +233,32 @@ vPortStartFirstTask:
     .globl  vPortYield
     .type   vPortYield, @function
 vPortYield:
+    .cfi_startproc
     /* Save R0 and R1 first so we can use them as scratch to disable the
        timer before completing the full register save.  Without this, a
        timer interrupt firing mid-save could corrupt the partially-built
        frame. */
-    push    r0
-    push    r1
+    push_cfi r0, 0
+    push_cfi r1, 1
     setr    r0, INT_MASK_ADDR
     setr    r1, 0
     memset32 r1, r0                 /* disable timer (REG_INT_MASK = 0) */
 
     /* Save remaining registers. */
-    push    r2
-    push    r3
-    push    r4
-    push    r5
-    push    r6
-    push    r7
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    push    r12
-    push    r13
-    push    r14
-    push    r15
+    push_cfi r2, 2
+    push_cfi r3, 3
+    push_cfi r4, 4
+    push_cfi r5, 5
+    push_cfi r6, 6
+    push_cfi r7, 7
+    push_cfi r8, 8
+    push_cfi r9, 9
+    push_cfi r10, 10
+    push_cfi r11, 11
+    push_cfi r12, 12
+    push_cfi r13, 13
+    push_cfi r14, 14
+    push_cfi r15, 15
     /* SP now points to the R15 slot.  CALL slot is at [SP+128]. */
 
     /* Patch the CALL return-address slot into a valid IRET frame.
@@ -218,6 +274,8 @@ vPortYield:
     setr    r1, pxCurrentTCB
     ldidx64 r1, r1, 0              /* r1 = pxCurrentTCB */
     stidx64 r0, r1, 0              /* pxCurrentTCB->pxTopOfStack = SP */
+    copy    r4, r0                 /* task's saved SP, kept across the call */
+    .cfi_def_cfa r4, 136
 
     /* Switch to kernel stack and select next task. */
     setr    r0, g_freertos_kernel_sp
@@ -225,6 +283,7 @@ vPortYield:
     setsp   r0
     call    vTaskSwitchContext      /* updates pxCurrentTCB */
 
-    portRESTORE_CONTEXT
+    portRESTORE_CONTEXT_CFI
     iret
+    .cfi_endproc
     .size vPortYield, . - vPortYield
