@@ -31,47 +31,97 @@
 #define INT_MASK_ADDR   0xF00F0000
 
     .text
+    /* Call frame information goes to .debug_frame (not loaded), like the C
+       code's, so debuggers can unwind through the entry points below. */
+    .cfi_sections .debug_frame
+
+/* ── Unwind annotations ─────────────────────────────────────────────────── */
+/*
+ * arch_switch and z_klausscpu_timer_isr are entered with one 64-bit word
+ * pushed (the CALL slot / the IRET frame), so the default rule CFA = SP+8,
+ * PC = low 32 bits of [CFA-8] holds at their first instruction.  The 16
+ * register pushes put Rn at CFA-16-8n.  The timer ISR copies the task's
+ * saved SP into callee-saved R4 (its own value is already on the task
+ * stack) before switching to the kernel stack, so CFA = R4+136 while
+ * sys_clock_isr() runs.  Whenever SP is moved to a saved task frame the
+ * whole frame is described again (cfi_task_frame).
+ */
+.macro push_cfi reg, n
+    push    \reg
+    .cfi_adjust_cfa_offset 8
+    .cfi_offset \reg, -16-8*\n
+.endm
+
+.macro pop_cfi reg
+    pop     \reg
+    .cfi_adjust_cfa_offset -8
+    .cfi_same_value \reg
+.endm
+
+/* SP points at a saved task frame: R15 at SP+0 .. R0 at SP+120, then the
+   IRET frame. */
+.macro cfi_task_frame
+    .cfi_def_cfa sp, 136
+    .cfi_offset r0, -16
+    .cfi_offset r1, -24
+    .cfi_offset r2, -32
+    .cfi_offset r3, -40
+    .cfi_offset r4, -48
+    .cfi_offset r5, -56
+    .cfi_offset r6, -64
+    .cfi_offset r7, -72
+    .cfi_offset r8, -80
+    .cfi_offset r9, -88
+    .cfi_offset r10, -96
+    .cfi_offset r11, -104
+    .cfi_offset r12, -112
+    .cfi_offset r13, -120
+    .cfi_offset r14, -128
+    .cfi_offset r15, -136
+.endm
 
 /* ── portSAVE_CONTEXT ───────────────────────────────────────────────────── */
 /* Saves R0-R15 onto the current stack.  Used by the timer ISR path.         */
 .macro portSAVE_CONTEXT
-    push    r0
-    push    r1
-    push    r2
-    push    r3
-    push    r4
-    push    r5
-    push    r6
-    push    r7
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    push    r12
-    push    r13
-    push    r14
-    push    r15
+    push_cfi r0, 0
+    push_cfi r1, 1
+    push_cfi r2, 2
+    push_cfi r3, 3
+    push_cfi r4, 4
+    push_cfi r5, 5
+    push_cfi r6, 6
+    push_cfi r7, 7
+    push_cfi r8, 8
+    push_cfi r9, 9
+    push_cfi r10, 10
+    push_cfi r11, 11
+    push_cfi r12, 12
+    push_cfi r13, 13
+    push_cfi r14, 14
+    push_cfi r15, 15
 .endm
 
 /* ── portRESTORE_CONTEXT ────────────────────────────────────────────────── */
-/* Restores R15-R0 from the current stack (caller issues IRET after).        */
+/* Restores R15-R0 from the current stack (caller issues IRET after).  SP
+   must already point at the saved task frame.                               */
 .macro portRESTORE_CONTEXT
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     r11
-    pop     r10
-    pop     r9
-    pop     r8
-    pop     r7
-    pop     r6
-    pop     r5
-    pop     r4
-    pop     r3
-    pop     r2
-    pop     r1
-    pop     r0
+    cfi_task_frame
+    pop_cfi r15
+    pop_cfi r14
+    pop_cfi r13
+    pop_cfi r12
+    pop_cfi r11
+    pop_cfi r10
+    pop_cfi r9
+    pop_cfi r8
+    pop_cfi r7
+    pop_cfi r6
+    pop_cfi r5
+    pop_cfi r4
+    pop_cfi r3
+    pop_cfi r2
+    pop_cfi r1
+    pop_cfi r0
 .endm
 
 
@@ -192,9 +242,10 @@ __start:
     .globl  arch_switch
     .type   arch_switch, @function
 arch_switch:
+    .cfi_startproc
     /* Save R0/R1 first so we can disable the timer safely. */
-    push    r0
-    push    r1
+    push_cfi r0, 0
+    push_cfi r1, 1
     /* Disable timer before completing the register save so a timer IRQ
        cannot corrupt the half-built frame. */
     setr    r0, INT_MASK_ADDR
@@ -216,24 +267,25 @@ arch_switch:
     setr    r0, _klausscpu_in_isr
     ldidx32 r0, r0, 0
     cmprv   r0, 0
+    .cfi_remember_state             /* state at .Larch_switch_from_isr */
     jmpne   .Larch_switch_from_isr
 
     /* ── Normal thread-context switch ────────────────────────────── */
     /* Save remaining registers. */
-    push    r2
-    push    r3
-    push    r4
-    push    r5
-    push    r6
-    push    r7
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    push    r12
-    push    r13
-    push    r14
-    push    r15
+    push_cfi r2, 2
+    push_cfi r3, 3
+    push_cfi r4, 4
+    push_cfi r5, 5
+    push_cfi r6, 6
+    push_cfi r7, 7
+    push_cfi r8, 8
+    push_cfi r9, 9
+    push_cfi r10, 10
+    push_cfi r11, 11
+    push_cfi r12, 12
+    push_cfi r13, 13
+    push_cfi r14, 14
+    push_cfi r15, 15
 
     /* Patch the CALL return-address slot into an IRET frame.
        [SP+128..131] = return PC (already correct — do not touch).
@@ -273,6 +325,7 @@ arch_switch:
      * then switch directly to the new thread's task context.
      */
 .Larch_switch_from_isr:
+    .cfi_restore_state
     setr    r0, _klausscpu_in_isr
     setr    r1, 0
     stidx32 r1, r0, 0          /* _klausscpu_in_isr = 0 */
@@ -283,6 +336,7 @@ arch_switch:
     setsp   r3
     portRESTORE_CONTEXT
     iret
+    .cfi_endproc
     .size arch_switch, . - arch_switch
 
 
@@ -308,6 +362,8 @@ arch_switch:
     .globl  z_klausscpu_timer_isr
     .type   z_klausscpu_timer_isr, @function
 z_klausscpu_timer_isr:
+    .cfi_startproc
+    .cfi_signal_frame
     portSAVE_CONTEXT
 
     /* Record "in ISR" so arch_is_in_isr() and arch_switch ISR fast path work. */
@@ -317,6 +373,8 @@ z_klausscpu_timer_isr:
 
     /* Save interrupted task SP → current->switch_handle AND _klausscpu_isr_handle. */
     getsp   r0
+    copy    r4, r0             /* task's saved SP, kept for the unwinder */
+    .cfi_def_cfa r4, 136
     setr    r1, _kernel
     ldidx64 r1, r1, ___cpu_t_current_OFFSET
     stidx64 r0, r1, ___thread_t_switch_handle_OFFSET
@@ -346,4 +404,5 @@ z_klausscpu_timer_isr:
 
     portRESTORE_CONTEXT
     iret
+    .cfi_endproc
     .size z_klausscpu_timer_isr, . - z_klausscpu_timer_isr
