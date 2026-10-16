@@ -20,6 +20,23 @@
         }
       },
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "klausscpu: board gdbserver",
+      "detail": "Build the open baremetal/programs/<name>.c with -O1 -g, load it onto the board over the UART halted at its entry, and serve core 1 over JTAG (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/board-gdbserver.sh ${fileBasenameNoExtension} 1234",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (.*(cannot|no |did not|failed).*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^make",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     }
   ]
 }

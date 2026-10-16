@@ -3,11 +3,13 @@
 Source-level debugging on the `klausscc` emulator — bare-metal programs,
 FreeRTOS and Zephyr: breakpoints, stepping, call stacks (including through
 interrupt handlers), locals/globals, registers, watchpoints and RTOS tasks
-as threads, in VS Code or the lldb command line.  The plan, including the move to the
-real board over JTAG, is `klaussCPU/DEBUG_PLAN.md`.
+as threads, in VS Code or the lldb command line — and the same on the real
+board (core 1 of the Nexys A7) over its USB-JTAG; see [The board](#the-board).
+The plan is `klaussCPU/DEBUG_PLAN.md`.
 
 ```
 VS Code ─DAP─▶ lldb-dap ─gdb-remote─▶ klausscc --gdbserver ─▶ emulator
+                                      klausscc --gdbserver --board ─JTAG─▶ debug module ─▶ core 1
 ```
 
 ## What you need
@@ -105,6 +107,61 @@ configuration attaches to a server you started yourself).
 - **Timing.** The emulator counts 2 cycles per instruction, so ticks arrive
   at a different instruction count than on the board.
 
+## The board
+
+The same debugging, on core 1 of the Nexys A7, through the on-chip debug
+module (`klaussCPU` `debug_module.sv`) over the board's USB-JTAG (FT2232H
+channel A; the console UART on channel B keeps working).
+
+You also need:
+
+- **A `DEBUG_EN=1` bitstream.**  `KlaussCPU.sv` has `parameter bit
+  DEBUG_EN = 0`; build with the generic `DEBUG_EN=1` (see
+  `klaussCPU/DEBUG_PLAN.md`).  Programming the FPGA over JTAG is volatile:
+  a power cycle goes back to the flash image.
+- **klausscc with board support:** `cargo build --release --features board`
+  (links libftdi1: `sudo apt install libftdi1-dev`).
+- **Vivado's hardware manager closed** — `hw_server` holds the JTAG channel.
+
+VS Code: open a program under `baremetal/programs/` and start **KlaussCPU:
+debug the open bare-metal program on the board (JTAG)**.  The task builds it,
+loads it over the UART with halt-on-load set, and serves core 1 halted on
+the program's first instruction.
+
+Command line:
+
+```sh
+debug/board-gdbserver.sh dbgtest 1234          # build, load, halt at entry, serve
+ATTACH=1 debug/board-gdbserver.sh dbgtest 1234 # halt the program already running
+lldb baremetal/dbgtest.elf -o 'gdb-remote 1234'
+```
+
+Differences from the emulator:
+
+- **Breakpoints.** 4 hardware PC comparators (`b -H`), and unlimited
+  software breakpoints: the word is replaced by `TRAP` while set (memory
+  reads show the original).  Code in ROM or code copied at run time needs
+  hardware breakpoints.
+- **Watchpoints** (2, up to 8 bytes in one doubleword) halt up to two
+  instructions after the access; the reported address is the access's.  A
+  store just before a `ret` therefore reports in the caller.
+- **Halted = frozen.**  The timer, millisecond clock and cycle counter stop
+  while the core is halted, so a tick doesn't fire the instant you continue.
+  Single steps run with interrupts masked, as on the emulator.
+- **Program output** goes to the console UART (`klausscc -m -s`, or any
+  terminal on the second ttyUSB), not the gdbserver's stdout.
+- **Detach** removes the breakpoints and lets the program run on.  A program
+  that halts (`HALT`) stays halted; load the next one as usual.
+- **Memory** reads run at about 200 KiB/s (64 KiB in 0.3 s at the default
+  10 MHz JTAG clock), D-cache coherent.
+- **RTOS threads at the entry stop.**  Before `_start` clears `.bss`, RAM
+  still holds the previous program's data, so if that was the same RTOS
+  image the thread list shows its old tasks until the program reaches
+  `main`.  Continue (or break on `main`) first.
+- **If the server is killed** without detaching, its breakpoints stay armed
+  until the next `--board` session or the next ordinary UART load (which
+  clears all debugger state), or the CPU reset button.
+
 ## Limitations (for now)
 
 - **No calling target functions** from expressions (`p foo()`).  Reading
@@ -119,4 +176,5 @@ debug/run_debug_smoke.sh
 
 This builds `dbgtest`, then runs a scripted lldb session (`debug/smoke.lldb`)
 and a VS Code-style DAP session (`debug/dap_smoke.py`) against the emulator,
-and checks each result.
+and checks each result.  `debug/run_board_smoke.sh` runs the same lldb
+session against the board (connected, `DEBUG_EN=1` bitstream loaded).

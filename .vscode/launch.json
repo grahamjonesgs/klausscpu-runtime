@@ -21,6 +21,24 @@
       "stopOnEntry": false
     },
     {
+      "name": "KlaussCPU: debug the open bare-metal program on the board (JTAG)",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      // Loads over the UART, halts at the entry, serves core 1 over JTAG.
+      // Needs a DEBUG_EN=1 bitstream (klaussCPU DEBUG_PLAN.md) and klausscc
+      // built with --features board.
+      "preLaunchTask": "klausscpu: board gdbserver",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
+      "attachCommands": [
+        "target create ${workspaceFolder}/baremetal/${fileBasenameNoExtension}.elf",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
       "name": "KlaussCPU: attach to a running gdbserver (port 1234)",
       "type": "lldb-dap",
       "request": "attach",

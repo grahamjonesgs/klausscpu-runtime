@@ -64,8 +64,9 @@ class OperatingSystemPlugIn(object):
 
     @staticmethod
     def _cstr(value):
-        s = value.GetSummary() or ""
-        return s.strip('"')
+        s = (value.GetSummary() or "").strip('"')
+        # a name read from uninitialised memory: don't print the garbage
+        return s if s.isprintable() and "\\" not in s else "?"
 
     # ---- FreeRTOS -------------------------------------------------------------
 
@@ -86,8 +87,14 @@ class OperatingSystemPlugIn(object):
 
     def _freertos_threads(self):
         current = self._global("pxCurrentTCB")
-        if current is None or current.GetValueAsUnsigned() == 0:
+        if current is None:
             return None
+        # Before vTaskStartScheduler (e.g. halted at the entry on the board,
+        # where RAM still holds the previous program) the lists are garbage:
+        # show the CPU's own thread.
+        running = self._global("xSchedulerRunning")
+        if current.GetValueAsUnsigned() == 0 or (running is not None and running.GetValueAsUnsigned() == 0):
+            return []
         current_tcb = current.GetValueAsUnsigned()
         threads = []
         seen = set()
