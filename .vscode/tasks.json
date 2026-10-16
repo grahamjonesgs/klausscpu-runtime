@@ -1,0 +1,25 @@
+{
+  // KlaussCPU debugging (see DEBUGGING.md).  debug/emu-gdbserver.sh finds the
+  // toolchain and klausscc in sibling checkouts of klausscpu-llvm and klausscc
+  // unless KLAUSSCPU_LLVM_BIN / KLAUSSCC are set.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "klausscpu: emulator gdbserver",
+      "detail": "Build the open baremetal/programs/<name>.c as baremetal/<name>.elf with -O1 -g and serve it on the emulator (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/emu-gdbserver.sh ${fileBasenameNoExtension} 1234",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (cannot .*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^make",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    }
+  ]
+}

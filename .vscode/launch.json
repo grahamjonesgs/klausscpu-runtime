@@ -1,0 +1,38 @@
+{
+  // KlaussCPU source-level debugging with lldb-dap (see DEBUGGING.md).
+  // Needs the "LLDB DAP" extension (llvm-vs-code-extensions.lldb-dap) and
+  // the lldb-dap built in klausscpu-llvm (stock lldb does not know KlaussCPU).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "KlaussCPU: debug the open bare-metal program on the emulator",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      "preLaunchTask": "klausscpu: emulator gdbserver",
+      "attachCommands": [
+        "target create ${workspaceFolder}/baremetal/${fileBasenameNoExtension}.elf",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
+      "name": "KlaussCPU: attach to a running gdbserver (port 1234)",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      "attachCommands": [
+        "target create ${input:elf}",
+        "gdb-remote 1234"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "elf",
+      "type": "promptString",
+      "description": "ELF being served (with debug info)",
+      "default": "${workspaceFolder}/baremetal/dbgtest.elf"
+    }
+  ]
+}

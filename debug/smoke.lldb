@@ -1,0 +1,27 @@
+# lldb session for run_debug_smoke.sh (@ELF@ / @PORT@ are substituted).
+settings set auto-confirm true
+target create @ELF@
+gdb-remote @PORT@
+breakpoint set -n dist2
+breakpoint set -n square
+continue
+bt
+frame variable *a *b
+continue
+thread step-out
+breakpoint delete
+breakpoint set -n fib -c 'n == 1'
+continue
+bt
+breakpoint delete
+watchpoint set variable counter
+continue
+continue
+continue
+frame variable i counter
+watchpoint delete
+register read pc sp r12 flags
+# The __builtin_debugtrap() stops with SIGTRAP; in batch mode a signal stop
+# ends the script, so let lldb report it and resume (skipping the TRAP).
+process handle SIGTRAP --stop false --notify true --pass false
+continue

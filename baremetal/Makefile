@@ -258,6 +258,11 @@ test_printf.elf: test_printf.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_varargs.o)
 
+# Debugger smoke-test program (../debug/run_debug_smoke.sh); build with
+# OPT="-O1 -g" to debug it with lldb / VS Code (see ../DEBUGGING.md).
+dbgtest.elf: dbgtest.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,dbgtest.o)
+
 perf_baseline.elf: perf_baseline.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,perf_baseline.o)
 
