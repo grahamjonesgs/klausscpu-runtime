@@ -10,6 +10,10 @@
       "request": "attach",
       "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
       "preLaunchTask": "klausscpu: emulator gdbserver",
+      // FreeRTOS tasks / Zephyr threads as debugger threads (debug/klausscpu_rtos.py).
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
       "attachCommands": [
         "target create ${workspaceFolder}/baremetal/${fileBasenameNoExtension}.elf",
         "gdb-remote 1234"
@@ -21,6 +25,9 @@
       "type": "lldb-dap",
       "request": "attach",
       "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
       "attachCommands": [
         "target create ${input:elf}",
         "gdb-remote 1234"

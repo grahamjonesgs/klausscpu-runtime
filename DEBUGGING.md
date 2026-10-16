@@ -1,8 +1,9 @@
 # Debugging KlaussCPU programs with lldb and VS Code
 
-Source-level debugging of bare-metal programs on the `klausscc` emulator:
-breakpoints, stepping, call stacks, locals/globals, registers and watchpoints,
-in VS Code or the lldb command line.  The plan, including the move to the
+Source-level debugging on the `klausscc` emulator — bare-metal programs,
+FreeRTOS and Zephyr: breakpoints, stepping, call stacks (including through
+interrupt handlers), locals/globals, registers, watchpoints and RTOS tasks
+as threads, in VS Code or the lldb command line.  The plan, including the move to the
 real board over JTAG, is `klaussCPU/DEBUG_PLAN.md`.
 
 ```
@@ -81,14 +82,34 @@ debug/emu-gdbserver.sh dbgtest           # terminal 1: build + serve on :1234
   register is reused).  That is expected; use `-O0` when that gets in the
   way.
 
+## RTOS programs
+
+The emulator models the interrupt controller and timer (`0xF00F_0000`) and
+`WAIT`, so FreeRTOS and Zephyr images run on it: pass any ELF linked at 0x20
+to `klausscc --input <elf> --gdbserver 1234` (for Zephyr,
+`build_*/zephyr/zephyr.elf`), then attach as above (the second launch
+configuration attaches to a server you started yourself).
+
+- **Threads.** `debug/klausscpu_rtos.py` is an lldb OS plugin that shows
+  every FreeRTOS task / Zephyr thread as a debugger thread, named with its
+  state (`TaskA [Blocked]`, `thread_b [Pending, prio 7]`), each with its own
+  call stack.  The launch configurations load it; from the command line:
+  `settings set target.process.python-os-plugin-path debug/klausscpu_rtos.py`
+  before `target create`.  Zephyr needs `CONFIG_THREAD_MONITOR=y` (and
+  `CONFIG_THREAD_NAME=y` for names).
+- **Interrupts.** Breakpoints inside handlers work, and the call stack
+  continues through `vPortTickISR` / `z_klausscpu_timer_isr` into the
+  interrupted task.  Single-stepping never enters an interrupt handler; a
+  pending interrupt is taken on the next continue.  `process plugin packet
+  monitor irq` prints the interrupt controller and timer state.
+- **Timing.** The emulator counts 2 cycles per instruction, so ticks arrive
+  at a different instruction count than on the board.
+
 ## Limitations (for now)
 
-- **No interrupts or timer:** the emulator does not model them yet, so
-  FreeRTOS and Zephyr programs cannot be debugged on it until DEBUG_PLAN
-  Phase 3.
 - **No calling target functions** from expressions (`p foo()`).  Reading
   variables, conditional breakpoints and arithmetic expressions work.
-- **No RTOS thread view yet** (Phase 4).
+- **Blitter and Ethernet interrupts** are not modelled by the emulator.
 
 ## Regression test
 
