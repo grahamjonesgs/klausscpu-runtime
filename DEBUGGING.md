@@ -115,9 +115,9 @@ channel A; the console UART on channel B keeps working).
 
 You also need:
 
-- **A `DEBUG_EN=1` bitstream.**  `KlaussCPU.sv` has `parameter bit
-  DEBUG_EN = 0`; build with the generic `DEBUG_EN=1` (see
-  `klaussCPU/DEBUG_PLAN.md`).  Programming the FPGA over JTAG is volatile:
+- **A `DEBUG_EN=1` bitstream:** `klaussCPU/tools/build_debug.sh` (about
+  15 minutes; `KlaussCPU.sv` defaults to `DEBUG_EN = 0`), then
+  `openFPGALoader -b nexys_a7_100 <bit>`.  Programming the FPGA over JTAG is volatile:
   a power cycle goes back to the flash image.
 - **klausscc with board support:** `cargo build --release --features board`
   (links libftdi1: `sudo apt install libftdi1-dev`).
