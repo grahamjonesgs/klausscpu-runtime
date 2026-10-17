@@ -39,6 +39,74 @@
       "stopOnEntry": false
     },
     {
+      "name": "KlaussCPU: FreeRTOS program on the emulator",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      // Asks for the program (freertos/<name>.elf), builds it with -g, serves it on the emulator.
+      "preLaunchTask": "klausscpu: FreeRTOS emulator gdbserver",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
+      // the task links the ELF it built to debug/.rtos.elf; open the real file
+      "attachCommands": [
+        "script import os; lldb.debugger.HandleCommand('target create ' + os.path.realpath('${workspaceFolder}/debug/.rtos.elf'))",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
+      "name": "KlaussCPU: FreeRTOS program on the board (JTAG)",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      // As above, loaded onto the board over the UART halted at its entry; core 1 over JTAG.
+      "preLaunchTask": "klausscpu: FreeRTOS board gdbserver",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
+      // the task links the ELF it built to debug/.rtos.elf; open the real file
+      "attachCommands": [
+        "script import os; lldb.debugger.HandleCommand('target create ' + os.path.realpath('${workspaceFolder}/debug/.rtos.elf'))",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
+      "name": "KlaussCPU: Zephyr app on the emulator",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      // Asks for the app (klausscpu-zephyr/apps/<app> or zephyr/samples/<app>), west-builds it with debug info.
+      "preLaunchTask": "klausscpu: Zephyr emulator gdbserver",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
+      // the task links the ELF it built to debug/.rtos.elf; open the real file
+      "attachCommands": [
+        "script import os; lldb.debugger.HandleCommand('target create ' + os.path.realpath('${workspaceFolder}/debug/.rtos.elf'))",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
+      "name": "KlaussCPU: Zephyr app on the board (JTAG)",
+      "type": "lldb-dap",
+      "request": "attach",
+      "debugAdapterExecutable": "${workspaceFolder}/../klausscpu-llvm/build/bin/lldb-dap",
+      // As above, loaded onto the board over the UART halted at its entry; core 1 over JTAG.
+      "preLaunchTask": "klausscpu: Zephyr board gdbserver",
+      "initCommands": [
+        "settings set target.process.python-os-plugin-path ${workspaceFolder}/debug/klausscpu_rtos.py"
+      ],
+      // the task links the ELF it built to debug/.rtos.elf; open the real file
+      "attachCommands": [
+        "script import os; lldb.debugger.HandleCommand('target create ' + os.path.realpath('${workspaceFolder}/debug/.rtos.elf'))",
+        "gdb-remote 1234"
+      ],
+      "stopOnEntry": false
+    },
+    {
       "name": "KlaussCPU: attach to a running gdbserver (port 1234)",
       "type": "lldb-dap",
       "request": "attach",

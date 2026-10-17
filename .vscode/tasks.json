@@ -37,6 +37,91 @@
         }
       },
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "klausscpu: FreeRTOS emulator gdbserver",
+      "detail": "Build freertos/<program>.elf with -g and serve it on the emulator (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/rtos-gdbserver.sh freertos ${input:freertosProgram} 1234",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (.*(cannot|no |did not|failed).*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^klausscpu-rtos:",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "klausscpu: FreeRTOS board gdbserver",
+      "detail": "Build freertos/<program>.elf with -g, load it onto the board halted at its entry, serve core 1 over JTAG (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/rtos-gdbserver.sh freertos ${input:freertosProgram} 1234",
+      "options": { "env": { "BOARD": "1" } },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (.*(cannot|no |did not|failed).*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^klausscpu-rtos:",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "klausscpu: Zephyr emulator gdbserver",
+      "detail": "west-build a Zephyr app with debug info into zephyr-ws/build_dbg_<app> and serve it on the emulator (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/rtos-gdbserver.sh zephyr ${input:zephyrApp} 1234",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (.*(cannot|no |did not|failed).*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^klausscpu-rtos:",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "klausscpu: Zephyr board gdbserver",
+      "detail": "west-build a Zephyr app with debug info, load it onto the board halted at its entry, serve core 1 over JTAG (port 1234)",
+      "type": "shell",
+      "command": "${workspaceFolder}/debug/rtos-gdbserver.sh zephyr ${input:zephyrApp} 1234",
+      "options": { "env": { "BOARD": "1" } },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "klausscc",
+        "pattern": { "regexp": "^klausscc gdbserver: (.*(cannot|no |did not|failed).*)$", "message": 1 },
+        "background": {
+          "activeBegin": true,
+          "beginsPattern": "^klausscpu-rtos:",
+          "endsPattern": "waiting for a debugger"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "freertosProgram",
+      "type": "pickString",
+      "description": "FreeRTOS program (net_demo / console_demo need the board: the emulator has no Ethernet)",
+      "options": ["demo", "console_demo", "net_demo"],
+      "default": "demo"
+    },
+    {
+      "id": "zephyrApp",
+      "type": "promptString",
+      "description": "Zephyr app: a klausscpu-zephyr/apps/ name (irq_soak, mandel, ...), a zephyr/samples/ name (synchronization, hello_world), or a path",
+      "default": "synchronization"
     }
   ]
 }

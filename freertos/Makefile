@@ -1,7 +1,8 @@
 # Makefile — KlaussCPU FreeRTOS port build
 #
 # Targets:
-#   make demo         — FreeRTOS task demo (no network)
+#   make demo         — FreeRTOS task demo (no network); `make -B demo.elf DBG=-g`
+#                       for source-level debugging (../DEBUGGING.md)
 #   make net_demo     — FreeRTOS + lwIP: DHCP + NTP + HTTP in parallel tasks
 #
 # Prerequisites:
@@ -39,6 +40,10 @@ BUILTINS  := $(abspath $(LLVM_BIN)/../../compiler-rt/lib/builtins)
 CRT_FLAGS := -target $(TARGET) -O1 -fPIC -nostdlibinc -I$(BUILTINS) -D__SOFTFP__
 
 # ── Common compiler flags ───────────────────────────────────────────────────
+# DBG: extra flags for every C/asm file, e.g. `make -B demo.elf DBG=-g` for a
+# debugger build (debug/rtos-gdbserver.sh; -B because objects don't depend on
+# the flags).
+DBG ?=
 
 BASE_CFLAGS := \
     -target $(TARGET) \
@@ -54,7 +59,8 @@ BASE_CFLAGS := \
     -I$(KERNEL)/include \
     -Iportable/KlaussCPU \
     -I$(RUNTIME) \
-    -nostdlib
+    -nostdlib \
+    $(DBG)
 
 # FreeRTOS-only flags (lwipopts from freertos/ directory, no lwIP sources)
 CFLAGS := $(BASE_CFLAGS) -I.

@@ -87,10 +87,25 @@ debug/emu-gdbserver.sh dbgtest           # terminal 1: build + serve on :1234
 ## RTOS programs
 
 The emulator models the interrupt controller and timer (`0xF00F_0000`) and
-`WAIT`, so FreeRTOS and Zephyr images run on it: pass any ELF linked at 0x20
-to `klausscc --input <elf> --gdbserver 1234` (for Zephyr,
-`build_*/zephyr/zephyr.elf`), then attach as above (the second launch
-configuration attaches to a server you started yourself).
+`WAIT`, so FreeRTOS and Zephyr images run on it as well as on the board.
+
+**VS Code:** pick one of the RTOS launch configurations and press F5 (any
+file can be open); it asks which program to debug, builds it with debug
+info, and serves it:
+
+| Configuration | Asks for | Builds |
+|---|---|---|
+| FreeRTOS program on the emulator / board (JTAG) | `demo`, `console_demo`, `net_demo` | `freertos/<program>.elf` with `make -B … DBG=-g` |
+| Zephyr app on the emulator / board (JTAG) | an app: `klausscpu-zephyr/apps/<app>` (`irq_soak`, `mandel`, …), a `zephyr/samples/` name (`synchronization`, `hello_world`) or a path | `zephyr-ws/build_dbg_<app>` (incremental; delete it for a pristine build) with `CONFIG_DEBUG_INFO`, `CONFIG_THREAD_MONITOR`, `CONFIG_THREAD_NAME` |
+
+`net_demo` and `console_demo` use Ethernet, which only the board has.  The
+first Zephyr build of an app takes a minute or two.  Command line: the same
+script, `debug/rtos-gdbserver.sh freertos demo 1234` or
+`debug/rtos-gdbserver.sh zephyr synchronization 1234` (`BOARD=1` for the
+board), then `lldb -o 'gdb-remote 1234' <elf>` (the script links the ELF to
+`debug/.rtos.elf`).  Any other ELF linked at 0x20 works too:
+`klausscc --input <elf> --gdbserver 1234`, then the "attach to a running
+gdbserver" configuration.
 
 - **Threads.** `debug/klausscpu_rtos.py` is an lldb OS plugin that shows
   every FreeRTOS task / Zephyr thread as a debugger thread, named with its
@@ -178,3 +193,7 @@ This builds `dbgtest`, then runs a scripted lldb session (`debug/smoke.lldb`)
 and a VS Code-style DAP session (`debug/dap_smoke.py`) against the emulator,
 and checks each result.  `debug/run_board_smoke.sh` runs the same lldb
 session against the board (connected, `DEBUG_EN=1` bitstream loaded).
+`debug/run_rtos_smoke.sh` (`BOARD=1` for the board) builds the FreeRTOS demo
+and the Zephyr synchronization sample the way the RTOS launch configurations
+do and checks them through lldb-dap (`debug/dap_rtos.py`): a source
+breakpoint, every task/thread named with its state, a stack for each.
