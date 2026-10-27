@@ -33,8 +33,10 @@ DEST="$("$CLANG" --target="$TRIPLE" -rtlib=compiler-rt -print-libgcc-file-name)"
 mkdir -p "$(dirname "$DEST")"
 
 # Same flags the runtime Makefile uses for crt-*.o, plus -fPIC (the Zephyr image
-# is built -fPIC, so the builtins must be too).
-FLAGS=(--target="$TRIPLE" -O1 -fPIC -nostdlibinc -I"$B" -D__SOFTFP__)
+# is built -fPIC, so the builtins must be too).  -ffreestanding, as compiler-rt's
+# own build uses: the driver no longer implies it, and the builtins must not be
+# turned into C library calls.
+FLAGS=(--target="$TRIPLE" -O1 -fPIC -nostdlibinc -ffreestanding -I"$B" -D__SOFTFP__)
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

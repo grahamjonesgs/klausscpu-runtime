@@ -99,9 +99,12 @@ CFLAGS = -target $(TRIPLE) $(OPT) \
 
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────
 # compiler-rt sources live in the klausscpu-llvm fork, alongside the toolchain.
-# Derive the fork root from $(LLVM_BIN) (= <fork>/build/bin).
+# Derive the fork root from $(LLVM_BIN) (= <fork>/build/bin).  Like
+# compiler-rt's own build, they are -ffreestanding: the compiler must not
+# turn their code into calls to C library functions (the driver no longer
+# implies it, and the programs above are compiled hosted).
 BUILTINS    = $(abspath $(LLVM_BIN)/../../compiler-rt/lib/builtins)
-CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc \
+CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc -ffreestanding \
               -I$(BUILTINS) -D__SOFTFP__
 
 CRT_SF_NAMES = addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 \

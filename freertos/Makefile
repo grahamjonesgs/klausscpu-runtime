@@ -37,7 +37,7 @@ OBJ := obj
 # CRT_CONV_OBJS, built here from the fork's compiler-rt — so the FreeRTOS build
 # no longer relies on a prior bare-metal build having left crt-*.o at the root.
 BUILTINS  := $(abspath $(LLVM_BIN)/../../compiler-rt/lib/builtins)
-CRT_FLAGS := -target $(TARGET) -O1 -fPIC -nostdlibinc -I$(BUILTINS) -D__SOFTFP__
+CRT_FLAGS := -target $(TARGET) -O1 -fPIC -nostdlibinc -ffreestanding -I$(BUILTINS) -D__SOFTFP__
 
 # ── Common compiler flags ───────────────────────────────────────────────────
 # DBG: extra flags for every C/asm file, e.g. `make -B demo.elf DBG=-g` for a

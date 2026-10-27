@@ -35,7 +35,10 @@ extern char __bss_start[], __bss_end[], _end[];
 /* _stack_top: the address of this symbol IS the stack-top value (0x08000000). */
 extern char _stack_top[];
 
-__attribute__((noreturn, used))
+/* no_builtin: the BSS loop below stays a loop.  Programs are compiled hosted,
+ * where the compiler would make it a memset call and link memset into every
+ * program for this alone. */
+__attribute__((noreturn, used, no_builtin("memset")))
 void _start(void) {
 
 #ifdef KLAUSSCPU_SW_STACK_INIT
