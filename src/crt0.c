@@ -64,7 +64,10 @@ void _start(void) {
 
     _CRT_LEDS = 0x0000;   /* checkpoint E: stdio init done, calling main */
 
-    main(0, (char **)0);
-
-    __builtin_trap();
+    /* HALT stops the core cleanly; the debugger and klausscc report R12 as the
+     * exit status.  (llvm.trap is TRAP, an abnormal stop, so __builtin_trap()
+     * must not be used as the normal end of a program.) */
+    register long rc __asm__("r12") = main(0, (char **)0);
+    __asm__ volatile("halt" : : "r"(rc));
+    __builtin_unreachable();
 }

@@ -99,8 +99,10 @@ ssize_t _read(int fd, void *buf, size_t len) {
 
 // ── Exit + no-op stubs ────────────────────────────────────────────────────────
 void _exit(int code) {
-    (void)code;
-    __builtin_trap();
+    /* Clean stop with the exit status in R12 (see crt0.c). */
+    register long r12 __asm__("r12") = code;
+    __asm__ volatile("halt" : : "r"(r12));
+    __builtin_unreachable();
 }
 
 int _close(int fd)                           { (void)fd;  errno = ENOSYS; return -1; }

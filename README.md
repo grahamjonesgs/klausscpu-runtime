@@ -118,6 +118,9 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 - lwIP checksum: `LWIP_CHKSUM_ALGORITHM=1` in `lwipopts.h` (LDIDX16 reads BE).
 - The top-level `fatfs/` is the **FreeRTOS** FatFs glue (tracked) — *not* the
   west-managed `zephyr-ws/modules/fs/fatfs` (untracked/ignored). Don't confuse them.
+- A program ends with `HALT` (exit status in R12) when `main` returns or
+  `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
+  abnormal stop (crash dump on the board, `stop = Trap` in the emulator).
 
 ## Relationship to `klausscpu-llvm`
 
