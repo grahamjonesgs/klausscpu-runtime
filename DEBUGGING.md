@@ -68,8 +68,10 @@ debug/emu-gdbserver.sh dbgtest           # terminal 1: build + serve on :1234
   so code is never patched.
 - **Watchpoints:** 2, each up to an aligned 8 bytes, reported after the
   access.
-- **`__builtin_debugtrap()`** (the `trap` instruction) stops with SIGTRAP on
-  the trap; continuing steps over it.  `__builtin_trap()` is still `halt`.
+- **`__builtin_debugtrap()`** and **`__builtin_trap()`** (both the `trap`
+  instruction) stop with SIGTRAP on the trap; continuing steps over it.
+  A Zephyr fatal error ends in `trap` too (`arch_system_halt`, reason code
+  in `r12`).
 - **HALT** ends the session: "exited" with the low byte of `r12`, which is
   main's return value when `crt0` halts.
 - **Faults:** an invalid instruction stops with SIGILL, and a PC outside RAM
