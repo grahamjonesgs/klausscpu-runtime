@@ -37,3 +37,11 @@ zephyr-ws/klausscpu-zephyr/apps/doom/doomgeneric-src/
 # Build logs (redirected west/ninja output) — not part of the build
 zephyr-ws/build_*.log
 debug/.rtos.elf
+
+# Benchmarks — upstream sources fetched by baremetal/benchmarks/get-benchmarks.sh
+# (not vendored: CoreMark and Embench-IoT keep their own licences), plus
+# build output and raw board captures
+baremetal/benchmarks/coremark/
+baremetal/benchmarks/embench-iot/
+baremetal/bench-build/
+baremetal/bench-results/

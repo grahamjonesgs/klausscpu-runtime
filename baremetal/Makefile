@@ -16,6 +16,8 @@
 #   make test_flags     — the flags each instruction writes vs the compiler's model
 #   make test_divshadow — a divide behind a taken fused branch (board only)
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
+#   make coremark       — CoreMark (bench-build/<OPT>/), see benchmarks/README.md
+#   make embench        — Embench-IoT suite (bench-build/<OPT>/embench/)
 #   make all            — every .elf
 #   make clean
 
@@ -582,6 +584,7 @@ clean:
 	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" "fp_mode_stub 2.o" \
 		  "eth_test 2.elf" "eth_test 2.o" \
 	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
+	rm -rf bench-build
 	# Remove ../src and ../fatfs stale objects left by the freertos build so VPATH
 	# doesn't confuse make into thinking targets are already up to date.
 	rm -f $(ROOT)/src/setjmp.o $(ROOT)/src/syscalls.o $(ROOT)/src/stdio_handles.o $(ROOT)/src/atomic.o \
@@ -651,3 +654,6 @@ core1_amp_vnc.elf: core1_amp_vnc.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,core1_amp_vnc.o)
 core1_amp_vnc: core1_amp_vnc.elf
 .PHONY: core1_amp_vnc
+
+# ── Benchmarks: CoreMark + Embench-IoT (benchmarks/README.md) ────────────────
+include benchmarks/benchmarks.mk
