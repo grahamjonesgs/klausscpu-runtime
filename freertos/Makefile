@@ -175,6 +175,7 @@ RUNTIME_OBJS := \
     $(OBJ)/syscalls.o \
     $(OBJ)/stdio_handles.o \
     $(OBJ)/setjmp.o \
+    $(OBJ)/atomic.o \
     $(OBJ)/mdio.o \
     $(OBJ)/eth.o
 
@@ -291,6 +292,10 @@ $(OBJ)/stdio_handles.o: $(RUNTIME)/src/stdio_handles.c | $(OBJ)
 
 $(OBJ)/setjmp.o: $(RUNTIME)/src/setjmp.S | $(OBJ)
 	$(AS) $(ASFLAGS) -c -o $@ $<
+
+# The __sync_* libcalls behind C atomics (interrupt-masked; one core only)
+$(OBJ)/atomic.o: $(RUNTIME)/src/atomic.c | $(OBJ)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(OBJ)/mdio.o: $(RUNTIME)/src/mdio.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<

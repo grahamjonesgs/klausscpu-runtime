@@ -12,6 +12,7 @@
 #   make test_fp        — soft-FP test (links compiler-rt builtins)
 #   make test_asm       — inline assembly test
 #   make test_printf    — varargs / printf test
+#   make test_atomic    — C atomics (src/atomic.c) incl. a timer-ISR stress test
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
 #   make all            — every .elf
 #   make clean
@@ -122,7 +123,9 @@ FATFS_DIR = $(ROOT)/fatfs
 
 # Objects linked into every program.
 RUNTIME_OBJS = crt0.o uart_stubs.o
-LIBC_OBJS    = syscalls.o stdio_handles.o setjmp.o
+# atomic.o: the __sync_* libcalls behind C atomics (src/atomic.c); with
+# --gc-sections only the functions a program uses are linked.
+LIBC_OBJS    = syscalls.o stdio_handles.o setjmp.o atomic.o
 
 # Hardware crypto driver (MMIO wrappers for all 5 crypto blocks).
 CRYPTO_HW_OBJ = crypto_hw.o
@@ -139,7 +142,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf test_varargs perf_baseline perf_haz fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs test_atomic perf_baseline perf_haz fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture
@@ -171,6 +174,7 @@ syscalls.o:    $(ROOT)/src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
 stdio_handles.o: $(ROOT)/src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
 uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -I$(ROOT) -c -o $@ $<
 crt0.o:        $(ROOT)/src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
+atomic.o:      $(ROOT)/src/atomic.c      ; $(CC) $(CFLAGS) -c -o $@ $<
 
 
 # compiler-rt builtins compiled from in-tree source
@@ -257,6 +261,9 @@ test_printf.elf: test_printf.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_varargs.o)
+
+test_atomic.elf: test_atomic.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_atomic.o)
 
 # Debugger smoke-test program (../debug/run_debug_smoke.sh); build with
 # OPT="-O1 -g" to debug it with lldb / VS Code (see ../DEBUGGING.md).
@@ -479,6 +486,7 @@ test_fp:     test_fp.elf
 test_asm:    test_asm.elf
 test_printf:       test_printf.elf
 test_varargs:      test_varargs.elf
+test_atomic:       test_atomic.elf
 perf_baseline:     perf_baseline.elf
 dhrystone:         dhrystone.elf
 fs_demo:           fs_demo.elf
@@ -552,7 +560,7 @@ clean:
 	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
 	# Remove ../src and ../fatfs stale objects left by the freertos build so VPATH
 	# doesn't confuse make into thinking targets are already up to date.
-	rm -f $(ROOT)/src/setjmp.o $(ROOT)/src/syscalls.o $(ROOT)/src/stdio_handles.o \
+	rm -f $(ROOT)/src/setjmp.o $(ROOT)/src/syscalls.o $(ROOT)/src/stdio_handles.o $(ROOT)/src/atomic.o \
 	      $(ROOT)/src/uart_stubs.o $(ROOT)/src/crt0.o $(ROOT)/src/eth.o \
 	      $(ROOT)/src/mdio.o $(ROOT)/src/diskio.o $(ROOT)/src/sd.o \
 	      $(ROOT)/fatfs/ff.o $(ROOT)/fatfs/ffsystem.o $(ROOT)/fatfs/ffunicode.o 2>/dev/null; true

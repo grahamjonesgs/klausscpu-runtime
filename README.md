@@ -118,6 +118,20 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 - lwIP checksum: `LWIP_CHKSUM_ALGORITHM=1` in `lwipopts.h` (LDIDX16 reads BE).
 - The top-level `fatfs/` is the **FreeRTOS** FatFs glue (tracked) — *not* the
   west-managed `zephyr-ws/modules/fs/fatfs` (untracked/ignored). Don't confuse them.
+- **C atomics (`_Atomic`, `<stdatomic.h>`, `__atomic_*`, `__sync_*`) are
+  atomic within one core only.** The ISA has no atomic instructions; the
+  compiler makes aligned atomic loads/stores of up to 8 bytes plain accesses,
+  fences compiler barriers, and every read-modify-write / compare-and-swap a
+  call into `src/atomic.c`, which does the plain operation with `INT_MASK`
+  saved, zeroed and restored. That is atomic against this core's interrupt
+  handlers and RTOS preemption, not against core 2 (AMP): use the mailbox
+  and a D-cache flush for that. Atomics wider than 8 bytes or misaligned
+  become `__atomic_*` calls, which nothing provides (link error). The
+  bare-metal and FreeRTOS builds link `atomic.o`; the Zephyr port uses its
+  own `ATOMIC_OPERATIONS_C` and does not. `baremetal/programs/test_atomic.c`
+  is the test. This needs a klausscpu-llvm with "forced atomics" (an older
+  toolchain makes every atomic an `__atomic_*` call, so `test_atomic` does
+  not link).
 - A program ends with `HALT` (exit status in R12) when `main` returns or
   `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
   abnormal stop (crash dump on the board, `stop = Trap` in the emulator).
