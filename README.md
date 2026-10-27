@@ -148,6 +148,12 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
   pattern; `./build-picolibc.sh`). Don't hand-write `fbr`/`fbri` directly
   followed by `divr`/`divur`/`modr`/`modur`/`divv`/`modv`.
   `baremetal/programs/test_divshadow.c` is the board test.
+- **An LCD write right after a taken fused branch reaches the LCD on the
+  board.** Same RTL hole: the LCD data strobe fires from EX in the cycle
+  the FBR squashes it. klausscpu-llvm never fuses a branch whose next
+  instruction is `lcdcmdv`/`lcddatav`/`lcddatar` (these only come from
+  inline asm, which already blocks the fusion); don't hand-write `fbr`/
+  `fbri` directly followed by one either. `lcd` (LCD reset) is safe.
 - A program ends with `HALT` (exit status in R12) when `main` returns or
   `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
   abnormal stop (crash dump on the board, `stop = Trap` in the emulator).
