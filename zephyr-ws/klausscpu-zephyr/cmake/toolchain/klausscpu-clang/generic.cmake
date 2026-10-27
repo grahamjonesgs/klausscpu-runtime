@@ -34,3 +34,11 @@ set(TOOLCHAIN_HAS_NEWLIB OFF CACHE BOOL "")
 # so CMAKE_C_COMPILER is resolved before DTS preprocessing runs.
 include("${ZEPHYR_BASE}/cmake/compiler/clang/generic.cmake")
 include("${ZEPHYR_BASE}/cmake/bintools/llvm/generic.cmake" OPTIONAL)
+
+# The assembler is the same clang.  Name it, rather than let CMake identify it
+# from `clang --version`: CMake tries the GNU pattern "(GCC)" first, and a host
+# clang prints a -Wgcc-install-dir-libstdcxx warning ("... prefer GCC
+# installations ...") when more than one host GCC is installed.  An ASM
+# compiler taken for GNU gets no --target flag, so every .S file is assembled
+# for the host ("invalid instruction mnemonic 'setr'").
+set(CMAKE_ASM_COMPILER_ID Clang)
