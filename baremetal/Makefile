@@ -444,8 +444,15 @@ loader.elf: loader.o $(FATFS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 # libc symbol resolves at load time against the kernel's exported libc (see the
 # Zephyr SSH app's ssh/llext_exports.c).  Copy the resulting .llext to the SD
 # card and load it with the SSH `run` command (e.g. `run adventure.llext`).
+#
+# Long calls (-klausscpu-short-calls=false): the loader places the extension
+# anywhere in the heap, beyond the +-512 KiB reach of the 1-word short CALL,
+# and cannot add the thunks lld would, so every call to the kernel is the
+# 2-word CALL (R_KLAUSSCPU_ABS32).  Short calls between objects bundled into
+# one extension (test_fp.llext's compiler-rt objects) are R_KLAUSSCPU_CALL18,
+# which the Zephyr loader applies (arch/klausscpu/core/elf.c).
 EXT_CFLAGS = -target $(TARGET) -Os -nostdinc -ffreestanding -fno-builtin \
-             -I$(ROOT)/ext_include
+             -mllvm -klausscpu-short-calls=false -I$(ROOT)/ext_include
 EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch perf_baseline dhrystone
 
 %.llext: programs/%.c

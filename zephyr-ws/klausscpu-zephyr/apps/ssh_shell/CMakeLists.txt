@@ -16,7 +16,8 @@ if(CONFIG_LLEXT)
   get_filename_component(apibackend_src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ssh/apibackend.c ABSOLUTE)
   # Override two inherited Zephyr flags for the extension (LLEXT_APPEND_FLAGS is
-  # appended after them by add_llext_target, so these win):
+  # appended after them by add_llext_target, so these win; the toolchain's
+  # long-calls flag, cmake/compiler/clang/target.cmake, stays):
   #   -fno-data-sections : the default -fdata-sections puts every global in its
   #       own .bss.<name>, but the loader allows only one SHT_NOBITS section
   #       ("Multiple SHT_NOBITS sections are not supported") — coalesce to one .bss.
@@ -24,7 +25,7 @@ if(CONFIG_LLEXT)
   #       .rela.debug_* relocation sections; the loader then tries to relocate a
   #       non-allocated debug section and fails ("Section N not loaded in any
   #       memory region").  Dropping debug info removes those rela sections.
-  set(LLEXT_APPEND_FLAGS -fno-data-sections -g0)
+  list(APPEND LLEXT_APPEND_FLAGS -fno-data-sections -g0)
   add_llext_target(apibackend
     OUTPUT  ${CMAKE_BINARY_DIR}/apibackend.llext
     SOURCES ${apibackend_src}

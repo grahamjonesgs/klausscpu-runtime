@@ -54,6 +54,7 @@ typedef int (*pic_entry_fn)(void (*mirror_fn)(char));
 #define R_KLAUSSCPU_ABS32   1u
 #define R_KLAUSSCPU_ABS64   2u
 #define R_KLAUSSCPU_PCREL32 3u
+#define R_KLAUSSCPU_CALL18  6u
 
 #define ELF32_R_TYPE(info)  ((info) & 0xFFu)
 
@@ -150,7 +151,8 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
     }
 
     /* Apply ABS32/ABS64 relocations (only needed when delta != 0).
-     * PCREL32 entries are skipped — they are already correct for any base.
+     * PCREL32 and CALL18 (short call) entries are skipped — they are
+     * already correct for any base; so are lld's call thunks (jmprel).
      * Requires the ELF to have been linked with lld --emit-relocs. */
     if (delta != 0 && ehdr.e_shoff != 0) {
         Elf32_Shdr shdr;
@@ -180,7 +182,7 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
                     unsigned long long nw = old + (unsigned long long)(long long)delta;
                     memcpy(loc, &nw, 8);
                 }
-                /* PCREL32 / NONE: no fixup needed */
+                /* PCREL32 / CALL18 / NONE: no fixup needed */
             }
         }
         printf("loader: relocations applied\n");

@@ -44,6 +44,7 @@
 #define R_KLAUSSCPU_ABS32   1u
 #define R_KLAUSSCPU_ABS64   2u
 #define R_KLAUSSCPU_PCREL32 3u
+#define R_KLAUSSCPU_CALL18  6u
 
 #define ELF32_R_TYPE(info) ((info) & 0xFFu)
 
@@ -177,7 +178,8 @@ static int load_elf(int sock, u32 load_base, pic_entry_fn *entry_out) {
             memset(dest + phdr.p_filesz, 0, phdr.p_memsz - phdr.p_filesz);
     }
 
-    /* Apply ABS32/ABS64 relocations (skip PCREL32 — already correct). */
+    /* Apply ABS32/ABS64 relocations (skip PCREL32 and CALL18 — PC-relative,
+     * already correct for any base, as are lld's call thunks). */
     if (delta != 0 && ehdr.e_shoff != 0) {
         Elf32_Shdr shdr;
         for (int i = 0; i < ehdr.e_shnum; i++) {

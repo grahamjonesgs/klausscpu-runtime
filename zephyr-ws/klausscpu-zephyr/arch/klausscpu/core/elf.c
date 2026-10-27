@@ -15,9 +15,9 @@
  * (Newer Zephyr changed this to (ldr, ext, rel, shdr) and does symbol
  *  lookup inside the arch hook — see arch/riscv/core/elf.c on main.)
  *
- * KlaussCPU relocations are whole-field (no HI20/LO12 splitting, no
- * instruction-immediate bit-packing), so unlike RISC-V/ARM this handler is
- * tiny: three real cases.
+ * KlaussCPU relocations are whole-field (no HI20/LO12 splitting) except the
+ * short call's word displacement, so unlike RISC-V/ARM this handler is tiny:
+ * four real cases.
  *
  * Endianness: KlaussCPU data memory is little-endian, and lld writes every
  * relocated field (including the instruction word-1 immediate slot) with
@@ -46,6 +46,7 @@ LOG_MODULE_REGISTER(elf, CONFIG_LLEXT_LOG_LEVEL);
 #define R_KLAUSSCPU_ABS32   1
 #define R_KLAUSSCPU_ABS64   2
 #define R_KLAUSSCPU_PCREL32 3
+#define R_KLAUSSCPU_CALL18  6
 
 /*
  * PC-relative fields are stored relative to the START of the instruction,
@@ -98,6 +99,29 @@ int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc, uintptr_t sym_base_addr,
 					KLAUSSCPU_PCREL_INSN_BIAS),
 			     (uint8_t *)loc);
 		break;
+
+	case R_KLAUSSCPU_CALL18: {
+		/* ISA v3 short CALL (word 0 0x63000000): simm18 word displacement
+		 * (S + A - P) / 4 in word0[17:0], P = the instruction itself (the
+		 * relocation is at its start).  It reaches +-512 KiB; lld calls a
+		 * further callee through a thunk, which this loader cannot add.
+		 * Extensions are therefore built with long calls (-mllvm
+		 * -klausscpu-short-calls=false, LLEXT_APPEND_FLAGS), and a short
+		 * call here is one between objects bundled into the extension. */
+		intptr_t disp = (intptr_t)(sym_base_addr + rel->r_addend) -
+				(intptr_t)loc;
+
+		if ((disp & 3) != 0 || disp < -(1 << 19) || disp >= (1 << 19)) {
+			LOG_ERR("short call to '%s' out of reach (%ld bytes): build "
+				"with -mllvm -klausscpu-short-calls=false",
+				sym_name ? sym_name : "?", (long)disp);
+			return -ENOEXEC;
+		}
+		sys_put_le32((sys_get_le32((uint8_t *)loc) & ~0x3FFFFu) |
+				     ((uint32_t)(disp >> 2) & 0x3FFFFu),
+			     (uint8_t *)loc);
+		break;
+	}
 
 	default:
 		LOG_ERR("unsupported relocation type %u for symbol '%s'",

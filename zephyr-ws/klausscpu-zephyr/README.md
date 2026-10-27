@@ -198,6 +198,15 @@ and add its name to `EXT_DEMOS` in the Makefile. It may call any symbol exported
 in `ssh/llext_exports.c` (printf, puts, putchar, getchar, malloc/calloc/realloc/
 free, mem*/str*) plus the inline MMIO helpers in `mmio.h`.
 
+Extensions are compiled with long calls (`-mllvm -klausscpu-short-calls=false`:
+the Makefile's `EXT_CFLAGS`, and `LLEXT_APPEND_FLAGS` from
+`cmake/compiler/clang/target.cmake` for `add_llext_target`).  The 1-word short
+CALL reaches only +-512 KiB, and lld bridges a longer call with a thunk that
+the loader cannot add, so a call from the llext heap to a kernel export must be
+the 2-word `CALLREL`/`CALL`.  The loader (`arch/klausscpu/core/elf.c`) does apply
+`R_KLAUSSCPU_CALL18` between objects bundled into one extension (e.g. the
+compiler-rt objects in `test_fp.llext`), and rejects one that is out of reach.
+
 ### Running it
 
 Copy the `.llext` to the SD card, then over SSH (`ssh admin@<ip>`, pw `klausscpu`):
