@@ -36,16 +36,18 @@
 LOG_MODULE_REGISTER(elf, CONFIG_LLEXT_LOG_LEVEL);
 
 /*
- * KlaussCPU relocation types — mirror of the values in
- * llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def and the loader in
- * runtime/programs/loader.c.  (No <zephyr/arch/klausscpu/elf.h> exists yet;
- * if LLEXT support is adopted, move these there alongside an EM_KLAUSSCPU
- * definition.)
+ * KlaussCPU relocation types — mirror of
+ * llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def (and of the
+ * runtime's klausscpu_elf.h, which this arch does not include to stay
+ * self-contained).  klausscpu-runtime/check-toolchain-constants.py checks
+ * that they agree.
  */
 #define R_KLAUSSCPU_NONE    0
 #define R_KLAUSSCPU_ABS32   1
 #define R_KLAUSSCPU_ABS64   2
 #define R_KLAUSSCPU_PCREL32 3
+#define R_KLAUSSCPU_PC32    4
+#define R_KLAUSSCPU_PC64    5
 #define R_KLAUSSCPU_CALL18  6
 
 /*
@@ -97,6 +99,20 @@ int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc, uintptr_t sym_base_addr,
 		 * convention; identical to lld's relocate()). */
 		sys_put_le32((uint32_t)(sym_base_addr + rel->r_addend - loc +
 					KLAUSSCPU_PCREL_INSN_BIAS),
+			     (uint8_t *)loc);
+		break;
+
+	case R_KLAUSSCPU_PC32:
+		/* 32-bit PC-relative data, a symbol difference such as the
+		 * -fPIC relative lookup tables (`.long str - table`).  S + A - P
+		 * exactly: the field itself is the origin, no instruction bias. */
+		sys_put_le32((uint32_t)(sym_base_addr + rel->r_addend - loc),
+			     (uint8_t *)loc);
+		break;
+
+	case R_KLAUSSCPU_PC64:
+		/* 64-bit PC-relative data (`.quad a - b`).  S + A - P. */
+		sys_put_le64((uint64_t)(sym_base_addr + rel->r_addend - loc),
 			     (uint8_t *)loc);
 		break;
 

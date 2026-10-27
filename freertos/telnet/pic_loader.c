@@ -22,6 +22,7 @@
 #include "lwip/sockets.h"
 
 #include "ff.h"
+#include "klausscpu_elf.h"
 #include "pic_loader.h"
 
 /* ── PIC load address ────────────────────────────────────────────────────── */
@@ -37,14 +38,9 @@
 #define ELFMAG1  'E'
 #define ELFMAG2  'L'
 #define ELFMAG3  'F'
-#define PT_LOAD  1u
-#define SHT_RELA 4u
-
-#define R_KLAUSSCPU_NONE    0u
-#define R_KLAUSSCPU_ABS32   1u
-#define R_KLAUSSCPU_ABS64   2u
-#define R_KLAUSSCPU_PCREL32 3u
-#define R_KLAUSSCPU_CALL18  6u
+#define PT_LOAD   1u
+#define SHT_RELA  4u
+#define SHF_ALLOC 2u
 
 #define ELF32_R_TYPE(info) ((info) & 0xFFu)
 
@@ -143,6 +139,11 @@ static int load_elf(int sock, u32 load_base, pic_entry_fn *entry_out) {
         sock_printf(sock, "Bad ELF magic\r\n");
         return -1;
     }
+    if (ehdr.e_machine != EM_KLAUSSCPU) {
+        sock_printf(sock, "Not a KlaussCPU ELF (e_machine 0x%x)\r\n",
+                    (unsigned)ehdr.e_machine);
+        return -1;
+    }
 
     u32 link_base = 0xFFFFFFFFu;
     Elf32_Phdr phdr;
@@ -178,14 +179,19 @@ static int load_elf(int sock, u32 load_base, pic_entry_fn *entry_out) {
             memset(dest + phdr.p_filesz, 0, phdr.p_memsz - phdr.p_filesz);
     }
 
-    /* Apply ABS32/ABS64 relocations (skip PCREL32 and CALL18 — PC-relative,
-     * already correct for any base, as are lld's call thunks). */
+    /* Apply ABS32/ABS64 relocations (skip PCREL32, PC32, PC64 and CALL18 —
+     * PC-relative, already correct for any base, as are lld's call thunks).
+     * Only loaded sections: .debug_* (non-SHF_ALLOC) relocations hold
+     * section offsets, not addresses. */
     if (delta != 0 && ehdr.e_shoff != 0) {
-        Elf32_Shdr shdr;
+        Elf32_Shdr shdr, target;
         for (int i = 0; i < ehdr.e_shnum; i++) {
             if (fread_at(ehdr.e_shoff + i * ehdr.e_shentsize, &shdr,
                          sizeof(shdr)) != 0) continue;
             if (shdr.sh_type != SHT_RELA || shdr.sh_entsize == 0) continue;
+            if (fread_at(ehdr.e_shoff + shdr.sh_info * ehdr.e_shentsize,
+                         &target, sizeof(target)) != 0) continue;
+            if (!(target.sh_flags & SHF_ALLOC)) continue;
 
             u32 n = shdr.sh_size / shdr.sh_entsize;
             for (u32 j = 0; j < n; j++) {

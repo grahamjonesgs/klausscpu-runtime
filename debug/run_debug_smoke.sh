@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Debugger smoke test on the emulator: build baremetal/programs/dbgtest.c with
 # -O1 -g, serve it with `klausscc --gdbserver`, drive lldb with smoke.lldb and
-# check breakpoints, backtraces, variables, step-out return values,
-# conditional breakpoints, watchpoints, the debugtrap and the exit status;
+# check breakpoints, backtraces, the ABI plugin's unwind plans, variables,
+# step-out return values, conditional breakpoints, watchpoints, the
+# debugtrap and the exit status;
 # then drive lldb-dap over DAP the way VS Code does (dap_smoke.py).
 #
 #   KLAUSSCPU_LLVM_BIN  toolchain bin dir (default ../klausscpu-llvm/build/bin)
@@ -47,6 +48,8 @@ check lldb.txt 'square(v=-3)'
 check lldb.txt 'Return value: (long) $0 = 9'
 check lldb.txt 'fib(n=1) at dbgtest.c'
 check lldb.txt 'fib(n=6) at dbgtest.c'
+check lldb.txt 'row[0]:    0: CFA=r15+16 => r15=[CFA-16] sp=CFA+0 pc=[CFA-8]'
+check lldb.txt 'row[0]:    0: CFA=sp +8 => sp=CFA+0 pc=[CFA-8]'
 check lldb.txt 'Watchpoint 1 hit'
 check lldb.txt 'new value: 3'
 check lldb.txt '(int) i = 4'

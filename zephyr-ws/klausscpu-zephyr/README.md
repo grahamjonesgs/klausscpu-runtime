@@ -206,6 +206,10 @@ the loader cannot add, so a call from the llext heap to a kernel export must be
 the 2-word `CALLREL`/`CALL`.  The loader (`arch/klausscpu/core/elf.c`) does apply
 `R_KLAUSSCPU_CALL18` between objects bundled into one extension (e.g. the
 compiler-rt objects in `test_fp.llext`), and rejects one that is out of reach.
+It handles every KlaussCPU relocation type, including the PC-relative data
+ones (`R_KLAUSSCPU_PC32`/`PC64`, e.g. the relative lookup tables of `-fPIC`
+code); `check-toolchain-constants.py` at the top of klausscpu-runtime checks
+its list against klausscpu-llvm's `KlaussCPU.def`.
 
 ### Running it
 

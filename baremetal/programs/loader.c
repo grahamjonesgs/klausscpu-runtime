@@ -29,6 +29,7 @@
 #include <string.h>
 #include "ff.h"
 #include "../../mmio.h"
+#include "../../klausscpu_elf.h"
 
 /* ── Load address ──────────────────────────────────────────────────────── */
 #define PIC_LOAD_ADDR   0x04000000UL
@@ -46,15 +47,9 @@ typedef int (*pic_entry_fn)(void (*mirror_fn)(char));
 #define ELFMAG1  'E'
 #define ELFMAG2  'L'
 #define ELFMAG3  'F'
-#define PT_LOAD  1u
-#define SHT_RELA 4u
-
-/* KlaussCPU relocation types */
-#define R_KLAUSSCPU_NONE    0u
-#define R_KLAUSSCPU_ABS32   1u
-#define R_KLAUSSCPU_ABS64   2u
-#define R_KLAUSSCPU_PCREL32 3u
-#define R_KLAUSSCPU_CALL18  6u
+#define PT_LOAD   1u
+#define SHT_RELA  4u
+#define SHF_ALLOC 2u
 
 #define ELF32_R_TYPE(info)  ((info) & 0xFFu)
 
@@ -116,6 +111,11 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
         printf("loader: bad ELF magic\n");
         return -1;
     }
+    if (ehdr.e_machine != EM_KLAUSSCPU) {
+        printf("loader: not a KlaussCPU ELF (e_machine 0x%x)\n",
+               (unsigned)ehdr.e_machine);
+        return -1;
+    }
 
     /* Find link base = lowest PT_LOAD VMA. */
     u32 link_base = 0xFFFFFFFFu;
@@ -151,16 +151,21 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
     }
 
     /* Apply ABS32/ABS64 relocations (only needed when delta != 0).
-     * PCREL32 and CALL18 (short call) entries are skipped — they are
-     * already correct for any base; so are lld's call thunks (jmprel).
+     * The PC-relative ones (PCREL32, PC32, PC64, CALL18) are skipped — they
+     * are already correct for any base; so are lld's call thunks (jmprel).
+     * Only sections that are loaded are patched: the relocations of
+     * .debug_* (non-SHF_ALLOC) have section offsets, not addresses.
      * Requires the ELF to have been linked with lld --emit-relocs. */
     if (delta != 0 && ehdr.e_shoff != 0) {
-        Elf32_Shdr shdr;
+        Elf32_Shdr shdr, target;
         for (int i = 0; i < ehdr.e_shnum; i++) {
             if (fread_at(ehdr.e_shoff + i * ehdr.e_shentsize, &shdr,
                          sizeof(shdr)) != 0) continue;
             if (shdr.sh_type != SHT_RELA) continue;
             if (shdr.sh_entsize == 0) continue;
+            if (fread_at(ehdr.e_shoff + shdr.sh_info * ehdr.e_shentsize,
+                         &target, sizeof(target)) != 0) continue;
+            if (!(target.sh_flags & SHF_ALLOC)) continue;
 
             u32 n = shdr.sh_size / shdr.sh_entsize;
             for (u32 j = 0; j < n; j++) {
@@ -182,7 +187,7 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
                     unsigned long long nw = old + (unsigned long long)(long long)delta;
                     memcpy(loc, &nw, 8);
                 }
-                /* PCREL32 / CALL18 / NONE: no fixup needed */
+                /* PCREL32 / PC32 / PC64 / CALL18 / NONE: no fixup needed */
             }
         }
         printf("loader: relocations applied\n");

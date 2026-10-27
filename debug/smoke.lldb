@@ -13,6 +13,8 @@ breakpoint delete
 breakpoint set -n fib -c 'n == 1'
 continue
 bt
+# The ABI plugin's fallback unwind plans (llvm/TargetParser/KlaussCPUABI.h).
+target modules show-unwind -n fib
 breakpoint delete
 watchpoint set variable counter
 continue
