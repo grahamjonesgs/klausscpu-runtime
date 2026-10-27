@@ -11,6 +11,9 @@
  *   - char-key switch (offset key, still dense)
  *   - sparse switch with default branch (LLVM may keep this as if/else, but
  *     the harness still verifies behaviour)
+ *   - a 16-opcode interpreter loop and a 12-case switch over 23 keys: the
+ *     backend builds a jump table from 12 cases at 40% density, so these
+ *     two are the ones that take the table dispatch (T1-T4 are below that)
  *
  * Run output should print "PASS" for every test then a results summary.
  */
@@ -97,6 +100,56 @@ static int sparse(int k) {
     }
 }
 
+/* ── T5: 16-opcode interpreter loop (a jump table from 12 cases) ─────────── */
+
+enum { OP_ADD, OP_SUB, OP_XOR, OP_SHL, OP_SHR, OP_INC, OP_DEC, OP_DUP,
+       OP_SWAP, OP_MUL3, OP_NOT, OP_ROT, OP_AND, OP_OR, OP_NEG, OP_HALT };
+
+static unsigned long interp(const unsigned char *p, unsigned long a,
+                            unsigned long b) {
+    for (;;) {
+        switch (*p++) {
+        case OP_ADD:  a = a + b;                       break;
+        case OP_SUB:  a = a - b;                       break;
+        case OP_XOR:  a = a ^ b;                       break;
+        case OP_SHL:  a = a << 1;                      break;
+        case OP_SHR:  a = a >> 1;                      break;
+        case OP_INC:  a++;                             break;
+        case OP_DEC:  b--;                             break;
+        case OP_DUP:  b = a;                           break;
+        case OP_SWAP: { unsigned long t = a; a = b; b = t; } break;
+        case OP_MUL3: a = a * 3;                       break;
+        case OP_NOT:  a = ~a;                          break;
+        case OP_ROT:  a = (a << 7) | (a >> 57);        break;
+        case OP_AND:  a = a & (b | 0xFF);              break;
+        case OP_OR:   a = a | (b & 0xF0F0);            break;
+        case OP_NEG:  a = 0 - a;                       break;
+        case OP_HALT: return a ^ (b << 1);
+        default:      a += 0x5A5A;                     break;  /* bad opcode */
+        }
+    }
+}
+
+/* ── T6: 12 cases over 23 keys (a table indexed by c - 'b') ──────────────── */
+
+static unsigned long sparse_dense(int c, unsigned long v) {
+    switch (c) {
+    case 'b': return v + 1;
+    case 'd': return v * 7;
+    case 'f': return v - 100;
+    case 'h': return v ^ 0x55;
+    case 'j': return v << 3;
+    case 'l': return v >> 2;
+    case 'n': return 0 - v;
+    case 'p': return v | 0x1000;
+    case 'r': return v & 0xFF;
+    case 't': return v * v;
+    case 'v': return v + 'v';
+    case 'x': return 3 * v + 1;
+    default:  return 7;
+    }
+}
+
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -156,6 +209,32 @@ int main(void) {
         ok = ok && (sparse(   0) ==      0);
         ok = ok && (sparse(   2) ==      0);
         check("T4 sparse switch:  ", ok);
+    }
+
+    /* T5: interpreter loop over every opcode, an unknown one and HALT.
+     * Expected values from the same code built with host gcc. */
+    {
+        unsigned char prog[256];
+        unsigned s = 1;
+        for (int i = 0; i < 255; i++) {
+            s = s * 1103515245u + 12345u;
+            prog[i] = (s >> 16) % 17;           /* 16: an unknown opcode */
+            if (prog[i] == OP_HALT)
+                prog[i] = 16;
+        }
+        prog[255] = OP_HALT;
+        unsigned long r = 0;
+        for (int k = 0; k < 4; k++)
+            r += interp(prog, r + k, 12345 * k);
+        check("T5 interp loop:    ", r == 9918552UL);
+    }
+
+    /* T6: every key in and around 'b'..'x' */
+    {
+        unsigned long t = 0;
+        for (int c = 'a' - 2; c <= 'z' + 2; c++)
+            t = t * 31 + sparse_dense(c, c + t % 1000);
+        check("T6 sparse table:   ", t == 12686950814770859519UL);
     }
 
     printf("\nResults: %d pass, %d fail\n", g_pass, g_fail);
