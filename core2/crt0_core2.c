@@ -16,7 +16,10 @@ extern void __stdio_init(void);
 extern char __data_start[], __data_end[], __data_load_start[];
 extern char __bss_start[], __bss_end[], _end[];
 
-__attribute__((noreturn, used))
+/* no_builtin: the .data copy and BSS loops stay loops.  Programs are compiled
+ * hosted, where the compiler would make them memcpy/memset calls -- made
+ * before .data exists, so the C library would have to touch no globals. */
+__attribute__((noreturn, used, no_builtin("memcpy", "memset")))
 void _start(void)
 {
     const char *src = __data_load_start;
