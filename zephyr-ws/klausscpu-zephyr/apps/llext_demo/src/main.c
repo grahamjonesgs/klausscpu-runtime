@@ -13,7 +13,10 @@
 #include <zephyr/llext/buf_loader.h>
 #include <zephyr/llext/symbol.h>
 
-#include "hello_ext_bin.inc"
+/* ext/hello_ext.c, compiled at build time (see CMakeLists.txt). */
+static const unsigned char __aligned(8) hello_ext_bin[] = {
+#include "hello_ext.inc"
+};
 
 /* The extension references printk; expose it to the loader's symbol table. */
 EXPORT_SYMBOL(printk);

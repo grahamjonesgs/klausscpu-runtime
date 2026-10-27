@@ -1,10 +1,9 @@
 /*
  * hello_ext.c — minimal KlaussCPU LLEXT extension.
  *
- * Built standalone with the KlaussCPU clang into an ELFCLASS32 ET_REL object,
- * then embedded as a byte array (hello_ext_bin.inc) into the demo app.  See
- * apps/llext_demo/README or the Makefile-style command in CMakeLists for the
- * exact compile invocation.
+ * Compiled at build time with the KlaussCPU clang into an ELFCLASS32 ET_REL
+ * object, then embedded as a byte array (hello_ext.inc) into the demo app.
+ * See ../CMakeLists.txt for the exact compile invocation.
  *
  * `hello_world` is an ordinary GLOBAL function, so the loader records it in the
  * extension's symbol table (llext_copy_symbols) and the app resolves it with
