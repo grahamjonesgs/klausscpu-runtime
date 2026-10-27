@@ -13,6 +13,7 @@
 #   make test_asm       — inline assembly test
 #   make test_printf    — varargs / printf test
 #   make test_atomic    — C atomics (src/atomic.c) incl. a timer-ISR stress test
+#   make test_flags     — the flags each instruction writes vs the compiler's model
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
 #   make all            — every .elf
 #   make clean
@@ -145,7 +146,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf test_varargs test_atomic perf_baseline perf_haz fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs test_atomic test_flags perf_baseline perf_haz fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture
@@ -267,6 +268,14 @@ test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_atomic.elf: test_atomic.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_atomic.o)
+
+# test_flags: one generated assembly function per instruction
+# (programs/gen_test_flags.py writes test_flags_cases.S / .h).
+test_flags_cases.o: programs/test_flags_cases.S
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_flags.elf: test_flags.o test_flags_cases.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_flags_cases.o test_flags.o)
 
 # Debugger smoke-test program (../debug/run_debug_smoke.sh); build with
 # OPT="-O1 -g" to debug it with lldb / VS Code (see ../DEBUGGING.md).

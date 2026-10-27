@@ -132,6 +132,13 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
   is the test. This needs a klausscpu-llvm with "forced atomics" (an older
   toolchain makes every atomic an `__atomic_*` call, so `test_atomic` does
   not link).
+- `baremetal/programs/test_flags.c` checks which flags (Z S C V) every
+  instruction writes against the compiler's model of them (a `Defs = [FLAGS]`
+  that is missing is a miscompile).  After changing the backend's instruction
+  definitions, regenerate its cases with
+  `python3 programs/gen_test_flags.py <klausscpu-llvm>` (it fails when the
+  `.td` and its table of the RTL's flag masks disagree) and run it on the
+  emulator and the board.
 - A program ends with `HALT` (exit status in R12) when `main` returns or
   `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
   abnormal stop (crash dump on the board, `stop = Trap` in the emulator).
