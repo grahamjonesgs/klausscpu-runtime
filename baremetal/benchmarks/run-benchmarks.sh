@@ -60,7 +60,12 @@ for OPT in "${OPTS[@]}"; do
         echo "BUILD FAILED — see $R/build.log"; fail=1; continue
     fi
     {
-        echo "toolchain: $(git -C "$KLAUSSCPU_LLVM_BIN/../.." rev-parse --short=12 HEAD 2>/dev/null || echo unknown)  OPT=$OPT"
+        # clang's version string names the klausscpu-llvm commit it was built
+        # from (not whether that tree had uncommitted changes); add the git
+        # state when KLAUSSCPU_LLVM_BIN is <klausscpu-llvm>/build/bin.
+        tc=$("$KLAUSSCPU_LLVM_BIN/clang" --version 2>/dev/null | grep -o 'klausscpu-llvm[^ ]* [0-9a-f]*' | awk '{print substr($2,1,12)}')
+        dirty=$(git -C "$KLAUSSCPU_LLVM_BIN/../.." status --porcelain --untracked-files=no 2>/dev/null | grep -q . && echo " (llvm tree has uncommitted changes)")
+        echo "toolchain: ${tc:-unknown}${dirty}  OPT=$OPT"
     } >"$R/summary.txt"
 
     if [ "${RUN_COREMARK:-1}" != 0 ]; then

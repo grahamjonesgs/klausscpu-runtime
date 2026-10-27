@@ -1,0 +1,168 @@
+# Benchmark results: CoreMark and Embench-IoT on the KlaussCPU board
+
+How the benchmarks are built and run, and how they are scored, is in
+[README.md](README.md). These numbers are an interim baseline. The compiler
+work under way will change them, and they will be measured again when it
+lands.
+
+## Setup
+
+| | |
+|---|---|
+| Board | Nexys A7-100T (Artix-7), KlaussCPU core 1, **100 MHz** (MIG `ui_clk`) |
+| Toolchain | klausscpu-llvm **`ca184a1c92dc`**, *plus* the uncommitted work-in-progress pre-RA machine scheduler (`KlaussCPUMachineScheduler.{cpp,h}`, wired into `KlaussCPUTargetMachine::createMachineScheduler`). `build/bin/clang-23` was built 2026-10-27 15:58:26 and frozen for the whole run (clang-23 sha256 `4dec783eb2225346…`). See the notes for the committed-tree figure. |
+| Runtime | klausscpu-runtime `8d594c9` (branch `benchmarks`), picolibc-install built 2026-10-16 |
+| Benchmarks | CoreMark v1.01 `cfa9ab3`; Embench-IoT 1.0 `0466a18` |
+| Flags | `-target klausscpu-unknown-elf $(OPT) -ffunction-sections -fdata-sections -fPIC`, `ld.lld --gc-sections`; soft-float via compiler-rt (built at -O1) |
+| Date | 2026-10-27 |
+| Command | `benchmarks/run-benchmarks.sh -O2 -Os -O1` |
+
+The board's cycle counts are deterministic. On the same binary, a repeat run
+gives the same Embench cycle counts to the cycle, and the same CoreMark count
+(-Os 2355954726 cycles in both runs).
+
+## Summary
+
+| OPT | CoreMark | CoreMark/MHz | CoreMark CPI | Embench speed (geomean, per MHz, vs Cortex-M4) | Embench size (geomean, vs Cortex-M4 -Os) | Verification |
+|---|---:|---:|---:|---:|---:|---|
+| -O2 | 98.33 | 0.983 | 2.96 | 0.509 | 2.563 | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+| -Os | 84.89 | 0.849 | 3.12 | 0.471 | 1.826 | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+| -O1 | 95.24 | 0.952 | 3.08 | 0.496 | 1.829 | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+
+## CoreMark
+
+2K data set (`TOTAL_DATA_SIZE=2000`), 2000 iterations, `MEM_STACK`, one
+context. Every run printed "Correct operation validated".
+
+| OPT | run | seeds | time (s) | cycles | instructions | CoreMark | crclist | crcmatrix | crcstate | crcfinal |
+|---|---|---|---:|---:|---:|---:|---|---|---|---|
+| -O2 | performance | 0,0,0x66 | 20.34 | 2033947061 | 687649570 | 98.33 | 0xe714 | 0x1fd7 | 0x8e3a | 0x4983 |
+| -O2 | validation | 0x3415,0x3415,0x66 | 20.39 | 2038517003 | 686508171 | 98.11 | 0xe3c1 | 0x0747 | 0x8d84 | 0x0cac |
+| -Os | performance | 0,0,0x66 | 23.56 | 2355954726 | 756156479 | 84.89 | 0xe714 | 0x1fd7 | 0x8e3a | 0x4983 |
+| -Os | validation | 0x3415,0x3415,0x66 | 23.62 | 2362485031 | 758011083 | 84.66 | 0xe3c1 | 0x0747 | 0x8d84 | 0x0cac |
+| -O1 | performance | 0,0,0x66 | 21.00 | 2099985418 | 682062314 | 95.24 | 0xe714 | 0x1fd7 | 0x8e3a | 0x4983 |
+| -O1 | validation | 0x3415,0x3415,0x66 | 21.06 | 2106327087 | 683577121 | 94.95 | 0xe3c1 | 0x0747 | 0x8d84 | 0x0cac |
+
+These match CoreMark's reference CRCs: 2K performance list/matrix/state
+0xe714/0x1fd7/0x8e3a, and 2K validation 0xe3c1/0x0747/0x8d84. They also match a
+host (x86-64 gcc -O2) build of the same port. The host build gives crcfinal
+0x4983 and 0x0cac at 2000 iterations, the same as the board.
+
+The run-rules report line, -O2:
+`CoreMark 1.0 : 98.330976 / Clang 23.0.0git (… ca184a1c92dc…) -O2 / STACK`
+
+## Embench-IoT 1.0
+
+`CPU_MHZ=1` and `WARMUP_HEAT=1`. Cycles and instructions span
+`start_trigger()` to `stop_trigger()`. In these tables:
+
+- **verify** is the result of `verify_benchmark()`.
+- **.text** is the `.text` of the dummy-library size build (Embench's size
+  method).
+- **rel. speed** is reference ms × 1000 / cycles: the speed per MHz relative to
+  the reference Cortex-M4 at -O2. Higher is better.
+- **rel. size** is `.text` / reference `.text`, where the reference is the
+  Cortex-M4 at -Os. Lower is better.
+
+The reference is an Arm Cortex-M4 compiled with GCC 9.2. The speed reference
+was built at -O2 and the size reference at -Os, so -O2 speed and -Os size are
+the like-for-like comparisons.
+
+### -O2
+
+| benchmark | cycles | instr | CPI | verify | .text (B) | rel. speed | rel. size |
+|---|---:|---:|---:|---|---:|---:|---:|
+| aha-mont64 | 3531452 | 2322333 | 1.52 | PASS | 1696 | 1.134 | 1.582 |
+| crc32 | 10670727 | 2918259 | 3.66 | PASS | 560 | 0.376 | 1.972 |
+| cubic | 7576661 | 3244366 | 2.34 | PASS | 3424 | 0.519 | 2.162 |
+| edn | 9816046 | 3011469 | 3.26 | PASS | 2616 | 0.409 | 1.976 |
+| huffbench | 7806787 | 2649191 | 2.95 | PASS | 3420 | 0.528 | 2.754 |
+| matmult-int | 11997291 | 2808799 | 4.27 | PASS | 1932 | 0.332 | 3.927 |
+| minver | 10309894 | 3639723 | 2.83 | PASS | 5716 | 0.388 | 4.894 |
+| nbody | 4401436 | 2193099 | 2.01 | PASS | 6048 | 0.638 | 6.366 |
+| nettle-aes | 9356184 | 3740033 | 2.50 | PASS | 5492 | 0.430 | 2.557 |
+| nettle-sha256 | 9974860 | 4338584 | 2.30 | PASS | 8564 | 0.401 | 2.522 |
+| nsichneu | 11140782 | 2007800 | 5.55 | PASS | 17744 | 0.359 | 1.483 |
+| picojpeg | 9611374 | 3179755 | 3.02 | PASS | 30036 | 0.419 | 4.313 |
+| qrduino | 7547884 | 2872452 | 2.63 | PASS | 17340 | 0.563 | 2.982 |
+| sglib-combined | 8715988 | 2479018 | 3.52 | PASS | 4880 | 0.457 | 2.148 |
+| slre | 9700388 | 2944580 | 3.29 | PASS | 6452 | 0.413 | 2.933 |
+| st | 4924631 | 2066055 | 2.38 | PASS | 3476 | 0.828 | 3.476 |
+| statemate | 6436467 | 1835409 | 3.51 | PASS | 8464 | 0.622 | 1.888 |
+| ud | 8767925 | 2920576 | 3.00 | PASS | 2972 | 0.456 | 4.128 |
+| wikisort | 2677124 | 898096 | 2.98 | PASS | 2672 | 1.038 | 0.622 |
+| **geomean** | | | | | | **0.509** | **2.563** |
+| geo. SD | | | | | | 1.405 | 1.661 |
+
+### -Os
+
+| benchmark | cycles | instr | CPI | verify | .text (B) | rel. speed | rel. size |
+|---|---:|---:|---:|---|---:|---:|---:|
+| aha-mont64 | 4445537 | 2464882 | 1.80 | PASS | 1252 | 0.901 | 1.168 |
+| crc32 | 11853201 | 3311460 | 3.58 | PASS | 464 | 0.338 | 1.634 |
+| cubic | 7432780 | 3251749 | 2.29 | PASS | 2768 | 0.529 | 1.747 |
+| edn | 12126141 | 3457333 | 3.51 | PASS | 1992 | 0.331 | 1.505 |
+| huffbench | 8103639 | 2617652 | 3.10 | PASS | 2560 | 0.508 | 2.061 |
+| matmult-int | 14608601 | 4388437 | 3.33 | PASS | 808 | 0.273 | 1.642 |
+| minver | 9905240 | 3583670 | 2.76 | PASS | 2536 | 0.404 | 2.171 |
+| nbody | 4430682 | 2201310 | 2.01 | PASS | 1692 | 0.634 | 1.781 |
+| nettle-aes | 9386609 | 3747160 | 2.50 | PASS | 4108 | 0.429 | 1.912 |
+| nettle-sha256 | 10196035 | 4406137 | 2.31 | PASS | 7408 | 0.392 | 2.181 |
+| nsichneu | 11388240 | 2001644 | 5.69 | PASS | 16776 | 0.351 | 1.402 |
+| picojpeg | 11112297 | 3463693 | 3.21 | PASS | 13176 | 0.363 | 1.892 |
+| qrduino | 8121715 | 2847137 | 2.85 | PASS | 11920 | 0.524 | 2.050 |
+| sglib-combined | 9292188 | 2572920 | 3.61 | PASS | 4076 | 0.428 | 1.794 |
+| slre | 10268654 | 3059358 | 3.36 | PASS | 5080 | 0.391 | 2.309 |
+| st | 5046230 | 2102211 | 2.40 | PASS | 1712 | 0.809 | 1.712 |
+| statemate | 6968441 | 2007245 | 3.47 | PASS | 8028 | 0.574 | 1.790 |
+| ud | 6918670 | 2487512 | 2.78 | PASS | 1260 | 0.578 | 1.750 |
+| wikisort | 4324365 | 1227013 | 3.52 | PASS | 12056 | 0.643 | 2.806 |
+| **geomean** | | | | | | **0.471** | **1.826** |
+| geo. SD | | | | | | 1.361 | 1.207 |
+
+### -O1
+
+| benchmark | cycles | instr | CPI | verify | .text (B) | rel. speed | rel. size |
+|---|---:|---:|---:|---|---:|---:|---:|
+| aha-mont64 | 3901997 | 2557943 | 1.53 | PASS | 1360 | 1.026 | 1.269 |
+| crc32 | 11845767 | 3309939 | 3.58 | PASS | 464 | 0.339 | 1.634 |
+| cubic | 7431738 | 3256280 | 2.28 | PASS | 2816 | 0.529 | 1.778 |
+| edn | 11752659 | 3545121 | 3.32 | PASS | 2060 | 0.341 | 1.556 |
+| huffbench | 8027961 | 2668363 | 3.01 | PASS | 2796 | 0.513 | 2.251 |
+| matmult-int | 12899439 | 4078169 | 3.16 | PASS | 864 | 0.309 | 1.756 |
+| minver | 9998483 | 3640837 | 2.75 | PASS | 2788 | 0.400 | 2.387 |
+| nbody | 4356392 | 2203614 | 1.98 | PASS | 1688 | 0.645 | 1.777 |
+| nettle-aes | 9397453 | 3753090 | 2.50 | PASS | 4260 | 0.428 | 1.983 |
+| nettle-sha256 | 10247333 | 4419440 | 2.32 | PASS | 7572 | 0.390 | 2.230 |
+| nsichneu | 11140791 | 2007800 | 5.55 | PASS | 17884 | 0.359 | 1.494 |
+| picojpeg | 10447032 | 3548193 | 2.94 | PASS | 25824 | 0.386 | 3.708 |
+| qrduino | 7698866 | 2893198 | 2.66 | PASS | 12368 | 0.552 | 2.127 |
+| sglib-combined | 9121000 | 2583449 | 3.53 | PASS | 4320 | 0.436 | 1.901 |
+| slre | 9747377 | 3036370 | 3.21 | PASS | 5648 | 0.411 | 2.567 |
+| st | 5005914 | 2085523 | 2.40 | PASS | 1856 | 0.815 | 1.856 |
+| statemate | 6946848 | 2011175 | 3.45 | PASS | 8064 | 0.576 | 1.798 |
+| ud | 7101956 | 2682610 | 2.65 | PASS | 1420 | 0.563 | 1.972 |
+| wikisort | 2686170 | 907966 | 2.96 | PASS | 2572 | 1.035 | 0.599 |
+| **geomean** | | | | | | **0.496** | **1.829** |
+| geo. SD | | | | | | 1.415 | 1.413 |
+
+## Notes
+
+- **Committed toolchain.** Earlier the same day, the `clang-23` built at 15:27
+  was used. It predates the WIP scheduler sources and is most likely the
+  committed `ca184a1c92dc`. With it, CoreMark -O2 was 97.29 (2055740724 cycles,
+  692603570 instructions), and Embench -O2 had the same speed geomean of 0.509.
+  The WIP scheduler build is about 1% faster on CoreMark -O2.
+- **wikisort.** Its -Os `.text` is 4.5x the -O2 size, and it takes 1.6x the
+  cycles. At -O1/-O2, clang inlines `WikiSort()` into `benchmark_body()` with
+  `size` and `compare` constant-propagated, so the 12 KB out-of-line copy is
+  garbage-collected. At -Os it stays out of line, and generic.
+- **Code size.** -O2 code is about 2.6x the reference Cortex-M4 (-Os) on the
+  geomean, and -Os is about 1.8x. The largest ratios are nbody (6.4x at -O2,
+  1.8x at -Os) and minver: soft-float and FP-heavy code with inlining.
+- **fabs/fabsf.** clang emits these as libm calls on KlaussCPU. Arm GCC inlines
+  them as a sign-bit clear. This affects cubic, minver, nbody and st.
+- **CPI.** Embench CPI ranges from 1.5 (aha-mont64, native 64-bit) to 5.5
+  (nsichneu, a large, branchy state machine). CoreMark's CPI is about 3.0.
+- **No verification failures.** Every CoreMark run validated, and every
+  Embench benchmark returned `verify_benchmark() == 1`, at every level.
