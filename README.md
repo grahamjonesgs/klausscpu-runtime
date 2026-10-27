@@ -139,6 +139,15 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
   `python3 programs/gen_test_flags.py <klausscpu-llvm>` (it fails when the
   `.td` and its table of the RTL's flag masks disagree) and run it on the
   emulator and the board.
+- **A divide right after a taken fused branch (FBR) returns a stale result
+  on the board.** This is an RTL bug: the squashed divide keeps the divider
+  busy, and the next real divide completes with its result. The emulator
+  has no pipeline and never shows it. klausscpu-llvm now never fuses a
+  branch whose next instruction is a divide, but code built by an older
+  toolchain must be rebuilt, picolibc above all (its `qsort` has the
+  pattern; `./build-picolibc.sh`). Don't hand-write `fbr`/`fbri` directly
+  followed by `divr`/`divur`/`modr`/`modur`/`divv`/`modv`.
+  `baremetal/programs/test_divshadow.c` is the board test.
 - A program ends with `HALT` (exit status in R12) when `main` returns or
   `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
   abnormal stop (crash dump on the board, `stop = Trap` in the emulator).
