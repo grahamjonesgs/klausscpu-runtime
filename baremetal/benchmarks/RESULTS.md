@@ -5,6 +5,79 @@ How the benchmarks are built and run, and how they are scored, is in
 work under way will change them, and they will be measured again when it
 lands.
 
+## Code size: MachineOutliner and LTO (2026-10-28)
+
+klausscpu-llvm's 'size-opts' step: the MachineOutliner (on by default at
+-Oz only; `-moutline` / `-mno-outline` override it) and link-time
+optimisation (`make LTO=1`, off by default).  Board figures are
+`tools/validate/bench.sh` runs, each configuration run twice with identical
+results; "corpus" is the 39 bare-metal programs on the emulator (`.text`
+includes picolibc and the builtins, which were not rebuilt).
+
+**MachineOutliner**
+
+| | CoreMark | Embench speed | Embench size | corpus `.text` | corpus instructions |
+|---|---:|---:|---:|---:|---:|
+| -Os | 89.07 | 0.503 | 1.597 | 1,026,952 | 292,355,163 |
+| -Os -moutline | 78.96 (-11.4%) | 0.485 (-3.6%) | 1.475 (-7.6%) | -3.52% | +2.13% |
+| -Oz -mno-outline | 85.41 | 0.489 | 1.571 | 1,005,048 | 301,599,437 |
+| -Oz (outliner, the default) | 71.64 (-16.1%) | 0.469 (-4.1%) | 1.460 (-7.0%) | -2.74% | +0.60% |
+
+The speed cost is the call and return around outlined code in hot loops
+(nsichneu +38% cycles, qrduino +11%, picojpeg +7..15%), so the outliner is a
+-Oz feature; at -Os the size gain does not justify an 11% CoreMark loss.
+nsichneu's `.text` halves (16680 -> 7180 bytes).
+
+**LTO** (`make LTO=1`: the programs are bitcode, ld.lld optimises each
+whole; the compiler-rt builtins, `atomic.o`, assembly, picolibc and
+Embench's support code stay native)
+
+| corpus | `.text` | instructions |
+|---|---:|---:|
+| -O1 | +1.96% | -0.14% |
+| -O2 | +2.04% | +1.41% (dhrystone +4.7%) |
+| -Os | -3.76% | -0.27% |
+| -Oz | -4.37% (against -Oz, both with the outliner) | +0.0% |
+
+Board: CoreMark -O2 101.95, -Os 88.25, -Oz 72.80 (+0.8%, -0.9%, +1.6%);
+Dhrystone `-fno-builtin` at -O1 1488 cycles/run against 1470 (+1.2%),
+perf_baseline unchanged.  Embench is not built for whole-program
+optimisation: with its data internalised, LTO folds cubic at -O2 (167
+cycles) and most of statemate (-85% cycles, `.text` 7732 -> 772 bytes at
+-Os), so its LTO geomeans (speed 1.098 / 0.585 / 0.536, size 2.417 / 1.250 /
+1.155 at -O2 / -Os / -Oz, 19/19 PASS) are not comparable.  Per benchmark at
+-Os the rest moves by -24%..+3% in cycles and -73%..+4% in size; wikisort
+gets its -O2 code back (see below).  So LTO pays for size at -Os/-Oz and not
+at -O1/-O2, and stays off by default.
+
+**Zephyr** (`text` bytes; `tools/validate/zephyr/suite.sh` with
+`ZEPHYR_CMAKE_ARGS`; every app passes on the emulator in each
+configuration, and -Oz with LTO also on the board).  The port builds
+`CONFIG_SIZE_OPTIMIZATIONS` at -O2 (`cmake/compiler/clang/compiler_flags.cmake`);
+`CONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE` gives -Oz, `CONFIG_LTO` works with
+either since klausscpu-llvm passes the LTO options to lld.
+
+| app | -O2 | -O2 LTO | -Oz | -Oz LTO |
+|---|---:|---:|---:|---:|
+| hello | 10544 | 10444 | 9848 | 7900 |
+| mandel | 138844 | 157732 | 105540 | 93380 |
+| gui_lvgl | 435160 | 562496 | 337684 | 306588 |
+| doom | 458872 | 551088 | 325828 | 292416 |
+| ssh_shell | 854292 | 1180836 (+38%) | 580840 (-32%) | 511040 (-40%) |
+
+-Oz with LTO on the board, against the -O2 baseline: mandel -2.4%, doom
+draw fps 18 (was 20), LVGL frames 5-58% slower, irq_soak +2.9%.
+
+**wikisort at -Os** (the anomaly noted below) is not a KlaussCPU cost:
+at -O2 IPSCCP's function specialiser clones `WikiSort` for the constant
+`compare = TestCompare`, and the clone, internal with one call site, is
+inlined into `benchmark_body` and folded (10 KB of generic code becomes
+1 KB).  The specialiser skips `optsize` functions
+(`FunctionSpecializer::isCandidateFunction`), and the -Os inline threshold
+(50) is far below `WikiSort`'s cost (1210), so -Os keeps the generic
+out-of-line copy.  x86-64 behaves the same.  With LTO, `WikiSort` is
+internal and inlined at -Os too (-24% cycles, `.text` 10008 -> 2708).
+
 ## Latest: toolchain `65f26a14dd03` (2026-10-28)
 
 The same board, flags and command (`run-benchmarks.sh -O2 -Os`), after the
@@ -187,9 +260,11 @@ the like-for-like comparisons.
   692603570 instructions), and Embench -O2 had the same speed geomean of 0.509.
   The WIP scheduler build is about 1% faster on CoreMark -O2.
 - **wikisort.** Its -Os `.text` is 4.5x the -O2 size, and it takes 1.6x the
-  cycles. At -O1/-O2, clang inlines `WikiSort()` into `benchmark_body()` with
-  `size` and `compare` constant-propagated, so the 12 KB out-of-line copy is
-  garbage-collected. At -Os it stays out of line, and generic.
+  cycles. At -O1/-O2, clang specialises `WikiSort()` for its constant
+  `compare` and inlines the clone into `benchmark_body()`, so the 12 KB
+  out-of-line copy is garbage-collected. At -Os it stays out of line, and
+  generic: the function specialiser skips optsize code (target-independent;
+  see "Code size" above).
 - **Code size.** -O2 code is about 2.6x the reference Cortex-M4 (-Os) on the
   geomean, and -Os is about 1.8x. The largest ratios are nbody (6.4x at -O2,
   1.8x at -Os) and minver: soft-float and FP-heavy code with inlining.
