@@ -155,8 +155,10 @@ this checkout.
   `.td` and its table of the RTL's flag masks disagree) and run it on the
   emulator and the board.
 - **Unaligned data:** only `MEMGET32` (a 32-bit load from `[r]`) reads an
-  unaligned address; every other 16/32/64-bit load and every store uses the
-  aligned-down address, silently. klausscpu-llvm compiles packed-struct
+  unaligned address; every other 16/32-bit load or store and the A=1
+  64-bit forms use the aligned-down address, silently, and the A=0 ("raw")
+  64-bit forms pass the address on unmodified and must be given an aligned
+  one (CPU_ARCHITECTURE.md 8.3). klausscpu-llvm compiles packed-struct
   fields, `memcpy(&w, p, 4/8)` and bytes assembled into words to
   `MEMGET32` (two for 64 bits) and splits unaligned stores into bytes, but a
   plain `uint32_t *` (or `int *`) pointing at an unaligned address, e.g. the
