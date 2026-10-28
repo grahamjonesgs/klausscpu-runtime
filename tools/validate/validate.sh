@@ -22,6 +22,11 @@
 #   g-invariance [N] [FIRST]  N Csmith programs (default 100) compiled with -g
 #                         and -g0 at -Oz and -Os -moutline: the .text must be
 #                         identical
+#   cfi [N] [FIRST]       unwind info against emulator runs (cfi_run.sh): N
+#                         Csmith programs (default 100) at -O2 -g and -O3 -g
+#                         and the corpus at -O3 -g; at every PC the CFI must
+#                         recover the caller's CFA, return address, R15, R4-R7
+#                         (after a self-test of the checker on faulty CFI)
 #   lldb                  lldb end to end on the emulator (lldb_e2e.sh):
 #                         dbgtest at -O0/-O1/-O2, Zephyr and FreeRTOS
 #   lldb-board            the same on the board (DEBUG_EN=1 bitstream, a
@@ -118,6 +123,19 @@ g_invariance() {   # g_invariance <count> <first>
   else
     result FAIL "-g/-g0 .text ($1 seeds from $2)" "$(tail -n 1 "$OUT/g-invariance.log") -- see $OUT/g-invariance/fail"
   fi
+}
+cfi_one() {   # cfi_one <name> <label> <cfi_run.sh mode and args before the outdir...>
+  local name=$1 label=$2 mode=$3; shift 3
+  if "$HERE/cfi_run.sh" "$mode" "$@" "$OUT/cfi-$name" >"$OUT/cfi-$name.log" 2>&1; then
+    result PASS "CFI replay ($label)" "$(tail -n 1 "$OUT/cfi-$name.log")"
+  else
+    result FAIL "CFI replay ($label)" "$(tail -n 1 "$OUT/cfi-$name.log") -- see $OUT/cfi-$name/results.tsv"
+  fi
+}
+cfi() {   # cfi <count> <first>
+  cfi_one selftest "checker self-test" selftest
+  cfi_one csmith "$1 seeds from $2, -O2 -O3" csmith "$2" "$1"
+  cfi_one corpus "corpus -O3" corpus
 }
 lit() {
   local L=$LLVM_SRC
@@ -231,6 +249,7 @@ csmith-board)
   ;;
 abi) abi "${1:-8}" "${2:-1}" ;;
 g-invariance) g_invariance "${1:-100}" "${2:-${CSMITH_SEED:-1}}" ;;
+cfi) cfi "${1:-100}" "${2:-${CSMITH_SEED:-1}}" ;;
 selftest)
   E=${1:-}
   if [ -z "$E" ]; then "$HERE/emu_suite.sh" "$OUT/emu-O1" -O1; E=$OUT/emu-O1; fi

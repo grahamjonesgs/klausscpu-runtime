@@ -17,6 +17,7 @@ BOARD_LOCK=/path/board.lock tools/validate/validate.sh zephyr   # ~15 min on the
 tools/validate/validate.sh csmith 300 120000          # 300 seeds from 120000
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh csmith-board 100 120000
 tools/validate/validate.sh oracle [<previous oracle dir>]
+tools/validate/validate.sh cfi 100 120000   # ~4 min, unwind info vs emulator runs
 tools/validate/validate.sh lldb             # ~15 s, lldb on the emulator
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh lldb-board  # ~15 s on the board
 ```
@@ -217,6 +218,37 @@ compiled at -Oz and at -Os -moutline with -g and with -g0, and each pair's
 debug instructions used to change which of two equally good candidates it
 outlined, in a third of these programs, while a lit test showed one case
 where they did not.  Nothing is run, so it takes seconds.
+
+**cfi [N] [FIRST]** — `cfi_run.sh` and `cfi_check.py`: the unwind info
+(`.debug_frame`) must be right at every instruction that runs.
+`cfi_check.py <elf>` runs the program on the emulator with `--trace` and
+replays the trace against a shadow call stack: a call records the caller's
+SP (the CFA), the return address, and the caller's R15 and R4-R7; before
+every instruction in a function with an FDE, the row covering its PC
+(`llvm-dwarfdump --debug-frame`) is evaluated on the registers and on a
+shadow copy of memory built from the trace's stores, and must give back
+all of them (a register without a rule must still hold the caller's value;
+a save slot below SP is an error too, since an interrupt may overwrite it).
+A tail call keeps the frame it replaces; a frame ends when SP reaches its
+CFA (a return or longjmp); interrupt handlers (entered at an `INT_VECn`
+address) are not checked, the calls they make are; a `SETSP` of anything
+but R15 (a context switch) suspends checking until the next call.  It
+prints each disagreement with its function, PC, register, and the
+expected and recovered values.  The mode first checks the checker
+(`cfi_run.sh selftest`: a hand-written function with right CFI passes, and
+copies with a callee-saved spill missing its rule or a wrong CFA offset are
+flagged), then runs N Csmith programs (default
+100, from `CSMITH_SEED`; seeds with host-visible UB discarded as for
+`csmith`) at -O2 -g and -O3 -g, and the bare-metal corpus at -O3 -g with
+each program cut off at `CFI_MAX` instructions (default 20M; the idle and
+long-running programs are checked that far).  `cfi_run.sh csmith <first>
+<count> <dir> [level...]` and `cfi_run.sh corpus <dir> [level...]` take
+other levels.  It flags the -O3 tail duplication of a shrink-wrapped
+prologue that klausscpu-llvm now prevents (`cfi-prologue-no-taildup.ll`)
+in the review's reproducer and in 199 of 200 generated programs built
+around that shape (a select diamond in front of a prologue block of at most
+four instructions); the corpus and 300 Csmith seeds never contained it.
+About 3 minutes for the corpus, 30 seconds per 100 seeds.
 
 **oracle [BASE]** — `oracle.sh` snapshots the toolchain's output bytes: the
 corpus objects and ELFs at -O1/-O2/-Os/-Oz and -Oz -mno-outline with their
