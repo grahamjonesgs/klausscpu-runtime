@@ -179,7 +179,9 @@ this checkout.
   the FBR squashes it. klausscpu-llvm never fuses a branch whose next
   instruction is `lcdcmdv`/`lcddatav`/`lcddatar` (these only come from
   inline asm, which already blocks the fusion); don't hand-write `fbr`/
-  `fbri` directly followed by one either. `lcd` (LCD reset) is safe.
+  `fbri` directly followed by one either. `lcd` (LCD reset) is safe. The
+  assembler (klausscpu-llvm 8cb63bbc9ad3 and later) warns about either
+  pattern in hand-written or inline assembly.
 - **The C ABI changed (klausscpu-llvm `llvm/lib/Target/KlaussCPU/ABI.md`,
   version 2):** `int`/`unsigned` arguments and results are sign-extended to
   64 bits, structs of up to 16 bytes are passed in registers, and only
