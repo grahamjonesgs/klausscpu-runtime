@@ -1,6 +1,7 @@
 /* Debugger test program (debug/run_debug_smoke.sh): calls, recursion, a
-   struct, struct and 32-bit return values, a watched global,
-   __builtin_debugtrap.  Build with -g, e.g.
+   struct, struct and 32-bit return values, a watched global, functions
+   without a frame record (a frameless leaf, a shrink-wrapped early exit, a
+   tail call), __builtin_debugtrap.  Build with -g, e.g.
    `make dbgtest.elf OPT="-O1 -g"`. */
 #include <stdio.h>
 
@@ -34,6 +35,18 @@ __attribute__((noinline)) struct point midpoint(const struct point *a,
 
 __attribute__((noinline)) unsigned neg_u32(long v) { return (unsigned)-v; }
 
+/* square() is a leaf without a frame; hop() has none either and jumps to
+   square() (a tail call), so square() returns straight to main(); checked()
+   builds its frame only on the path that calls (shrink-wrapping).  The
+   debugger unwinds through all of them from the CFI. */
+__attribute__((noinline)) long hop(long v) { return square(v + 1); }
+
+__attribute__((noinline)) long checked(const long *p) {
+  if (!p)
+    return -1;
+  return square(*p) + 1;
+}
+
 __attribute__((noinline)) void bump(int times) {
   for (int i = 0; i < times; i++)
     counter += i;
@@ -47,8 +60,12 @@ int main(void) {
   results[0] = d;
   results[1] = fib(seed + 3);
   bump(4);
+  long seven = seed + 4;
+  results[4] = hop(seed + 1);
+  results[5] = checked(0) + checked(&seven);
   printf("d=%ld fib=%ld counter=%ld mid=%ld\n", d, results[1], (long)counter,
          results[3]);
+  printf("hop=%ld checked=%ld\n", results[4], results[5]);
   __builtin_debugtrap();
   results[2] = d + results[1];
   return (int)(results[2] & 0x7f);

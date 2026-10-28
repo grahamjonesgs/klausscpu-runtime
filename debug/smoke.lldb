@@ -32,6 +32,24 @@ continue
 frame variable i counter
 watchpoint delete
 register read pc sp r12 flags
+# Frames without a frame record, unwound from the CFI: square() reached by
+# hop()'s tail call (lldb shows hop as an artificial frame, from the
+# DW_AT_call_tail_call site), checked()'s frameless early exit, and square() under
+# checked()'s shrink-wrapped frame.
+breakpoint set -n square -c 'v == 5'
+breakpoint set -n checked -c 'p == 0'
+breakpoint set -n square -c 'v == 7'
+continue
+bt
+thread step-out
+continue
+bt
+thread step-out
+continue
+bt
+thread step-out
+thread step-out
+breakpoint delete
 # The __builtin_debugtrap() stops with SIGTRAP; in batch mode a signal stop
 # ends the script, so let lldb report it and resume (skipping the TRAP).
 process handle SIGTRAP --stop false --notify true --pass false

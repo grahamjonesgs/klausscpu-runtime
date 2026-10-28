@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Debugger smoke test on the emulator: build baremetal/programs/dbgtest.c with
 # -O1 -g, serve it with `klausscc --gdbserver`, drive lldb with smoke.lldb and
-# check breakpoints, backtraces, the ABI plugin's unwind plans, variables,
+# check breakpoints, backtraces (also through frameless, shrink-wrapped and
+# tail-calling functions), the ABI plugin's unwind plans, variables,
 # step-out return values, conditional breakpoints, watchpoints, the
 # debugtrap and the exit status;
 # then drive lldb-dap over DAP the way VS Code does (dap_smoke.py).
@@ -52,12 +53,28 @@ check lldb.txt 'fib(n=1) at dbgtest.c'
 check lldb.txt 'fib(n=6) at dbgtest.c'
 check lldb.txt 'row[0]:    0: CFA=r15+16 => r15=[CFA-16] sp=CFA+0 pc=[CFA-8]'
 check lldb.txt 'row[0]:    0: CFA=sp +8 => sp=CFA+0 pc=[CFA-8]'
+# Frames without a frame record (CFI unwinding): hop() tail-calls square()
+# (an artificial frame from DW_AT_call_tail_call; step-out goes past it to
+# main), checked()'s frameless early exit, square() under checked()'s
+# shrink-wrapped frame.
+check lldb.txt 'square(v=5) at dbgtest.c'
+check lldb.txt '[artificial]'
+check lldb.txt 'Stepped out past: frame #1: '
+check lldb.txt 'Return value: (long) $3 = 25'
+check lldb.txt 'checked(p=0x0000000000000000) at dbgtest.c'
+check lldb.txt 'main at dbgtest.c:65'
+check lldb.txt 'Return value: (long) $4 = -1'
+check lldb.txt 'square(v=7) at dbgtest.c'
+check lldb.txt 'checked(p=<unavailable>) at dbgtest.c:47'
+check lldb.txt 'Return value: (long) $5 = 49'
+check lldb.txt 'Return value: (long) $6 = 50'
 check lldb.txt 'Watchpoint 1 hit'
 check lldb.txt 'new value: 3'
 check lldb.txt '(int) i = 4'
 check lldb.txt 'received signal: SIGTRAP'
 check lldb.txt 'exited with status = 33'
 check uart.txt 'd=25 fib=8 counter=6 mid=4294967299'
+check uart.txt 'hop=25 checked=49'
 check server.txt 'program halted (exit status 33)'
 
 # The same program through lldb-dap, the way VS Code drives it.
