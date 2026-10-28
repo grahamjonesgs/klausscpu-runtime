@@ -112,7 +112,8 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 | `zephyr-ws/klausscpu-zephyr/` | Zephyr arch/SOC/board/drivers + `ssh_shell` app |
 | `build-*.sh`, `get-*.sh` | upstream fetch/build scripts |
 | `klausscpu_elf.h` | `EM_KLAUSSCPU` and the relocation types, for the run-time loaders |
-| `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words, the FreeRTOS/Zephyr stack alignment) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
+| `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words, the FreeRTOS/Zephyr stack alignment, the registers `setjmp.S` saves) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
+| `abi-test/` | C ABI conformance test: generated caller/callee pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, run on the emulator against host gcc (`./abi-test/run_abi_test.sh [first-seed] [count] [functions]`) |
 
 ## Gotchas
 
@@ -156,6 +157,19 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
   instruction is `lcdcmdv`/`lcddatav`/`lcddatar` (these only come from
   inline asm, which already blocks the fusion); don't hand-write `fbr`/
   `fbri` directly followed by one either. `lcd` (LCD reset) is safe.
+- **The C ABI changed (klausscpu-llvm `llvm/lib/Target/KlaussCPU/ABI.md`,
+  version 2):** `int`/`unsigned` arguments and results are sign-extended to
+  64 bits, structs of up to 16 bytes are passed in registers, and only
+  variadic calls reserve the argument home area.  Code built by an older
+  toolchain does not mix with it: rebuild picolibc (`./build-picolibc.sh`),
+  the builtins (`./build-builtins.sh`), wolfSSL/wolfSSH
+  (`freertos/wolfssl/build-*.sh`), Zephyr pristine (`west build -p always`)
+  and `make clean` the bare-metal and FreeRTOS builds (make does not notice a
+  new compiler).  lld refuses to link objects of different ABI versions (the
+  low byte of `e_flags`), so a stale object fails the link instead of the
+  program.  The hand-written assembly here (`setjmp.S`, the context
+  switches, the ISR wrappers) did not need changes: the register roles are
+  the same.
 - A program ends with `HALT` (exit status in R12) when `main` returns or
   `_exit` is called; `__builtin_trap()` is the `TRAP` instruction, an
   abnormal stop (crash dump on the board, `stop = Trap` in the emulator).

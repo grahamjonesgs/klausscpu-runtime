@@ -22,6 +22,7 @@ crt-*.o
 picolibc-src/
 picolibc-build/
 picolibc-install/
+picolibc-install-oldabi/
 picolibc-cross-abs.ini
 
 # lwIP — cloned externally, not part of this repo

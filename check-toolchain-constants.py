@@ -13,6 +13,8 @@ repository and in klausscc with them:
   zephyr-ws/.../arch/klausscpu/core/elf.c  R_KLAUSSCPU_* (all handled), bias
   debug/klausscpu_rtos.py                  register names, DWARF and generic numbers
   klausscpu.ld                             == klausscpu-llvm's rust/klausscpu.ld
+  src/setjmp.S                             saves and restores exactly the
+                                             callee-saved GPRs and R15
   freertos portmacro.h, Zephyr arch.h and  the RTOS stack alignment (a multiple
     arch/klausscpu/Kconfig                   of StackAlign)
   klausscc src/debug/arch.rs               TRAP_WORD, the gdbserver target XML
@@ -83,7 +85,7 @@ def llvm_facts(llvm):
     abi["GPRNames"] = re.findall(r'"(\w+)"', m.group(1))
     for key in ("NopWord", "HaltWord", "TrapWord", "JmpRelWord", "Word1Offset",
                 "DwarfSP", "DwarfRA", "FPReg", "AddressBits", "ArgGPRs",
-                "NumGPRs", "StackAlign"):
+                "CalleeSavedGPRs", "NumGPRs", "StackAlign"):
         if key not in abi:
             sys.exit("check-toolchain-constants: KlaussCPUABI.h has no %s" % key)
     if len(abi["GPRNames"]) != abi["NumGPRs"]:
@@ -152,6 +154,19 @@ def check_runtime(em, relocs, abi, llvm):
         if got is None or got % abi["StackAlign"]:
             fail("%s: %r, but klausscpu-llvm's StackAlign is %d (it must be a "
                  "multiple)" % (what, got, abi["StackAlign"]))
+
+    # setjmp/longjmp save and restore the callee-saved GPRs and the frame
+    # pointer: no fewer (a longjmp would corrupt the caller's registers), no
+    # more (jmp_buf is sized for them).
+    sj = read(os.path.join(HERE, "src", "setjmp.S"))
+    want = sorted(abi["CalleeSavedGPRs"] + [abi["FPReg"]])
+    for fn, op in (("setjmp", "stidx64"), ("longjmp", "ldidx64")):
+        m = re.search(r"^%s:\n(.*?)\.size" % fn, sj, re.M | re.S)
+        body = m.group(1) if m else ""
+        # R12-R14 carry the saved SP and return address (scratch registers).
+        got = sorted({int(r) for r in re.findall(
+            r"^\s*%s\s+r(\d+),\s*r0,\s*\d+" % op, body, re.M)} - {12, 13, 14})
+        expect("src/setjmp.S %s registers" % fn, got, want)
 
     # The Rust bare-metal linker script is a copy of klausscpu.ld.
     rust_ld = os.path.join(llvm, "llvm", "lib", "Target", "KlaussCPU", "rust",

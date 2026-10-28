@@ -40,12 +40,14 @@ check() {  # check FILE TEXT
   fi
 }
 check lldb.txt 'stop reason = breakpoint 1.1'
+check lldb.txt 'Return value: (point) $0 = (x = 2, y = 4)'
+check lldb.txt 'Return value: (unsigned int) $1 = 4294967293'
 check lldb.txt 'frame #1: '
 check lldb.txt 'main at dbgtest.c'
 check lldb.txt '(const point) *a = (x = 1, y = 2)'
 check lldb.txt '(const point) *b = (x = 4, y = 6)'
 check lldb.txt 'square(v=-3)'
-check lldb.txt 'Return value: (long) $0 = 9'
+check lldb.txt 'Return value: (long) $2 = 9'
 check lldb.txt 'fib(n=1) at dbgtest.c'
 check lldb.txt 'fib(n=6) at dbgtest.c'
 check lldb.txt 'row[0]:    0: CFA=r15+16 => r15=[CFA-16] sp=CFA+0 pc=[CFA-8]'
@@ -55,7 +57,7 @@ check lldb.txt 'new value: 3'
 check lldb.txt '(int) i = 4'
 check lldb.txt 'received signal: SIGTRAP'
 check lldb.txt 'exited with status = 33'
-check uart.txt 'd=25 fib=8 counter=6'
+check uart.txt 'd=25 fib=8 counter=6 mid=4294967299'
 check server.txt 'program halted (exit status 33)'
 
 # The same program through lldb-dap, the way VS Code drives it.

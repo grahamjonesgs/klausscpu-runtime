@@ -2,6 +2,15 @@
 settings set auto-confirm true
 target create @ELF@
 gdb-remote @PORT@
+# Return values the ABI plugin reads: a 16-byte struct (r12/r11), an
+# unsigned int.
+breakpoint set -n midpoint
+breakpoint set -n neg_u32
+continue
+thread step-out
+continue
+thread step-out
+breakpoint delete
 breakpoint set -n dist2
 breakpoint set -n square
 continue
