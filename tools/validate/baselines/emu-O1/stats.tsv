@@ -33,6 +33,7 @@ test_fp	239987	17160
 test_printf	110515	10896
 test_rtos	nohalt	13024
 test_sd	12914433	34808
+test_setjmp	124089	11648
 test_switch	83863	12136
 test_sync	nohalt	13320
 test_unaligned	13195953	16944

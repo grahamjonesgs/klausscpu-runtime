@@ -16,6 +16,7 @@
 #   make test_flags     — the flags each instruction writes vs the compiler's model
 #   make test_divshadow — a divide behind a taken fused branch (board only)
 #   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
+#   make test_setjmp    — setjmp / longjmp (SP, callee-saved registers, stack args after longjmp)
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
 #   make coremark       — CoreMark (bench-build/<OPT>/), see benchmarks/README.md
 #   make embench        — Embench-IoT suite (bench-build/<OPT>/embench/)
@@ -176,7 +177,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
-           test_unaligned
+           test_unaligned test_setjmp
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -280,6 +281,9 @@ queens.elf: queens.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_switch.elf: test_switch.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_switch.o)
+
+test_setjmp.elf: test_setjmp.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_setjmp.o)
 
 test_fp.elf: test_fp.o $(CRT_FP_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(CRT_FP_OBJS) test_fp.o)
@@ -534,6 +538,7 @@ bst:         bst.elf
 crypto:      crypto.elf
 queens:      queens.elf
 test_switch: test_switch.elf
+test_setjmp: test_setjmp.elf
 test_fp:     test_fp.elf
 test_asm:    test_asm.elf
 test_printf:       test_printf.elf

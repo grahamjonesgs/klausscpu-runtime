@@ -6,8 +6,12 @@
 //   [+16] R6   callee-saved
 //   [+24] R7   callee-saved
 //   [+32] R15  caller's frame pointer (saved BEFORE we push our own frame)
-//   [+40] SP   caller's stack pointer at point of setjmp call
+//   [+40] SP   caller's stack pointer after setjmp returns: CallerSP, the
+//              SP before the CALL pushed the return address (incoming_SP + 8)
 //   [+48] PC   return address (saved by CALL to setjmp, lives at [SP+0])
+//
+// longjmp sets SP to [+40] and jumps to [+48], so the caller continues with
+// the SP a normal return from setjmp leaves (baremetal test_setjmp).
 //
 // Calling convention:
 //   setjmp(jmp_buf *env)   → R0=env; returns 0 (or val from longjmp)
@@ -34,8 +38,9 @@ setjmp:
     stidx64  r6,  r0, 16
     stidx64  r7,  r0, 24
 
-    // Caller's SP = our incoming_SP = R15 + 8  (R15 = incoming_SP - 8).
-    addi     r12, r15, 8
+    // Caller's SP after the return = incoming_SP + 8 = R15 + 16
+    // (R15 = incoming_SP - 8; the RET pops the return address).
+    addi     r12, r15, 16
     stidx64  r12, r0, 40
 
     // Return address lives at [incoming_SP + 0] = [R15 + 8].

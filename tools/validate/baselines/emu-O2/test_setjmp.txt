@@ -1,0 +1,22 @@
+--- Captured UART output ---
+test_setjmp
+-- normal return
+PASS callee-saved r4
+PASS callee-saved r5
+PASS callee-saved r6
+PASS callee-saved r7
+PASS call with stack arguments
+PASS variadic call with stack arguments
+PASS setjmp returns 0
+-- after longjmp
+PASS callee-saved r4
+PASS callee-saved r5
+PASS callee-saved r6
+PASS callee-saved r7
+PASS call with stack arguments
+PASS variadic call with stack arguments
+PASS setjmp returns the longjmp value
+PASS SP after longjmp - SP after a normal return
+PASS longjmp(env, 0) makes setjmp return 1
+ALL PASS
+--- end UART ---

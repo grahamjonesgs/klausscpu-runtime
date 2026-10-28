@@ -33,6 +33,7 @@ test_fp	Halt
 test_printf	Halt
 test_rtos	InstructionCap
 test_sd	Halt
+test_setjmp	Halt
 test_switch	Halt
 test_sync	InstructionCap
 test_unaligned	Halt
