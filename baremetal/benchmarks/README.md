@@ -139,8 +139,8 @@ window contains only benchmark code. No timer ISR runs in it.
   `.rodata` out of `.text`. The metric is that ELF's `.text`.
   `dummy-libklausscpu.c` stands in for Embench's `dummy-libgcc.c`, which only
   covers Arm's `__aeabi_*`. It holds stubs for the compiler-rt soft-float and
-  integer helpers, plus `fabs`/`fabsf` (clang calls them on KlaussCPU, while Arm
-  GCC inlines them) and picolibc's `_ctype_b` table.
+  integer helpers and picolibc's `_ctype_b` table.  (`fabs`/`fabsf` need no
+  stub: clang clears the sign bit inline, as Arm GCC does.)
 - **Score**: `embench-score.py bench-results/<OPT>/embench.csv` follows Embench
   1.0. Relative speed = reference ms × 1000 / (cycles / CPU_MHZ), so with
   CPU_MHZ=1 it is the speed per MHz relative to the reference. Relative size =

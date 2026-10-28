@@ -27,9 +27,8 @@ BENCH_OUT   := bench-build/$(BENCH_OPT)
 
 .PHONY: coremark coremark_validate embench embench-sizes bench-clean
 
-# compiler-rt helpers the benchmarks need beyond the standard CRT_FP_OBJS set
-# (64-bit integer <-> FP conversions; built by the crt-%.o rule).
-BENCH_CRT_OBJS := $(CRT_FP_OBJS) $(patsubst %,crt-%.o,floatdidf floatundidf floatdisf floatundisf)
+# The compiler-rt helpers: the standard soft-float and integer set.
+BENCH_CRT_OBJS := $(CRT_FP_OBJS)
 
 # ── CoreMark ──────────────────────────────────────────────────────────────────
 COREMARK_SRC  := $(BENCH)/coremark

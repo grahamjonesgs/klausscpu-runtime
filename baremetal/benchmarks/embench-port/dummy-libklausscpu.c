@@ -30,10 +30,6 @@ STUB (__udivdi3) STUB (__divdi3) STUB (__umoddi3) STUB (__moddi3)
 STUB (__udivmoddi4) STUB (__udivti3) STUB (__umodti3) STUB (__udivmodti4)
 STUB (__multi3) STUB (__muldi3)
 
-/* KlaussCPU has no FPU and clang emits fabs/fabsf as libm calls (Arm GCC
- * inlines them, so Embench's dummy-libm.c lacks them). */
-STUB (fabs) STUB (fabsf)
-
 /* picolibc's <ctype.h> macros index this table (newlib's is _ctype_, which
  * dummy-libc.c provides).  Read-only data: not part of the .text metric. */
 const char _ctype_b[257];

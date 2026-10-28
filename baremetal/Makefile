@@ -113,10 +113,12 @@ CRT_FLAGS   = -target $(TRIPLE) -O1 -nostdlibinc -ffreestanding \
               -I$(BUILTINS) -D__SOFTFP__
 
 CRT_SF_NAMES = addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 \
-               floatsisf floatunsisf fixsfsi fixsfdi fixunssfsi fixunssfdi
+               floatsisf floatunsisf floatdisf floatundisf \
+               fixsfsi fixsfdi fixunssfsi fixunssfdi
 
 CRT_DF_NAMES = adddf3 subdf3 muldf3 divdf3 negdf2 comparedf2 \
-               floatsidf floatunsidf fixdfsi fixdfdi fixunsdfsi fixunsdfdi \
+               floatsidf floatunsidf floatdidf floatundidf \
+               fixdfsi fixdfdi fixunsdfsi fixunsdfdi \
                extendsfdf2 truncdfsf2
 
 CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4 \

@@ -193,8 +193,13 @@ the like-for-like comparisons.
 - **Code size.** -O2 code is about 2.6x the reference Cortex-M4 (-Os) on the
   geomean, and -Os is about 1.8x. The largest ratios are nbody (6.4x at -O2,
   1.8x at -Os) and minver: soft-float and FP-heavy code with inlining.
-- **fabs/fabsf.** clang emits these as libm calls on KlaussCPU. Arm GCC inlines
-  them as a sign-bit clear. This affects cubic, minver, nbody and st.
+- **fabs/fabsf.** With the toolchain of the first runs (`ca184a1c92dc`, whose
+  driver still added `-ffreestanding`), clang emitted these as libm calls in
+  cubic, minver, nbody and st, where Arm GCC clears the sign bit inline.
+  Since klausscpu-llvm `1ebec965e063` programs are compiled hosted, and
+  `fabs`/`fabsf`/`copysign`/`-x` are bit operations (`BCLR`, `ANDV`, `BTGL`,
+  `XORI`) at every level; no Embench benchmark calls them any more, so the
+  phase-4 results above already include that.
 - **CPI.** Embench CPI ranges from 1.5 (aha-mont64, native 64-bit) to 5.5
   (nsichneu, a large, branchy state machine). CoreMark's CPI is about 3.0.
 - **No verification failures.** Every CoreMark run validated, and every
