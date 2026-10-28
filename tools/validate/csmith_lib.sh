@@ -35,7 +35,9 @@
 #   CSMITH_OPTS   extra csmith options     (e.g. --float for the FP runs;
 #                 --packed-struct overrides the default --no-packed-struct)
 #   CSMITH_TARGET_CFLAGS  extra flags for every KlaussCPU build, after the
-#                 level's (e.g. -fno-inline, or -fsanitize=alignment
+#                 level's and the screen's -fno-strict-aliasing, so they can
+#                 override both (e.g. -fno-inline; -fstrict-aliasing to test
+#                 without the screen; -fsanitize=alignment
 #                 -fsanitize-trap=alignment for a --packed-struct run)
 #   PICOLIBC      C library install        (default: the one matching the
 #                 toolchain's ABI, see picolibc_for_toolchain)

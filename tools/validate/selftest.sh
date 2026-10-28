@@ -20,8 +20,9 @@
 # the others halt (ok-long with the default retry cap; with a small one, HANG
 # when the host's run is light and long when it is heavy, set by
 # EMU_LONG_RATIO); the aliasing screen (a --float program with
-# incompatible pointer types is built with -fno-strict-aliasing, an integer
-# one without keeps TBAA);
+# incompatible pointer types is built with -fno-strict-aliasing, also when
+# gcc only warns about them as gcc 13 does, and an integer one without keeps
+# TBAA);
 # csmith_board.sh with a wrong emulator checksum in a program too big for the
 # board (it never reaches the board); and perf.py with a metric that is no
 # longer measured.
@@ -121,6 +122,19 @@ check 0 "csmith: one level over the cap, also on retry, heavy on the host (long)
 check 0 "csmith --float: incompatible pointer types get -fno-strict-aliasing" \
   env CSMITH_OPTS=--float sh -c '"$1" 121439 1 "$2" -O2 && grep -qx 121439 "$2/no-strict-aliasing.txt"' \
   - "$HERE/csmith_run.sh" "$T/cs-alias"
+# The same with the diagnostic only a warning, as gcc 13 makes it: a gcc
+# wrapper that adds -fpermissive (the cloud's gcc 13 screened nothing when
+# the screen went by gcc's exit status).
+mkdir -p "$T/gcc13"
+cat >"$T/gcc13/gcc" <<W
+#!/bin/sh
+exec $(command -v gcc) -fpermissive "\$@"
+W
+chmod +x "$T/gcc13/gcc"
+# shellcheck disable=SC2016
+check 0 "csmith --float, gcc 13 (a warning): incompatible pointer types get -fno-strict-aliasing" \
+  env CSMITH_OPTS=--float PATH="$T/gcc13:$PATH" sh -c '"$1" 121439 1 "$2" -O2 && grep -qx 121439 "$2/no-strict-aliasing.txt"' \
+  - "$HERE/csmith_run.sh" "$T/cs-alias13"
 # shellcheck disable=SC2016
 check 0 "csmith: no incompatible pointer types, TBAA kept" \
   env CSMITH_OPTS= sh -c '"$1" 120000 1 "$2" -O2 && [ ! -e "$2/no-strict-aliasing.txt" ]' \

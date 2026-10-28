@@ -164,7 +164,10 @@ its gcc -O0 build executes at least `EMU_RETRY_MAX / EMU_LONG_RATIO` (100,
 so 2e8) instructions (`perf stat`; without perf, its CPU time at 3e9 per
 second), KlaussCPU code up to 100 times as long could still be running, and
 the level is `long` (not a failure, not checked to the end; the host count
-is the last line of its `emu<opt>.long.out`).  Seed 700263 at -O0 is one: an
+is the last line of its `emu<opt>.long.out`).  A `long` level can be
+checked to the end by running its seed again with a larger `EMU_RETRY_MAX`
+(it is then `ok-long` or `HANG`); the cloud campaign's four heavy -O0 seeds
+took 3.85e10 to 2.0e11 instructions.  Seed 700263 at -O0 is one: an
 int32 loop that runs 2.39e8 times until it overflows, 1.19e10 host
 instructions and 6.6e11 on KlaussCPU (an hour on the emulator), where -O1
 and up take 275K.  Csmith programs typically run about 1e6 host
@@ -191,15 +194,20 @@ the members of a union (cvise): it stores the `uint32_t` member through an
 first back, which only an access through the union itself would make
 defined, and which gcc does not diagnose.  Integer programs keep TBAA (no
 seed tried has an incompatible pointer type), so the same union punning
-could in principle give an integer seed a false failure too; none has yet.  The screen reads gcc's diagnostics, not its exit status:
-gcc 14 and later make the diagnostic an error, while gcc 13 keeps it a
-warning that `-w` silences even under `-Werror=`, so the old exit-status
-check screened nothing on gcc 13 (found by the cloud Csmith campaign of
-2026-10-28).
+could in principle give an integer seed a false failure too; none has yet.
+The screen reads gcc's diagnostics, not its exit status: gcc 14 and later
+make the diagnostic an error, while gcc 13 keeps it a warning that `-w`
+silences even under `-Werror=`, so the old exit-status check screened
+nothing on gcc 13 (found by the cloud Csmith campaign of 2026-10-28; the
+self-test also runs the screen through a gcc that only warns).
 `CSMITH_TARGET_CFLAGS` adds flags to every KlaussCPU build of the run,
 after the level's (`-fno-inline`, say), and a later `--packed-struct` in
-`CSMITH_OPTS` turns packed structs back on.  A packed-struct run wants
-`CSMITH_TARGET_CFLAGS="-fsanitize=alignment -fsanitize-trap=alignment"`:
+`CSMITH_OPTS` turns packed structs back on.  The flags also come after the
+screen's `-fno-strict-aliasing`, so `CSMITH_TARGET_CFLAGS=-fstrict-aliasing`
+turns TBAA back on for the screened seeds (to see whether the screen still
+matters: seed 121439 `--float` then gives a `MISMATCH` at -O1 and up); the
+seeds are still listed in `no-strict-aliasing.txt`.  A packed-struct run
+wants `CSMITH_TARGET_CFLAGS="-fsanitize=alignment -fsanitize-trap=alignment"`:
 a misaligned access through a pointer into a `#pragma pack(1)` struct is
 undefined, the host (whose own layout may happen to be aligned) cannot see
 it, and the sanitizer turns it into a `stop-Trap`, which the harness counts
