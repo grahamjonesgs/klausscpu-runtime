@@ -29,7 +29,9 @@ longjmp, crt0) leaves the shadow stack untrusted until the next call.
 
 Prints per-function counts of the PCs checked and every disagreement
 (function, PC, what, expected, got; the first --show of each), and exits
-1 if there is any.  Code without an FDE (a library built without -g) is
+1 if there is any.  Exits 2 if the run could not be checked: the emulator
+stopped other than by halting or reaching --max-instructions (a trap, a
+crash, no trace), or not one PC was checked (no FDE parsed, or nothing ran).  Code without an FDE (a library built without -g) is
 not checked, but calls through it are followed.
 
 Options:
@@ -350,7 +352,15 @@ def main():
         print(f"  BAD {f}+{pc - faddrs[bisect.bisect_right(faddrs, pc) - 1]:#x} "
               f"pc={pc:#x} {what}: x{len(ex)}"
               + "".join(f"; want {w} got {g}" for w, g in shown))
-    return 1 if bad else 0
+    if bad:
+        return 1
+    if stop not in ("Halt", "InstructionCap"):
+        print(f"  ERROR the emulator stopped with {stop}, not Halt or InstructionCap")
+        return 2
+    if total == 0:
+        print("  ERROR no PC was checked")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

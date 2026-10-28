@@ -235,11 +235,16 @@ address) are not checked, the calls they make are; a `SETSP` of anything
 but R15 (a context switch) suspends checking until the next call.  It
 prints each disagreement with its function, PC, register, and the
 expected and recovered values.  The mode first checks the checker
-(`cfi_run.sh selftest`: a hand-written function with right CFI passes, and
-copies with a callee-saved spill missing its rule or a wrong CFA offset are
-flagged), then runs N Csmith programs (default
-100, from `CSMITH_SEED`; seeds with host-visible UB discarded as for
-`csmith`) at -O2 -g and -O3 -g, and the bare-metal corpus at -O3 -g with
+(`cfi_run.sh selftest`: a hand-written function with right CFI passes,
+with a LEAVERET epilogue and with `SETSP R15; POP R15`, and copies with a
+callee-saved spill missing its rule, a wrong CFA offset, or a callee-saved
+rule kept after `SETSP R15` left its slot below SP are flagged), then runs
+N Csmith programs (default 100, from `CSMITH_SEED`; seeds with host-visible
+UB discarded as for `csmith`) at -O2 -g, -O3 -g and -O3 -g
+`-mllvm -klausscpu-enter-leave=false` (the `PUSH R15; GETSP R15; ADDSP`
+prologue, otherwise used only for frames too big for ENTER, and the
+`SETSP R15; POP R15` epilogue, otherwise never used), and the bare-metal
+corpus at -O3 -g with
 each program cut off at `CFI_MAX` instructions (default 20M; the idle and
 long-running programs are checked that far).  `cfi_run.sh csmith <first>
 <count> <dir> [level...]` and `cfi_run.sh corpus <dir> [level...]` take
@@ -248,7 +253,12 @@ prologue that klausscpu-llvm now prevents (`cfi-prologue-no-taildup.ll`)
 in the review's reproducer and in 199 of 200 generated programs built
 around that shape (a select diamond in front of a prologue block of at most
 four instructions); the corpus and 300 Csmith seeds never contained it.
-About 3 minutes for the corpus, 30 seconds per 100 seeds.
+Without ENTER/LEAVE it also flagged all 158 programs of a second such
+generator, at the `POP R15` of each epilogue, until `SETSP R15` (which
+leaves the callee-saved slots below SP) dropped their rules itself.  A run counts as `check-fail`, and fails the mode,
+when the checker could not check it: it crashed or was killed, the
+emulator stopped other than by halting or reaching its cap, or not one PC
+was checked.  About 3 minutes for the corpus, 45 seconds per 100 seeds.
 
 **oracle [BASE]** — `oracle.sh` snapshots the toolchain's output bytes: the
 corpus objects and ELFs at -O1/-O2/-Os/-Oz and -Oz -mno-outline with their

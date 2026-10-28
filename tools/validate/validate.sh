@@ -23,8 +23,9 @@
 #                         and -g0 at -Oz and -Os -moutline: the .text must be
 #                         identical
 #   cfi [N] [FIRST]       unwind info against emulator runs (cfi_run.sh): N
-#                         Csmith programs (default 100) at -O2 -g and -O3 -g
-#                         and the corpus at -O3 -g; at every PC the CFI must
+#                         Csmith programs (default 100) at -O2 -g, -O3 -g and
+#                         -O3 -g without ENTER/LEAVE, and the corpus at
+#                         -O3 -g; at every PC the CFI must
 #                         recover the caller's CFA, return address, R15, R4-R7
 #                         (after a self-test of the checker on faulty CFI)
 #   lldb                  lldb end to end on the emulator (lldb_e2e.sh):
@@ -134,7 +135,7 @@ cfi_one() {   # cfi_one <name> <label> <cfi_run.sh mode and args before the outd
 }
 cfi() {   # cfi <count> <first>
   cfi_one selftest "checker self-test" selftest
-  cfi_one csmith "$1 seeds from $2, -O2 -O3" csmith "$2" "$1"
+  cfi_one csmith "$1 seeds from $2, -O2 -O3, -O3 without ENTER/LEAVE" csmith "$2" "$1"
   cfi_one corpus "corpus -O3" corpus
 }
 lit() {

@@ -9,27 +9,32 @@
 # address, R15 and R4-R7 the .debug_frame row recovers must be the caller's.
 #
 #   csmith  each Csmith program (the csmith_run.sh screen: a seed whose host
-#           build shows UB is discarded) at each level (default -O2 -O3; a
+#           build shows UB is discarded) at each level (default -O2 -O3 and
+#           -O3 without ENTER/LEAVE, whose epilogue is SETSP R15; POP R15; a
 #           level's extra flags are joined by '+'), plus -g
 #   corpus  the bare-metal corpus (emu_suite.sh's `make all`) at each level
 #           (default -O3) plus -g, each run for CFI_MAX instructions
 #           (default 20M) -- the long and idle programs are only partly
 #           checked
 #   selftest  the checker itself: a hand-written function whose CFI is right
-#           must pass, and two copies with one fault each (a callee-saved
-#           spill without its rule, a wrong CFA offset) must each be flagged
+#           must pass, with a LEAVERET epilogue and with SETSP R15; POP R15,
+#           and three copies with one fault each (a callee-saved spill
+#           without its rule, a wrong CFA offset, a callee-saved rule kept
+#           after SETSP R15 left its slot below SP) must each be flagged
 #
-# Writes <outdir>/results.tsv (seed or program, level, ok|BAD|cc-fail|
-# ld-fail, instructions, PCs checked) and keeps the source, ELF and
-# checker report of every BAD seed in <outdir>/fail/.  Prints the counts;
-# exits 1 if anything is BAD or fails to build.
+# Writes <outdir>/results.tsv (seed or program, level, ok|BAD|check-fail|
+# cc-fail|ld-fail, instructions, PCs checked) and keeps the source, ELF and
+# checker report of every seed that is not ok in <outdir>/fail/.  Prints the
+# counts; exits 1 if anything is BAD, fails to build, or could not be
+# checked (check-fail: the checker crashed or was killed, the emulator
+# stopped other than by halting or reaching its cap, or no PC was checked).
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
 CHECK=$VALIDATE_DIR/cfi_check.py
 MODE=${1:-}; shift || true
 summary() {
   awk -F'\t' '{c[$3]++; n+=$5} END {for (k in c) printf "%s %d, ", k, c[k]; printf "%d PCs checked\n", n}' "$OUT/results.tsv"
-  ! grep -qP '\t(BAD|cc-fail|ld-fail|build-fail)\t' "$OUT/results.tsv"
+  ! grep -qP '\t(BAD|check-fail|cc-fail|ld-fail|build-fail)\t' "$OUT/results.tsv"
 }
 # check <elf> <name> <level> <cap>: one results line; the report in <name><level>.cfi
 check() {
@@ -45,7 +50,7 @@ csmith)
   . "$VALIDATE_DIR/csmith_lib.sh"
   [ $# -ge 3 ] || die "usage: cfi_run.sh csmith <first-seed> <count> <outdir> [level ...]"
   FIRST=$1; COUNT=$2; OUT=$(realpath -m "$3"); shift 3
-  LEVELS=${*:-"-O2 -O3"}
+  LEVELS=${*:-"-O2 -O3 -O3+-mllvm+-klausscpu-enter-leave=false"}
   mkdir -p "$OUT/work" "$OUT/fail" "$OUT/reports"
   csmith_rt "$OUT"
   one() {
@@ -114,7 +119,14 @@ int main(void) {
 }
 EOF2
   # cfi_f saves R4, overwrites it and calls a frameless leaf; FAULT picks
-  # what is wrong with its CFI.
+  # what is wrong with its CFI (none and split: nothing).
+  epilogue() {
+    case $1 in
+      split) printf '\tsetsp r15\n\t.cfi_def_cfa_register sp\n\t.cfi_same_value r4\n\tpop r15\n\t.cfi_def_cfa_offset 8\n\t.cfi_same_value r15\n\tret\n' ;;
+      late) printf '\tsetsp r15\n\t.cfi_def_cfa_register sp\n\tpop r15\n\t.cfi_def_cfa_offset 8\n\t.cfi_same_value r15\n\t.cfi_same_value r4\n\tret\n' ;;
+      *) printf '\tleaveret\n' ;;
+    esac
+  }
   fn() {
     cat <<EOF2
 	.cfi_sections .debug_frame
@@ -133,7 +145,7 @@ $([ "$1" = rule ] || echo "	.cfi_offset r4, -24")
 	callrel cfi_leaf
 	addr r12, r12, r4
 	ldidx64 r4, r15, -8
-	leaveret
+$(epilogue "$1")
 	.cfi_endproc
 	.p2align 2
 	.type cfi_leaf,@function
@@ -145,14 +157,15 @@ cfi_leaf:
 EOF2
   }
   "$LLVM_BIN/clang" $CFLAGS -O1 -g -c "$OUT/main.c" -o "$OUT/main.o" || die "selftest main.c"
-  for F in none rule cfa; do
+  for F in none split rule cfa late; do
     fn $F >"$OUT/f-$F.s"
     "$LLVM_BIN/clang" -target klausscpu-unknown-elf -g -c "$OUT/f-$F.s" -o "$OUT/f-$F.o" &&
       "$LLVM_BIN/ld.lld" -T "$RT/klausscpu.ld" --gc-sections -o "$OUT/f-$F.elf" $RTOBJS \
         "$OUT/main.o" "$OUT/f-$F.o" "$PICO/lib/libc.a" || die "selftest build ($F)"
     line=$(check "$OUT/f-$F.elf" "fault-$F" -g 1000000)
     case $F:$line in
-      none:*$'\t'ok$'\t'*|rule:*$'\t'BAD$'\t'*|cfa:*$'\t'BAD$'\t'*) echo "$line" ;;
+      none:*$'\t'ok$'\t'*|split:*$'\t'ok$'\t'*) echo "$line" ;;
+      rule:*$'\t'BAD$'\t'*|cfa:*$'\t'BAD$'\t'*|late:*$'\t'BAD$'\t'*) echo "$line" ;;
       *) printf 'fault-%s\t-g\tMISSED\t-\t0\n' "$F" ;;
     esac
   done >>"$OUT/results.tsv"
