@@ -6,8 +6,9 @@
 # unsigned 8-64-bit integers, pointers, float/double, __int128, structs and
 # unions of 1-24 bytes, variadic functions).  Host gcc gives the expected
 # output; then every combination of caller and callee optimisation level
-# ($OPTS, default -O0 -O1 -O2 -Os) is built for KlaussCPU, run on the klausscc
-# emulator and compared line by line.
+# ($OPTS, default -O0 -O1 -O2 -Os -Oz; a level can carry more flags joined by
+# '+', "-Os+-moutline") is built for KlaussCPU, run on the klausscc emulator
+# and compared line by line.
 #
 #   KLAUSSCPU_LLVM_BIN  toolchain bin dir (default ../klausscpu-llvm/build/bin)
 #   KLAUSSCC            klausscc binary (default ../klausscc/target/release/klausscc)
@@ -20,7 +21,7 @@ RT=$(dirname "$HERE")
 LLVM_BIN=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 EMU=${KLAUSSCC:-$RT/../klausscc/target/release/klausscc}
 PICO=${PICOLIBC:-$RT/picolibc-install}
-OPTS=${OPTS:-"-O0 -O1 -O2 -Os"}
+OPTS=${OPTS:-"-O0 -O1 -O2 -Os -Oz"}
 FIRST=${1:-1}; COUNT=${2:-4}; NFUNCS=${3:-60}
 if [ -n "${OUT:-}" ]; then mkdir -p "$OUT"; else OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT; fi
 
@@ -40,8 +41,8 @@ for seed in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
   gcc -std=c2x -O0 -w "$W/caller.c" "$W/callee.c" -o "$W/host" || exit 2
   "$W/host" > "$W/expected.txt" || exit 2
   for O in $OPTS; do
-    $CC $CFLAGS $O -c "$W/caller.c" -o "$W/caller$O.o" || { echo "seed $seed: caller $O does not compile"; fail=1; continue; }
-    $CC $CFLAGS $O -c "$W/callee.c" -o "$W/callee$O.o" || { echo "seed $seed: callee $O does not compile"; fail=1; continue; }
+    $CC $CFLAGS ${O//+/ } -c "$W/caller.c" -o "$W/caller$O.o" || { echo "seed $seed: caller $O does not compile"; fail=1; continue; }
+    $CC $CFLAGS ${O//+/ } -c "$W/callee.c" -o "$W/callee$O.o" || { echo "seed $seed: callee $O does not compile"; fail=1; continue; }
   done
   for OA in $OPTS; do
     for OB in $OPTS; do

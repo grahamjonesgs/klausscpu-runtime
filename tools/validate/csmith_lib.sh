@@ -88,8 +88,10 @@ csmith_gen() {
 # ST to cc-fail or ld-fail and return 1.
 csmith_build() {
   local O=$1
+  # A level may carry more flags joined by '+' ("-Os+-moutline"): they are
+  # one word in OPTS and in the file names.
   # shellcheck disable=SC2086
-  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS $O ${SEED_CFLAGS:-} -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
+  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS ${O//+/ } ${SEED_CFLAGS:-} -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
     ST=cc-fail; return 1
   fi
   # shellcheck disable=SC2086

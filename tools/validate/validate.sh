@@ -5,7 +5,7 @@
 #   quick                 emulator corpus at -O1 and -O2 against the committed
 #                         UART baselines, instruction counts and .text sizes,
 #                         4 ABI conformance seeds, 30 Csmith seeds
-#   full                  quick, plus 300 Csmith seeds (-O0 -O1 -O2 -Os), 150
+#   full                  quick, plus 300 Csmith seeds (-O0 -O1 -O2 -Os -Oz), 150
 #                         --float seeds, 30 ABI seeds, the KlaussCPU lit tests
 #                         and unit tests, lldb end to end on the emulator, and
 #                         an oracle snapshot (diffed against ORACLE_BASE when
@@ -15,7 +15,7 @@
 #                         compared with baselines/perf.tsv
 #   zephyr                Zephyr apps: build, emulator, board (VNC, SSH),
 #                         compared with baselines/perf.tsv
-#   csmith N [FIRST]      N Csmith seeds on the emulator (-O0 -O1 -O2 -Os)
+#   csmith N [FIRST]      N Csmith seeds on the emulator (-O0 -O1 -O2 -Os -Oz)
 #   csmith-board N [FIRST]  N Csmith seeds, one ELF per level (-O1 -O2) run on
 #                         the emulator AND the board: board vs emulator vs host
 #   abi [N] [FIRST]       N ABI conformance seeds (default 8)
@@ -123,7 +123,7 @@ lit() {
   run "lit (KlaussCPU)" "$OUT/lit.log" "$LLVM_BIN/llvm-lit" -s \
     "$L/llvm/test/CodeGen/KlaussCPU" "$L/llvm/test/MC/KlaussCPU" "$L/llvm/test/MC/Disassembler/KlaussCPU" \
     "$L/llvm/test/DebugInfo/KlaussCPU" "$L/llvm/test/Transforms/LoopUnroll/KlaussCPU" \
-    "$L"/lld/test/ELF/klausscpu-*.s "$L"/clang/test/CodeGen/klausscpu-*.c \
+    "$L"/lld/test/ELF/klausscpu-* "$L"/clang/test/CodeGen/klausscpu-*.c \
     "$L"/clang/test/Driver/klausscpu-*.c "$L"/clang/test/Preprocessor/klausscpu-*.c \
     "${lldb[@]}"
   local U=$LLVM_BIN/../unittests/Target/KlaussCPU/KlaussCPUTests

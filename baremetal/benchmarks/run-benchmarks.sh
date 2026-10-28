@@ -48,7 +48,7 @@ board() {   # board <timeout> <elf> <out>
 
 fail=0
 for OPT in "${OPTS[@]}"; do
-    D=$(echo "$OPT" | tr -d ' -')
+    D=$(echo "$OPT" | tr ' ' _ | tr -d -)   # as BENCH_OPT in benchmarks.mk
     B=bench-build/$D
     R=bench-results/$D
     mkdir -p "$R"

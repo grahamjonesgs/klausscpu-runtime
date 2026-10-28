@@ -88,7 +88,7 @@ differ, S stop differently, M missing`.  It also prints the emulator instruction
 that changed, the totals, and a WARN for any program that grew by more than
 `STATS_TOL` (2%).  Then 4 ABI conformance seeds and 30 Csmith seeds.
 
-**full** — quick, plus 300 Csmith seeds at -O0/-O1/-O2/-Os (from
+**full** — quick, plus 300 Csmith seeds at -O0/-O1/-O2/-Os/-Oz (from
 `CSMITH_SEED`, default 1), 150 `--float` seeds, 30 ABI seeds, the KlaussCPU
 lit tests (`llvm/test/{CodeGen,MC,MC/Disassembler,DebugInfo,Transforms/LoopUnroll}/KlaussCPU`,
 `lld/test/ELF/klausscpu-*`, `clang/test/{CodeGen,Driver,Preprocessor}/klausscpu-*`,
@@ -116,10 +116,15 @@ and on the board: the GUI apps with a VNC grab (`<app>.png`), ssh_shell with
 an SSH session (`kernel version`, `kernel uptime`).  The expected lines are
 in `zephyr/expect-emu.txt` and `zephyr/expect-board.txt`; the mandel, doom,
 irq_soak and gui_lvgl figures go through `perf.py` like the board's.
-`ZEPHYR_APPS` picks a subset.
+`ZEPHYR_APPS` picks a subset, and `ZEPHYR_CMAKE_ARGS` adds `-D` options to
+every build (`-DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y` builds at -Oz,
+`-DCONFIG_LTO=y` with LTO; the expectations are the same).
 
 **csmith N [FIRST]** — `csmith_run.sh`: each program's checksum from host gcc
--O0 against KlaussCPU clang at -O0/-O1/-O2/-Os on the emulator.  Programs
+-O0 against KlaussCPU clang at -O0/-O1/-O2/-Os/-Oz (-Oz runs the
+MachineOutliner) on the emulator; `csmith_run.sh <first> <count> <dir>
+[level...]` takes other levels, and a level can carry more flags joined by
+`+` (`-Os+-moutline`).  Programs
 with undefined behaviour that the host can see are discarded first: the host
 build under `-fsanitize=undefined,address,float-cast-overflow` must run clean
 and print the same checksum (status `host-ub`).  Packed structs are off.
@@ -164,8 +169,8 @@ Csmith's default programs take about 150K instructions on average and a few
 million at most (2.5M in 858 runs), and load in under a second.
 
 **abi [N] [FIRST]** — `abi-test/run_abi_test.sh` (generated caller/callee
-pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, against
-host gcc).
+pairs in separate translation units, every mix of -O0/-O1/-O2/-Os/-Oz
+(`OPTS`, with the same `+` syntax), against host gcc).
 
 **lldb / lldb-board** — `lldb_e2e.sh <outdir> emu|board`: lldb (from
 `KLAUSSCPU_LLVM_BIN`) against `klausscc --gdbserver`, each session scripted

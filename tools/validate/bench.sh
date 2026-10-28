@@ -21,7 +21,7 @@ if [ ! -e "$STAGED_BM/benchmarks/coremark/coremark.h" ] || [ ! -d "$STAGED_BM/be
 fi
 "$STAGED_BM/benchmarks/run-benchmarks.sh" "${OPTS[@]}" >"$OUT/run.log" 2>&1; rc=$?
 for O in "${OPTS[@]}"; do
-  D=$(echo "$O" | tr -d ' -')
+  D=$(echo "$O" | tr ' ' _ | tr -d -)
   cp -r "$STAGED_BM/bench-results/$D" "$OUT/$D" 2>/dev/null
   mkdir -p "$OUT/$D/elf"
   cp "$STAGED_BM/bench-build/$D"/*.elf "$OUT/$D/elf/" 2>/dev/null
@@ -29,7 +29,7 @@ for O in "${OPTS[@]}"; do
 done
 rm -rf "$OUT/tree"
 for O in "${OPTS[@]}"; do
-  D=$(echo "$O" | tr -d ' -')
+  D=$(echo "$O" | tr ' ' _ | tr -d -)
   cm=$(grep -ao 'CoreMark 1.0 : [0-9.]*' "$OUT/$D/summary.txt" 2>/dev/null | awk '{printf "%.2f", $4}')
   eb=$(grep -ho 'speed geomean [0-9.]*\|size geomean [0-9.]*' "$OUT/$D/summary.txt" 2>/dev/null | tr '\n' ' ')
   np=$(grep -c ',PASS,' "$OUT/$D/embench.csv" 2>/dev/null)

@@ -3,8 +3,10 @@
 #
 # Differential test on the emulator: the checksum of each Csmith program built
 # by host gcc -O0 against KlaussCPU clang at each optimisation level (default
-# -O0 -O1 -O2 -Os), run on the klausscc emulator.  See csmith_lib.sh for the
-# undefined-behaviour screen and the environment variables.
+# -O0 -O1 -O2 -Os -Oz; -Oz runs the MachineOutliner), run on the klausscc
+# emulator.  A level can carry more flags joined by '+' ("-Os+-moutline").
+# See csmith_lib.sh for the undefined-behaviour screen and the environment
+# variables.
 #
 # Appends to <outdir>/results.tsv one line per seed and level:
 #   seed  opt  status  host-checksum  klausscpu-checksum  instructions
@@ -28,7 +30,7 @@ set -uo pipefail
 . "$(dirname "$0")/csmith_lib.sh"
 [ $# -ge 3 ] || die "usage: csmith_run.sh <first-seed> <count> <outdir> [opt ...]"
 FIRST=$1; COUNT=$2; OUT=$(realpath -m "$3"); shift 3
-OPTS=${*:-"-O0 -O1 -O2 -Os"}
+OPTS=${*:-"-O0 -O1 -O2 -Os -Oz"}
 MAXI=${EMU_MAX_INSTRUCTIONS:-2000000000}
 mkdir -p "$OUT/fail" "$OUT/work"
 csmith_rt "$OUT"

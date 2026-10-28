@@ -3,7 +3,9 @@
 #
 # build  pristine-build every app ($ZEPHYR_APPS) into <outdir>/build/<app>,
 #        copy zephyr.elf to <outdir>/elf/<app>.elf (logs in <outdir>/logs/);
-#        the build dir is removed afterwards unless KEEP_BUILD=1
+#        the build dir is removed afterwards unless KEEP_BUILD=1;
+#        ZEPHYR_CMAKE_ARGS adds -D options to every build (e.g.
+#        -DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y for -Oz, -DCONFIG_LTO=y)
 # emu    run each ELF on the emulator for 200M instructions (<outdir>/emu/)
 #        and check expect-emu.txt: the expected lines, and a stop at the
 #        instruction cap (a trap or fault fails)
@@ -40,7 +42,8 @@ for step in $STEPS; do
   build)
     for a in $APPS; do
       rm -f "$OUT/elf/$a.elf"
-      if "$HERE/build.sh" "$a" "$OUT/build/$a" >"$OUT/logs/build-$a.log" 2>&1 &&
+      # shellcheck disable=SC2086
+      if "$HERE/build.sh" "$a" "$OUT/build/$a" ${ZEPHYR_CMAKE_ARGS:-} >"$OUT/logs/build-$a.log" 2>&1 &&
          cp "$OUT/build/$a/zephyr/zephyr.elf" "$OUT/elf/$a.elf"; then
         echo "PASS build $a"
         [ "${KEEP_BUILD:-0}" = 1 ] || rm -rf "$OUT/build/$a"
