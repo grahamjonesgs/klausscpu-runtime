@@ -62,10 +62,11 @@ check lldb.txt '[artificial]'
 check lldb.txt 'Stepped out past: frame #1: '
 check lldb.txt 'Return value: (long) $3 = 25'
 check lldb.txt 'checked(p=0x0000000000000000) at dbgtest.c'
-check lldb.txt 'main at dbgtest.c:65'
+SRC=$ROOT/baremetal/programs/dbgtest.c
+check lldb.txt "main at dbgtest.c:$(grep -n 'results\[5\] = checked(0)' "$SRC" | cut -d: -f1)"
 check lldb.txt 'Return value: (long) $4 = -1'
 check lldb.txt 'square(v=7) at dbgtest.c'
-check lldb.txt 'checked(p=<unavailable>) at dbgtest.c:47'
+check lldb.txt "checked(p=<unavailable>) at dbgtest.c:$(grep -n 'return square(\*p) + 1;' "$SRC" | cut -d: -f1)"
 check lldb.txt 'Return value: (long) $5 = 49'
 check lldb.txt 'Return value: (long) $6 = 50'
 check lldb.txt 'Watchpoint 1 hit'
