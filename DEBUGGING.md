@@ -118,11 +118,18 @@ gdbserver" configuration.
   `CONFIG_THREAD_NAME=y` for names).
 - **Interrupts.** Breakpoints inside handlers work, and the call stack
   continues through `vPortTickISR` / `z_klausscpu_timer_isr` into the
-  interrupted task.  Single-stepping never enters an interrupt handler; a
+  interrupted task.  The handlers' `.cfi_signal_frame` marks them as trap
+  handlers (a `.debug_frame` CIE with the augmentation "S"), so the
+  interrupted frame is shown at the interrupted instruction itself, and the
+  handler's own frame at the instruction after its call.  Single-stepping never enters an interrupt handler; a
   pending interrupt is taken on the next continue.  `process plugin packet
   monitor irq` prints the interrupt controller and timer state.
 - **Timing.** The emulator counts 2 cycles per instruction, so ticks arrive
   at a different instruction count than on the board.
+- **Switched-out threads** start at the instruction after their call into
+  the context switch (`vPortYield`, `arch_switch`): the OS plugin cannot
+  tell lldb that this PC is a return address, so in optimised code that
+  instruction's line can show as 0 (`do_swap ... at kswap.h:0`).
 
 ## The board
 
@@ -185,7 +192,7 @@ Differences from the emulator:
   variables, conditional breakpoints and arithmetic expressions work.
 - **Blitter and Ethernet interrupts** are not modelled by the emulator.
 
-## Regression test
+## Regression tests
 
 ```sh
 debug/run_debug_smoke.sh
@@ -199,3 +206,15 @@ session against the board (connected, `DEBUG_EN=1` bitstream loaded).
 and the Zephyr synchronization sample the way the RTOS launch configurations
 do and checks them through lldb-dap (`debug/dap_rtos.py`): a source
 breakpoint, every task/thread named with its state, a stack for each.
+
+The validation harness has the end-to-end version,
+`tools/validate/validate.sh lldb` (emulator; also part of `full`) and
+`lldb-board` (`tools/validate/lldb_e2e.sh`, scripted with `lldb -b -s`:
+`tools/validate/lldb/*.lldb`).  It runs `dbgtest` built at -O0, -O1 and -O2
+(line and function breakpoints, step-in / finish / next, backtraces
+through frameless, shrink-wrapped and tail-calling functions, variables and
+registers of outer frames held in callee-saved registers, expressions), and
+the Zephyr synchronization sample and the FreeRTOS demo (a backtrace
+through the timer interrupt into the interrupted code, the thread list with
+a stack per thread, expressions over kernel objects), and prints a
+PASS/FAIL line per check.

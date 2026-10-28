@@ -1,0 +1,86 @@
+# lldb end-to-end session on baremetal/programs/dbgtest.c, built with -g at
+# -O0, -O1 and -O2 and run on the emulator and on the board by lldb_e2e.sh,
+# which substitutes @ELF@, @PORT@ and the @LINE_*@ source lines and checks
+# the output.  A failing command ends a batch session, so every command here
+# must succeed at every optimisation level.  The [tags] name the checks.
+settings set auto-confirm true
+settings set stop-line-count-before 0
+settings set stop-line-count-after 0
+target create @ELF@
+gdb-remote @PORT@
+#
+# [line-bp] A breakpoint on a source line of main(); [frame-var] main's
+# structs (on the stack: their address is taken).
+breakpoint set -f dbgtest.c -l @LINE_DIST2_CALL@
+continue
+frame variable p q
+#
+# [step] [finish] A line breakpoint in dist2() on the line that calls
+# square(): step into square(), finish back to dist2() and on to main(), with
+# the return values.  [next] Then step over two lines of main().
+breakpoint set -f dbgtest.c -l @LINE_SQUARES@
+continue
+thread step-in
+bt
+finish
+finish
+next
+next
+#
+# [frameless] Backtraces through functions without a frame record, from the
+# CFI: square() reached by hop()'s tail call (from -O1 on hop() is gone from
+# the stack; lldb shows it as an artificial frame, from the
+# DW_AT_call_tail_call site), checked()'s frameless early exit, and square()
+# under checked()'s shrink-wrapped frame.
+breakpoint delete
+breakpoint set -n square -c 'v == 5'
+breakpoint set -n checked -c 'p == 0'
+breakpoint set -n square -c 'v == 7'
+continue
+bt
+finish
+continue
+bt
+finish
+continue
+bt
+finish
+finish
+#
+# [callee-saved] Stopped in the leaf leafsum(): clobber's p, q, s, t, keeper's
+# a, b and main's d live in callee-saved registers (from -O1 on), which the
+# frames below them saved; lldb restores them from the CFI's save rules.
+breakpoint delete
+breakpoint set -n leafsum
+continue
+bt
+frame variable x y
+# [expr] Expressions over arguments, globals, types and registers.
+expression x * 2 + y
+expression -- (long)sizeof(struct point) + seed
+expression results[3]
+expression/x counter
+expression $r0 + $r1
+# [registers] Frame 0's registers, then r4-r7 as each outer frame left them.
+register read pc sp r0 r1
+frame select 1
+frame variable p q s t
+register read r4 r5 r6 r7
+frame select 2
+frame variable k a b
+register read r4 r5 r6 r7
+expression a * 10 + b
+frame select 3
+frame variable d seven
+register read r4 r5 r6 r7
+frame select 0
+finish
+finish
+finish
+#
+# [exit] Run to the end: __builtin_debugtrap() stops with SIGTRAP (in batch
+# mode a signal stop ends the script, so report it and resume), then main
+# returns 33.
+breakpoint delete
+process handle SIGTRAP --stop false --notify true --pass false
+continue

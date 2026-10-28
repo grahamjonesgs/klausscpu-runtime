@@ -7,8 +7,9 @@
 #                         4 ABI conformance seeds, 30 Csmith seeds
 #   full                  quick, plus 300 Csmith seeds (-O0 -O1 -O2 -Os), 150
 #                         --float seeds, 30 ABI seeds, the KlaussCPU lit tests
-#                         and unit tests, and an oracle snapshot (diffed
-#                         against ORACLE_BASE when set)
+#                         and unit tests, lldb end to end on the emulator, and
+#                         an oracle snapshot (diffed against ORACLE_BASE when
+#                         set)
 #   board                 the board suite at -O1 (each program twice), CoreMark
 #                         and Embench-IoT at -O2 and -Os (BENCH=0 skips them),
 #                         compared with baselines/perf.tsv
@@ -18,6 +19,10 @@
 #   csmith-board N [FIRST]  N Csmith seeds, one ELF per level (-O1 -O2) run on
 #                         the emulator AND the board: board vs emulator vs host
 #   abi [N] [FIRST]       N ABI conformance seeds (default 8)
+#   lldb                  lldb end to end on the emulator (lldb_e2e.sh):
+#                         dbgtest at -O0/-O1/-O2, Zephyr and FreeRTOS
+#   lldb-board            the same on the board (DEBUG_EN=1 bitstream, a
+#                         klausscc built with --features board)
 #   oracle [BASE]         snapshot the toolchain's output bytes; diff with BASE
 #   selftest [EMU_RUN [BOARD_RUN]]  fault injection for the harness itself
 #                         (selftest.sh); runs the -O1 corpus first unless an
@@ -76,7 +81,7 @@ run() {      # run <check> <logfile> <command...> -- PASS/FAIL on the command's 
   else result FAIL "$name" "see $log"; fi
 }
 echo "validate $MODE: toolchain $(toolchain_id) (KLAUSSCPU_LLVM_BIN=$LLVM_BIN), klausscc $KLAUSSCC, output $OUT"
-case $MODE in board|zephyr|csmith-board) echo "validate $MODE: board lock $BOARD_LOCK (every session sharing the board must use the same file)" ;; esac
+case $MODE in board|zephyr|csmith-board|lldb-board) echo "validate $MODE: board lock $BOARD_LOCK (every session sharing the board must use the same file)" ;; esac
 
 emu_corpus() {
   local O
@@ -110,7 +115,8 @@ lit() {
   # lldb's KlaussCPU tests (a KlaussCPU directory or a klausscpu-* file
   # anywhere under lldb/test), when this build has lldb.
   local -a lldb=()
-  if [ -x "$LLVM_BIN/lldb" ] && [ -d "$L/lldb/test" ]; then
+  if [ -x "$LLVM_BIN/lldb" ] && [ -d "$L/lldb/test" ] &&
+     [ -f "$LLVM_BIN/../tools/lldb/test/Shell/lit.site.cfg.py" ]; then   # LLDB_INCLUDE_TESTS=ON
     mapfile -t lldb < <(find "$L/lldb/test" -path '*/Inputs' -prune -o \
       \( -type d -name KlaussCPU -print -prune \) -o \( -type f -iname 'klausscpu-*' -print \) 2>/dev/null | sort)
   fi
@@ -130,6 +136,16 @@ oracle() {   # oracle [BASE] -- snapshot, then diff with BASE when given
     run "oracle vs $1" "$OUT/oracle.diff" "$HERE/oracle_diff.sh" "$1" "$OUT/oracle"
   else
     result PASS "oracle snapshot" "$OUT/oracle (give a base, or ORACLE_BASE in full mode, to diff)"
+  fi
+}
+lldb_e2e() {   # lldb_e2e emu|board
+  if [ ! -x "$LLVM_BIN/lldb" ]; then result FAIL "lldb e2e ($1)" "no lldb in $LLVM_BIN"; return; fi
+  "$HERE/lldb_e2e.sh" "$OUT/lldb-$1" "$1" >"$OUT/lldb-$1.log" 2>&1
+  if grep -q '^FAIL' "$OUT/lldb-$1.log" || ! grep -q '^PASS' "$OUT/lldb-$1.log"; then
+    result FAIL "lldb e2e ($1)" "$(tail -n 1 "$OUT/lldb-$1.log") -- see $OUT/lldb-$1.log"
+    grep '^FAIL' "$OUT/lldb-$1.log" | sed 's/^/     /'
+  else
+    result PASS "lldb e2e ($1)" "$(tail -n 1 "$OUT/lldb-$1.log")"
   fi
 }
 perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex> <label>
@@ -153,6 +169,7 @@ full)
   csmith csmith "${CSMITH_SEED:-1}" 300 ""
   csmith csmith-float "$(( ${CSMITH_SEED:-1} + 300 ))" 150 --float
   lit
+  lldb_e2e emu
   oracle "${ORACLE_BASE:-}"
   ;;
 board)
@@ -187,6 +204,8 @@ zephyr)
   grep -E '^(PASS|FAIL)' "$OUT/zephyr.log" | while read -r st rest; do result "$st" "zephyr" "$rest"; done
   perf_check "$OUT/perf.tsv" "zephyr\." zephyr
   ;;
+lldb) lldb_e2e emu ;;
+lldb-board) lldb_e2e board ;;
 csmith)
   csmith csmith "${2:-${CSMITH_SEED:-1}}" "${1:?usage: validate.sh csmith N [FIRST]}"
   ;;

@@ -1,0 +1,36 @@
+# lldb session on the Zephyr synchronization sample built with debug info and
+# the thread list (zephyr/build.sh dbg_synchronization), with the RTOS OS
+# plugin (debug/klausscpu_rtos.py); run by lldb_e2e.sh on the emulator and on
+# the board.  @ELF@, @PORT@, @OSPLUGIN@ and @LINE_BUSY@ are substituted.
+settings set auto-confirm true
+settings set stop-line-count-before 0
+settings set stop-line-count-after 0
+settings set target.process.python-os-plugin-path @OSPLUGIN@
+target create @ELF@
+gdb-remote @PORT@
+#
+# [irq-bt] The timer interrupt: sys_clock_isr() <- z_klausscpu_timer_isr
+# (.cfi_signal_frame: a trap handler frame) <- the interrupted code, whose
+# frame is shown at the interrupted PC itself (not PC-1 as for a caller).
+breakpoint set -n sys_clock_isr
+continue
+bt
+frame select 2
+register read pc
+frame select 0
+target modules show-unwind -n z_klausscpu_timer_isr
+#
+# [threads] A line in thread_a's loop: every thread, named with its state,
+# each with its own stack.
+breakpoint delete
+breakpoint set -f main.c -l @LINE_BUSY@
+continue
+thread list
+bt all
+#
+# [expr] Expressions over the sample's kernel objects, at the same stop.
+expression thread_a_sem.limit
+expression thread_a_sem.limit + thread_b_sem.limit
+expression (int)thread_a_data.base.prio
+expression thread_b->base.thread_state
+detach

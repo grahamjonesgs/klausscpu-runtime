@@ -4,18 +4,21 @@ The checks every klausscpu-llvm change goes through before it is committed:
 the bare-metal corpus on the emulator, Csmith differential testing (on the
 emulator, and on the board against the emulator), the C ABI conformance test,
 a byte-for-byte "oracle" of the toolchain's output, the board suite with its
-cycle counts, CoreMark and Embench-IoT, and the Zephyr apps.  One driver runs
+cycle counts, CoreMark and Embench-IoT, the Zephyr apps, and lldb end to end
+on the emulator and the board.  One driver runs
 the right subset and prints a PASS/FAIL summary:
 
 ```sh
 export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin
 tools/validate/validate.sh quick            # ~1 min, emulator only
-tools/validate/validate.sh full             # ~4 min, emulator + lit + oracle
+tools/validate/validate.sh full             # ~4 min, emulator + lit + lldb + oracle
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh board    # ~4 min on the board
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh zephyr   # ~15 min on the board
 tools/validate/validate.sh csmith 300 120000          # 300 seeds from 120000
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh csmith-board 100 120000
 tools/validate/validate.sh oracle [<previous oracle dir>]
+tools/validate/validate.sh lldb             # ~15 s, lldb on the emulator
+BOARD_LOCK=/path/board.lock tools/validate/validate.sh lldb-board  # ~15 s on the board
 ```
 
 Each run writes into `-o <outdir>` (default
@@ -89,10 +92,11 @@ that changed, the totals, and a WARN for any program that grew by more than
 `CSMITH_SEED`, default 1), 150 `--float` seeds, 30 ABI seeds, the KlaussCPU
 lit tests (`llvm/test/{CodeGen,MC,MC/Disassembler,DebugInfo,Transforms/LoopUnroll}/KlaussCPU`,
 `lld/test/ELF/klausscpu-*`, `clang/test/{CodeGen,Driver,Preprocessor}/klausscpu-*`,
-and when the build has lldb every `KlaussCPU` directory or `klausscpu-*`
-file under `lldb/test`) and `KlaussCPUTests`, and an oracle snapshot,
-diffed against `ORACLE_BASE` when that is set (a failed `oracle.sh` is a
-FAIL).
+and when the build has lldb and its tests (`LLDB_INCLUDE_TESTS=ON`) every
+`KlaussCPU` directory or `klausscpu-*` file under `lldb/test`) and
+`KlaussCPUTests`, lldb end to end on the emulator (the `lldb` mode), and an
+oracle snapshot, diffed against `ORACLE_BASE` when that is set (a failed
+`oracle.sh` is a FAIL).
 
 **board** — `board_suite.sh` builds the self-checking programs at -O1, plus
 Dhrystone with `-fno-builtin` (`dhrystone_nobuiltin`, the like-for-like
@@ -162,6 +166,28 @@ million at most (2.5M in 858 runs), and load in under a second.
 **abi [N] [FIRST]** — `abi-test/run_abi_test.sh` (generated caller/callee
 pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, against
 host gcc).
+
+**lldb / lldb-board** — `lldb_e2e.sh <outdir> emu|board`: lldb (from
+`KLAUSSCPU_LLVM_BIN`) against `klausscc --gdbserver`, each session scripted
+with `lldb -b -s` (`lldb/*.lldb`, with the source lines substituted) and its
+output checked line by line.  `lldb/e2e.lldb` runs `dbgtest`
+(`baremetal/programs/dbgtest.c`) built with -g at -O0, -O1 and -O2: line and
+function breakpoints, step-in / finish (with return values) / next,
+backtraces through a frameless leaf, a shrink-wrapped early exit and a tail
+call (an artificial frame from -O1 on), frame variables and r4-r7 of outer
+frames whose values live in callee-saved registers (restored from the
+CFI), expressions, the exit status.  `lldb/zephyr.lldb` (the synchronization
+sample with debug info and thread names, `zephyr/build.sh
+dbg_synchronization`) and `lldb/freertos.lldb` (`freertos/demo` with -g,
+built in a staged copy of `freertos/`) load the RTOS OS plugin
+(`debug/klausscpu_rtos.py`): a backtrace from the timer interrupt's C
+handler through the assembly handler (a trap handler frame) into the
+interrupted code, which must be shown at its PC's own line; the thread list,
+every thread named with its state and with its own stack; expressions over
+kernel objects.  `lldb-board` needs the board's `DEBUG_EN=1` bitstream and a
+klausscc built with `--features board` (`KLAUSSCC`); each session holds
+`BOARD_LOCK`.  `E2E_OPTS`, `E2E_PROGS` (dbgtest zephyr freertos) and
+`E2E_PORT` narrow or move it.  `full` runs the emulator half.
 
 **oracle [BASE]** — `oracle.sh` snapshots the toolchain's output bytes: the
 corpus objects and ELFs at -O1/-O2/-Os with their disassembly, llvm-mc on the

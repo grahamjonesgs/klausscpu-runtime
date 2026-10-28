@@ -1,0 +1,35 @@
+# lldb session on the FreeRTOS demo built with -g (freertos/, make demo.elf
+# DBG=-g), with the RTOS OS plugin (debug/klausscpu_rtos.py); run by
+# lldb_e2e.sh on the emulator and on the board.  @ELF@, @PORT@, @OSPLUGIN@
+# and @LINE_TASKB@ are substituted.
+settings set auto-confirm true
+settings set stop-line-count-before 0
+settings set stop-line-count-after 0
+settings set target.process.python-os-plugin-path @OSPLUGIN@
+target create @ELF@
+gdb-remote @PORT@
+#
+# [irq-bt] The tick interrupt once the tasks run: xTaskIncrementTick() <-
+# vPortTickISR (.cfi_signal_frame) <- the interrupted task, shown at the
+# interrupted PC.
+breakpoint set -f demo.c -l @LINE_TASKB@
+continue
+breakpoint delete
+breakpoint set -n xTaskIncrementTick
+continue
+bt
+frame select 2
+register read pc
+frame select 0
+target modules show-unwind -n vPortTickISR
+#
+# [threads] Every task, named with its state, each with its own stack.
+breakpoint delete
+breakpoint set -f demo.c -l @LINE_TASKB@
+continue
+thread list
+bt all
+# [expr]
+expression pxCurrentTCB->pcTaskName
+expression pxCurrentTCB->uxPriority + 1
+detach

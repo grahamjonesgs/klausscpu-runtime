@@ -1,8 +1,9 @@
 /* Debugger test program (debug/run_debug_smoke.sh): calls, recursion, a
    struct, struct and 32-bit return values, a watched global, functions
    without a frame record (a frameless leaf, a shrink-wrapped early exit, a
-   tail call), __builtin_debugtrap.  Build with -g, e.g.
-   `make dbgtest.elf OPT="-O1 -g"`. */
+   tail call), values kept in callee-saved registers across calls,
+   __builtin_debugtrap.  Build with -g, e.g. `make dbgtest.elf OPT="-O1 -g"`.
+   tools/validate/lldb_e2e.sh also runs it at -O0 and -O2 (lldb/e2e.lldb). */
 #include <stdio.h>
 
 struct point { long x, y; };
@@ -47,6 +48,26 @@ __attribute__((noinline)) long checked(const long *p) {
   return square(*p) + 1;
 }
 
+/* Callee-saved registers in outer frames: from -O1 on, keeper() keeps a and
+   b in callee-saved registers (R4-R7) across its call, clobber() saves them
+   to keep its own four values there across the call to leafsum(), and main()
+   keeps d in one across all of it.  Stopped in leafsum(), the debugger finds
+   keeper's a and b, and main's d, in clobber's and keeper's register saves
+   (the CFI's DW_CFA_offset rules). */
+__attribute__((noinline)) long leafsum(long x, long y) { return x * y + seed; }
+
+__attribute__((noinline)) long clobber(long x) {
+  long p = x + seed, q = x * seed, s = x ^ seed, t = x - seed;
+  long r = leafsum(p, q);
+  return ((r * p + q) * s) + t;
+}
+
+__attribute__((noinline)) long keeper(long k) {
+  long a = k * 3 + seed, b = k - seed;
+  long r = clobber(a);
+  return a * r + b;
+}
+
 __attribute__((noinline)) void bump(int times) {
   for (int i = 0; i < times; i++)
     counter += i;
@@ -63,6 +84,7 @@ int main(void) {
   long seven = seed + 4;
   results[4] = hop(seed + 1);
   results[5] = checked(0) + checked(&seven);
+  results[6] = keeper(seed + 2);
   printf("d=%ld fib=%ld counter=%ld mid=%ld\n", d, results[1], (long)counter,
          results[3]);
   printf("hop=%ld checked=%ld\n", results[4], results[5]);
