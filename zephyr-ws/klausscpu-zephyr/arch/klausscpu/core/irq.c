@@ -16,6 +16,8 @@
 #include <zephyr/irq.h>
 #include <zephyr/init.h>
 
+#include <errno.h>
+
 /* Declared in zephyr/lib/libc/minimal/source/stdout/stdout_console.c.
  * Not exposed via any public header, so forward-declare here exactly
  * as the other console drivers (uart_console.c, ram_console.c, …) do. */
@@ -71,17 +73,37 @@ void z_irq_spurious(const void *unused)
 }
 
 /*
- * arch_irq_connect_dynamic — install a handler for the given IRQ source.
- * flags is ignored (no priority or trigger config on this controller).
+ * Interrupt handlers: only the timer (source 0, z_klausscpu_timer_isr in
+ * swap.S).  There is no IRQ_CONNECT (ARCH_IRQ_CONNECT) and no dynamic
+ * connection.  A vector is entered by the hardware with one IRET word pushed
+ * and nothing else saved, so a plain C routine there would corrupt the
+ * interrupted thread's registers and return through a CALL-frame RET instead
+ * of IRET.  A correct wrapper is more than a register save: the hardware
+ * clears only the dispatched source's INT_MASK bit, so the timer ISR (which
+ * resets SP to the top of the kernel stack and stores the interrupted SP in
+ * the current thread's switch_handle) could nest inside another handler
+ * running on that stack, and arch_switch() and arch_new_thread() resume
+ * every thread with the timer as the only enabled source.  Until the port
+ * handles all of that, more sources are a build error (here) or a refused
+ * call (below), not a vector that crashes when it fires.  The blitter and
+ * Ethernet drivers poll.
  */
+#ifdef CONFIG_DYNAMIC_INTERRUPTS
+/* #error, not BUILD_ASSERT: with clang and -std=c99 (the default C standard)
+ * Zephyr's BUILD_ASSERT expands to nothing (toolchain/gcc.h). */
+#error "KlaussCPU: CONFIG_DYNAMIC_INTERRUPTS is not supported (only the timer interrupt has a handler; see arch/klausscpu/core/irq.c)"
+#endif
+
 int arch_irq_connect_dynamic(unsigned int irq, unsigned int priority,
                               void (*routine)(const void *), const void *parameter,
                               uint32_t flags)
 {
     ARG_UNUSED(priority);
+    ARG_UNUSED(routine);
+    ARG_UNUSED(parameter);
     ARG_UNUSED(flags);
-    _INT_VEC(irq) = (uint32_t)(uintptr_t)routine;
-    return irq;
+    printk("arch_irq_connect_dynamic(%u): not supported on KlaussCPU\n", irq);
+    return -ENOTSUP;
 }
 
 /*

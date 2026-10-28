@@ -21,9 +21,10 @@
  * Thread stack reservation: 0.
  *
  * arch_new_thread() receives stack_ptr = top (the full stack top) and builds
- * the initial frame (16 GPRs + IRET = 136 bytes) downward from there.
+ * the initial frame (16 GPRs + IRET + z_thread_entry's return address =
+ * 144 bytes) downward from there.
  * A non-zero reservation would cause Zephyr to pass stack_ptr = top-N, so
- * arch_new_thread would write the frame to top-N-136 — overflowing below the
+ * arch_new_thread would write the frame to top-N-144 — overflowing below the
  * stack for small stacks (e.g. the 256-byte idle stack would overflow by 16 B).
  */
 #define ARCH_THREAD_STACK_RESERVED  0

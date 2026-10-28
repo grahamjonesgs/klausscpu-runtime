@@ -20,7 +20,8 @@ Boots the kernel, runs the timer ISR, dispatches the main thread, and emits
 |---|---|
 | `arch/klausscpu/core/swap.S` | `__start`, `arch_switch`, timer ISR (`z_klausscpu_timer_isr`) |
 | `arch/klausscpu/core/thread.c` | `arch_new_thread` (initial stack frame) |
-| `arch/klausscpu/core/irq.c` | IRQ enable/disable, kernel stack pointer, `arch_printk_char_out` + stdout hook |
+| `arch/klausscpu/core/irq.c` | IRQ enable/disable (the timer only; no dynamic connection), kernel stack pointer, `arch_printk_char_out` + stdout hook |
+| `arch/klausscpu/core/elf.c` | LLEXT: the ELF header check (machine, C ABI version) and the relocations |
 | `drivers/timer/klausscpu_timer.c` | Zephyr sys_clock driver (MMIO timer at `0xF00F_0000`) |
 | `drivers/serial/uart_klausscpu.c` | Polled UART driver using the `txcharmemr` builtin |
 | `soc/klausscpu/nexys_a7/linker.ld` | Memory layout — ROM at `0x20`, RAM at `0x00100000`, stack at top |
@@ -171,6 +172,22 @@ origin to match.
   plus a `SYS_INIT` installs the same function as the libc stdout hook. The
   upstream `drivers/console/uart_console.c` isn't compiled in this build, so
   without these overrides `printk` and `printf` would silently discard output.
+- **Interrupts: the timer only.** `z_klausscpu_timer_isr` is the one
+  handler; there is no `IRQ_CONNECT`, and `CONFIG_DYNAMIC_INTERRUPTS` is a
+  build error (`arch_irq_connect_dynamic()` refuses with `-ENOTSUP`).  A
+  vector gets one pushed IRET word and nothing saved, and only the dispatched
+  source's `INT_MASK` bit is cleared, so another handler would need a full
+  wrapper that also copes with the timer ISR nesting inside it; and
+  `arch_switch()`/`arch_new_thread()` resume threads with only the timer
+  enabled.  The blitter and Ethernet drivers poll.  (`irq.c` has the details.)
+- **Thread entry**: a thread starts in `z_thread_entry` (by IRET, with a 0
+  return address above it, so a backtrace ends there); an entry function that
+  returns comes back to it and the thread is aborted, Zephyr's convention.
+- **`BUILD_ASSERT` is a no-op** in this build: Zephyr's `toolchain/gcc.h`
+  maps it to `_Static_assert` only for GCC > 4.6 or C11, and clang says GCC
+  4.2 while the port builds with the default `-std=c99`.  (`CONFIG_STD_C11=y`
+  turns the checks on; the hello sample builds clean with it.)  Use `#error`
+  for a check that must fire.
 - **`OUTPUT_FORMAT("elf32-klausscpu")`** entry has been added to lld's
   `ScriptParser.cpp` `StringSwitch` table (in the LLVM tree, not here).
 

@@ -11,10 +11,18 @@
  *   [SP+112] R1   = p1
  *   [SP+120] R0   = entry
  *   [SP+128] IRET frame: INT_MASK[0]=1 | PC=z_thread_entry
+ *   [SP+136] 0: z_thread_entry's return address (the top of the stack)
  *
  * On first dispatch arch_switch() restores R0-R15 then IRETs into
  * z_thread_entry(entry, p1, p2, p3).  R0-R3 are set just before the
  * IRET frame so IRET lands in z_thread_entry with R0=entry, R1=p1, etc.
+ *
+ * z_thread_entry is entered as if called (ABI.md: [SP] is the return
+ * address), and a thread entry function that returns comes back to it,
+ * which aborts the thread (Zephyr's convention, lib/os/thread_entry.c).
+ * z_thread_entry itself never returns; its return address is 0 so that it
+ * lies inside the stack and an unwinder stops there instead of reading the
+ * word above the stack.
  *
  * KlaussCPU IRET frame (64-bit):
  *   bits[63:43] = 0
@@ -39,6 +47,9 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
 {
     /* stack_ptr is the top of the usable stack (highest valid byte + 1). */
     uint64_t *fp = (uint64_t *)stack_ptr;
+
+    /* z_thread_entry's return address: none (see the top of this file). */
+    *--fp = 0ULL;
 
     /*
      * IRET frame: timer enabled (INT_MASK[0]=1) so the new thread runs
