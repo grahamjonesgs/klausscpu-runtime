@@ -11,19 +11,32 @@
 # flag when its own layout happens to be aligned.
 #
 # Csmith's --float programs often pass a float * where an int32_t * is
-# expected (128 of seeds 121300-121449; no integer-only seed in 121000-121149
-# does).  Reading a float through an int32_t lvalue breaks C's aliasing rules
-# and neither sanitizer sees it, and TBAA then legitimately changes the
-# result: seed 121439 --float gives a different checksum at -O1/-O2/-Os, the
-# same on host clang -O1 for x86, and the right one with
-# -fno-strict-aliasing.  So a seed whose source has incompatible pointer
-# types (gcc -Werror=incompatible-pointer-types) is built for KlaussCPU with
-# -fno-strict-aliasing (SEED_CFLAGS; the seeds are listed in
-# <outdir>/no-strict-aliasing.txt), and every other seed keeps TBAA.
+# expected (59 of seeds 121300-121449, 67 of 153000-153149; no integer-only
+# seed in 121000-121149 does).  Reading a float through an int32_t lvalue
+# breaks C's aliasing rules and neither sanitizer sees it, and TBAA then
+# legitimately changes the result: seed 121439 --float gives a different
+# checksum at -O1/-O2/-Os, the same on host clang -O1 for x86, and the right
+# one with -fno-strict-aliasing.  So a seed whose source converts between
+# pointers to incompatible types (gcc's -Wincompatible-pointer-types) is
+# built for KlaussCPU with -fno-strict-aliasing (SEED_CFLAGS; the seeds are
+# listed in <outdir>/no-strict-aliasing.txt), and every other seed keeps
+# TBAA.  The float * that nearly every --float program passes to
+# transparent_crc_bytes(char *) counts too, although a char lvalue may read
+# anything: without it, seed 153272 --float is a false HANG at -O1 and up
+# (so is host clang -O1 for x86).  It puns through pointers to two members
+# of a union (an int32_t * and an int64_t * into the same union), which gcc
+# does not diagnose.
+# The screen looks for the diagnostic's tag in gcc's output rather than at
+# gcc's exit status, which depends on the gcc version: gcc 13 makes it a
+# warning that -w silences even under -Werror=, gcc 14 and later an error.
 #
 #   CSMITH        csmith binary            (default: csmith on PATH)
 #   CSMITH_INC    csmith runtime headers   (default /usr/include/csmith)
-#   CSMITH_OPTS   extra csmith options     (e.g. --float for the FP runs)
+#   CSMITH_OPTS   extra csmith options     (e.g. --float for the FP runs;
+#                 --packed-struct overrides the default --no-packed-struct)
+#   CSMITH_TARGET_CFLAGS  extra flags for every KlaussCPU build, after the
+#                 level's (e.g. -fno-inline, or -fsanitize=alignment
+#                 -fsanitize-trap=alignment for a --packed-struct run)
 #   PICOLIBC      C library install        (default: the one matching the
 #                 toolchain's ABI, see picolibc_for_toolchain)
 
@@ -73,7 +86,9 @@ csmith_gen() {
   gcc -w -fpermissive -O0 -I"$CSI" t.c -o host 2>/dev/null ||
     { printf '%s\t-\thost-cc-fail\t-\t-\n' "$seed"; return 1; }
   SEED_CFLAGS=
-  gcc -fsyntax-only -w -Werror=incompatible-pointer-types -I"$CSI" t.c 2>/dev/null ||
+  LC_ALL=C gcc -fsyntax-only -fpermissive -fdiagnostics-color=never -Wincompatible-pointer-types \
+      -I"$CSI" t.c >ptr.diag 2>&1
+  grep -qF -- '[-Wincompatible-pointer-types]' ptr.diag &&
     { SEED_CFLAGS=-fno-strict-aliasing; echo "$seed" >>"$OUT/no-strict-aliasing.txt"; }
   REF=$(timeout 10 ./host | grep -o 'checksum = [0-9A-F]*' | cut -d' ' -f3)
   [ -n "$REF" ] || { printf '%s\t-\thost-timeout\t-\t-\n' "$seed"; return 1; }
@@ -91,7 +106,7 @@ csmith_build() {
   # A level may carry more flags joined by '+' ("-Os+-moutline"): they are
   # one word in OPTS and in the file names.
   # shellcheck disable=SC2086
-  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS ${O//+/ } ${SEED_CFLAGS:-} -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
+  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS ${O//+/ } ${SEED_CFLAGS:-} ${CSMITH_TARGET_CFLAGS:-} -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
     ST=cc-fail; return 1
   fi
   # shellcheck disable=SC2086

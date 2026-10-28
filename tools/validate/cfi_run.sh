@@ -73,7 +73,7 @@ csmith)
     cd "$OUT" && rm -rf "$W"
   }
   export -f one check csmith_gen csmith_build
-  export OUT LEVELS CSMITH CSI CFLAGS LLVM_BIN RTOBJS PICO RT CHECK CSMITH_OPTS
+  export OUT LEVELS CSMITH CSI CFLAGS LLVM_BIN RTOBJS PICO RT CHECK CSMITH_OPTS CSMITH_TARGET_CFLAGS
   seq "$FIRST" $((FIRST + COUNT - 1)) | xargs -P "$JOBS" -I{} bash -c 'one {}' >>"$OUT/results.tsv"
   rm -rf "$OUT/work"
   summary

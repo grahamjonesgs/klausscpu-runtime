@@ -19,7 +19,9 @@
 # correct checksum (stop-Trap), and one level that runs past the cap while
 # the others halt (ok-long with the default retry cap; with a small one, HANG
 # when the host's run is light and long when it is heavy, set by
-# EMU_LONG_RATIO);
+# EMU_LONG_RATIO); the aliasing screen (a --float program with
+# incompatible pointer types is built with -fno-strict-aliasing, an integer
+# one without keeps TBAA);
 # csmith_board.sh with a wrong emulator checksum in a program too big for the
 # board (it never reaches the board); and perf.py with a metric that is no
 # longer measured.
@@ -111,6 +113,18 @@ check 1 "csmith: one level over the cap, also on retry, light on the host (HANG)
   env EMU_MAX_INSTRUCTIONS=200000 EMU_RETRY_MAX=250000 EMU_LONG_RATIO=0.001 "$HERE/csmith_run.sh" 120000 1 "$T/cs-hang"
 check 0 "csmith: one level over the cap, also on retry, heavy on the host (long)" \
   env EMU_MAX_INSTRUCTIONS=200000 EMU_RETRY_MAX=250000 EMU_LONG_RATIO=1000 "$HERE/csmith_run.sh" 120000 1 "$T/cs-heavy"
+# The aliasing screen (csmith_gen), whatever the host gcc's version: seed
+# 121439 --float passes a float * where an int32_t * is expected (with TBAA,
+# -O1 and up print another checksum); integer seed 120000 has no incompatible
+# pointer types.
+# shellcheck disable=SC2016  # expanded by the inner sh
+check 0 "csmith --float: incompatible pointer types get -fno-strict-aliasing" \
+  env CSMITH_OPTS=--float sh -c '"$1" 121439 1 "$2" -O2 && grep -qx 121439 "$2/no-strict-aliasing.txt"' \
+  - "$HERE/csmith_run.sh" "$T/cs-alias"
+# shellcheck disable=SC2016
+check 0 "csmith: no incompatible pointer types, TBAA kept" \
+  env CSMITH_OPTS= sh -c '"$1" 120000 1 "$2" -O2 && [ ! -e "$2/no-strict-aliasing.txt" ]' \
+  - "$HERE/csmith_run.sh" "$T/cs-noalias"
 # Csmith on the board script, without the board: the emulator checksum of
 # every level is wrong and every program counts as too big for the board.
 cat >"$T/klausscc-badck" <<'W'

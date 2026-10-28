@@ -171,14 +171,40 @@ and up take 275K.  Csmith programs typically run about 1e6 host
 instructions, so a hang in one stays a `HANG`.  When every
 level hits the cap, the program is just long (`instr-cap`, not a failure).
 `CSMITH_OPTS=--float` for the FP runs.  Csmith's `--float` programs often
-pass a `float *` where an `int32_t *` is expected (128 of 150 seeds from
+pass a `float *` where an `int32_t *` is expected (59 of 150 seeds from
 121300; no integer seed tried does): reading a float through an int lvalue
 is aliasing UB the sanitizers cannot see, and TBAA then changes the result
 (seed 121439: a different checksum at -O1 and above, the same one on host
 clang -O1 for x86, the right one with `-fno-strict-aliasing`).  A seed
-whose source has incompatible pointer types is therefore built with
+whose source converts between incompatible pointer types (gcc's
+`[-Wincompatible-pointer-types]` diagnostic) is therefore built with
 `-fno-strict-aliasing` (listed in `csmith/no-strict-aliasing.txt`, counted
-in the summary); every other seed keeps TBAA.
+in the summary); every other seed keeps TBAA.  In practice that screens
+nearly every `--float` program (254 of the 300 tested from 153000), since
+they pass a `float *` to `transparent_crc_bytes(char *)`.  That call alone is
+no aliasing UB, but the screen deliberately keeps counting it: leaving it out
+(TBAA for 126 more of those seeds) made seed 153272 `--float` a false `HANG`
+at -O1 and up, where host clang -O1 and gcc -O2 for x86 also go wrong unless
+built with `-fno-strict-aliasing`.  Its UB is punning through pointers to
+the members of a union (cvise): it stores the `uint32_t` member through an
+`int32_t *`, the `int64_t` member through an `int64_t *`, and reads the
+first back, which only an access through the union itself would make
+defined, and which gcc does not diagnose.  Integer programs keep TBAA (no
+seed tried has an incompatible pointer type), so the same union punning
+could in principle give an integer seed a false failure too; none has yet.  The screen reads gcc's diagnostics, not its exit status:
+gcc 14 and later make the diagnostic an error, while gcc 13 keeps it a
+warning that `-w` silences even under `-Werror=`, so the old exit-status
+check screened nothing on gcc 13 (found by the cloud Csmith campaign of
+2026-10-28).
+`CSMITH_TARGET_CFLAGS` adds flags to every KlaussCPU build of the run,
+after the level's (`-fno-inline`, say), and a later `--packed-struct` in
+`CSMITH_OPTS` turns packed structs back on.  A packed-struct run wants
+`CSMITH_TARGET_CFLAGS="-fsanitize=alignment -fsanitize-trap=alignment"`:
+a misaligned access through a pointer into a `#pragma pack(1)` struct is
+undefined, the host (whose own layout may happen to be aligned) cannot see
+it, and the sanitizer turns it into a `stop-Trap`, which the harness counts
+as a failure; each such trap must be checked in the emulator trace (the
+cloud campaign's 7 packed-struct seeds that trapped were all of this kind).
 The C library follows the toolchain's ABI (the low byte of `e_flags`): an
 ABI-0 toolchain (before klausscpu-llvm's ABI v2) links
 `picolibc-install-oldabi`, since lld refuses to mix ABI versions.
@@ -295,7 +321,9 @@ changes an early line, or goes missing, a `PASS` line that turns into
 that a capped program that gets less far, interleaves differently or
 reaches a new `PASS` still passes), and a board program that stops halting;
 then that Csmith flags a trap after a good checksum and a level that only
-halts with the larger cap (`ok-long`) or not at all (`HANG`); that
+halts with the larger cap (`ok-long`) or not at all (`HANG`), and that the
+aliasing screen takes seed 121439 `--float` (a float read through an
+`int32_t *`) and leaves integer seed 120000 with TBAA; that
 csmith-board flags a wrong emulator checksum in a program too big for the
 board (`COMPILER`, not `skip-big`); and that `perf.py` fails a metric that
 is no longer measured.  Run it after changing any script here.

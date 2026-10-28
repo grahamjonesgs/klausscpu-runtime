@@ -101,7 +101,7 @@ one() {
   cd "$OUT" && rm -rf "$W"
 }
 export -f one csmith_gen csmith_build csmith_classify csmith_recheck host_instructions checksum_of emu emu_instructions stop_of board
-export OUT OPTS MAXI MAX_TEXT LLVM_BIN RT KLAUSSCC CSMITH CSI CFLAGS RTOBJS PICO CSMITH_OPTS BOARD_LOCK
+export OUT OPTS MAXI MAX_TEXT LLVM_BIN RT KLAUSSCC CSMITH CSI CFLAGS RTOBJS PICO CSMITH_OPTS CSMITH_TARGET_CFLAGS BOARD_LOCK
 seq "$FIRST" $((FIRST + COUNT - 1)) | xargs -P "$JOBS" -I{} bash -c 'one {}' >>"$OUT/results.tsv"
 awk -F'\t' '{c[$2 " " $3]++} END{for (k in c) print k, c[k]}' "$OUT/results.tsv" | sort
 [ -s "$OUT/no-strict-aliasing.txt" ] && echo "no-strict-aliasing $(sort -u "$OUT/no-strict-aliasing.txt" | wc -l)"
