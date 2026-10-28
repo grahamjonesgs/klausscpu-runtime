@@ -28,4 +28,11 @@ for O in "${OPTS[@]}"; do
   cp "$STAGED_BM/bench-build/$D"/embench/*.elf "$OUT/$D/elf/" 2>/dev/null
 done
 rm -rf "$OUT/tree"
+for O in "${OPTS[@]}"; do
+  D=$(echo "$O" | tr -d ' -')
+  cm=$(grep -ao 'CoreMark 1.0 : [0-9.]*' "$OUT/$D/summary.txt" 2>/dev/null | awk '{printf "%.2f", $4}')
+  eb=$(grep -ho 'speed geomean [0-9.]*\|size geomean [0-9.]*' "$OUT/$D/summary.txt" 2>/dev/null | tr '\n' ' ')
+  np=$(grep -c ',PASS,' "$OUT/$D/embench.csv" 2>/dev/null)
+  echo "$O: CoreMark ${cm:-?} ($(grep -c ',PASS$' "$OUT/$D/coremark.csv" 2>/dev/null)/2 PASS), Embench ${eb}($np/19 PASS)"
+done
 exit $rc

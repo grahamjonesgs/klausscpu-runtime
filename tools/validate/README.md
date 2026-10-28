@@ -10,8 +10,8 @@ the right subset and prints a PASS/FAIL summary:
 ```sh
 export KLAUSSCPU_LLVM_BIN=<klausscpu-llvm>/build/bin
 tools/validate/validate.sh quick            # ~1 min, emulator only
-tools/validate/validate.sh full             # ~10 min, emulator + lit
-BOARD_LOCK=/path/board.lock tools/validate/validate.sh board    # ~6 min on the board
+tools/validate/validate.sh full             # ~4 min, emulator + lit + oracle
+BOARD_LOCK=/path/board.lock tools/validate/validate.sh board    # ~4 min on the board
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh zephyr   # ~15 min on the board
 tools/validate/validate.sh csmith 300 120000          # 300 seeds from 120000
 BOARD_LOCK=/path/board.lock tools/validate/validate.sh csmith-board 100 120000

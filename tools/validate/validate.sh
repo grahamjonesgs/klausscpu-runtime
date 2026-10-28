@@ -105,12 +105,13 @@ lit() {
   local U=$LLVM_BIN/../unittests/Target/KlaussCPU/KlaussCPUTests
   if [ -x "$U" ]; then run "unit tests (KlaussCPUTests)" "$OUT/unittests.log" "$U"; fi
 }
-perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex>
-  local b=$OUT/perf-baseline.tsv
+perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex> <label>
+  local b=$OUT/perf-baseline-$3.tsv
   grep -E "^(#|$2)" "$BASE/perf.tsv" >"$b"
-  run "perf vs baseline ($2)" "$OUT/perf-$(echo "$2" | tr -c 'a-z0-9\n' _).cmp" \
+  # shellcheck disable=SC2086
+  run "perf vs baseline ($3)" "$OUT/perf-$3.cmp" \
     python3 -I "$HERE/perf.py" compare "$b" "$1" ${PERF_TOL:+--tol $PERF_TOL}
-  grep -E 'REGRESSION|improved' "$OUT/perf-$(echo "$2" | tr -c 'a-z0-9\n' _).cmp" | sed 's/^/     /'
+  grep -E 'REGRESSION|improved' "$OUT/perf-$3.cmp" | sed 's/^/     /'
 }
 
 case $MODE in
@@ -147,17 +148,21 @@ board)
   python3 -I "$HERE/perf.py" extract board "$OUT/board-O1" board.O1 >"$OUT/perf.tsv" 2>"$OUT/perf-noise.txt"
   [ -s "$OUT/perf-noise.txt" ] && sed 's/^/     /' "$OUT/perf-noise.txt"
   if [ "${BENCH:-1}" != 0 ]; then
-    run "CoreMark + Embench (-O2 -Os)" "$OUT/bench.log" "$HERE/bench.sh" "$OUT/bench" -O2 -Os
+    if "$HERE/bench.sh" "$OUT/bench" -O2 -Os >"$OUT/bench.log" 2>&1; then
+      result PASS "CoreMark + Embench" "$(grep -E '^-O' "$OUT/bench.log" | tr '\n' ' ')"
+    else
+      result FAIL "CoreMark + Embench" "$(grep -E '^-O' "$OUT/bench.log" | tr '\n' ' ') -- see $OUT/bench"
+    fi
     for O in O2 Os; do
       python3 -I "$HERE/perf.py" extract bench "$OUT/bench/$O" "bench.$O" >>"$OUT/perf.tsv"
     done
   fi
-  perf_check "$OUT/perf.tsv" "board\.|bench\."
+  perf_check "$OUT/perf.tsv" "board\.|bench\." board
   ;;
 zephyr)
   "$HERE/zephyr/suite.sh" "$OUT" build emu board >"$OUT/zephyr.log" 2>&1
   grep -E '^(PASS|FAIL)' "$OUT/zephyr.log" | while read -r st rest; do result "$st" "zephyr" "$rest"; done
-  perf_check "$OUT/perf.tsv" "zephyr\."
+  perf_check "$OUT/perf.tsv" "zephyr\." zephyr
   ;;
 csmith)
   csmith csmith "${2:-${CSMITH_SEED:-1}}" "${1:?usage: validate.sh csmith N [FIRST]}"

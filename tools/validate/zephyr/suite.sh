@@ -23,7 +23,7 @@ APPS=${ZEPHYR_APPS:-"hello dbg_synchronization irq_soak llext_demo mandel gui_de
 IP=${KLAUSSCPU_BOARD_IP:-192.168.68.59}
 mkdir -p "$OUT/elf" "$OUT/logs"
 fail=0
-check() {   # check <expect-file> <dir> -- every pattern must match its capture
+check() {   # check <expect-file> <dir> <label> -- every pattern must match its capture
   local app re f base
   while IFS=$'\t' read -r app re; do
     case $app in ''|'#'*) continue ;; esac
@@ -31,8 +31,8 @@ check() {   # check <expect-file> <dir> -- every pattern must match its capture
     [[ " $APPS " == *" $base "* ]] || continue
     f=$2/$app.out; [ "$app" = ssh_session ] && f=$2/ssh_session.txt
     case $app in *.vnc) f=$2/$app.txt ;; esac
-    if tr -d '\r' <"$f" 2>/dev/null | grep -aEq -- "$re"; then echo "PASS $app: $re"
-    else echo "FAIL $app: $re (in $f)"; fail=1; fi
+    if tr -d '\r' <"$f" 2>/dev/null | grep -aEq -- "$re"; then echo "PASS $3 $app: $re"
+    else echo "FAIL $3 $app: $re (in $f)"; fail=1; fi
   done <"$1"
 }
 for step in $STEPS; do
@@ -59,10 +59,10 @@ for step in $STEPS; do
     wait
     for a in $APPS; do
       [ -e "$OUT/emu/$a.out" ] || continue
-      if grep -aq 'stop = InstructionCap' "$OUT/emu/$a.out"; then echo "PASS $a: ran to the instruction cap"
-      else echo "FAIL $a: $(grep -ao 'stop = [A-Za-z]*' "$OUT/emu/$a.out" || echo 'no stop line')"; fail=1; fi
+      if grep -aq 'stop = InstructionCap' "$OUT/emu/$a.out"; then echo "PASS emu $a: ran to the instruction cap"
+      else echo "FAIL emu $a: $(grep -ao 'stop = [A-Za-z]*' "$OUT/emu/$a.out" || echo 'no stop line')"; fail=1; fi
     done
-    check "$HERE/expect-emu.txt" "$OUT/emu"
+    check "$HERE/expect-emu.txt" "$OUT/emu" emu
     ;;
   board)
     O=$OUT/board; mkdir -p "$O"
@@ -98,7 +98,7 @@ for step in $STEPS; do
       esac
       echo "$a $(wc -c <"$O/$a.out")B" >>"$O/summary.txt"
     done
-    check "$HERE/expect-board.txt" "$O"
+    check "$HERE/expect-board.txt" "$O" board
     if grep -al 'FATAL ERROR' "$O"/*.out 2>/dev/null; then echo "FAIL: a Zephyr fatal error (above)"; fail=1; fi
     python3 -I "$VALIDATE_DIR/perf.py" extract zephyr "$O" zephyr >"$OUT/perf.tsv"
     ;;
