@@ -114,6 +114,13 @@ over SSH:
 ( cd ../baremetal && make ext-demos )   # builds hello/adventure/expr/... .llext
 ```
 
+`../tools/validate/zephyr/llext_sd.sh <outdir>` does the whole round trip on
+the board: it rebuilds the extensions (and ssh_shell's `apibackend.llext` /
+`ctrl.llext`), backs up every `.llext` on the card, uploads the new ones and
+runs each against its bare-metal baseline.  Rebuild the card's extensions
+whenever the toolchain's encoding or ABI changes: the loader does not check
+`e_flags`, and an old extension crashes the kernel (invalid opcode at `main`).
+
 Add a program: drop it in `baremetal/programs/`, add its name to `EXT_DEMOS` in
 `baremetal/Makefile`. It may call any symbol exported in `ssh/llext_exports.c`
 (printf/puts/putchar/getchar, malloc family, mem*/str*) plus the `mmio.h` helpers.

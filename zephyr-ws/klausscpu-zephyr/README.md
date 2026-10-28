@@ -185,11 +185,21 @@ session.
 
 ### Building an extension
 
-From `runtime/`:
+From `runtime/baremetal/`:
 
 ```sh
-make ext-demos      # builds hello/adventure/expr/bst/crypto/queens/test_64bit .llext
+make ext-demos      # hello adventure expr bst crypto queens test_64bit test_switch
+                    # perf_baseline dhrystone test_fp .llext
 ```
+
+The ssh_shell build also emits the two `svc` backends, `apibackend.llext` and
+`ctrl.llext`, into its build directory.  `tools/validate/zephyr/llext_sd.sh
+<outdir>` (in klausscpu-runtime) rebuilds all of them, backs up every
+`.llext` on the card, uploads the new ones over HTTP and runs each on the
+board (see `tools/validate/README.md`).  Rebuild the card's extensions after
+any change of the instruction encoding or the C ABI: nothing checks the ABI
+version in `e_flags` at load time, and an extension from an older toolchain
+crashes the kernel (invalid opcode at its `main`).
 
 Extensions compile with `-c` against the SDK headers in `runtime/ext_include/`
 (plain externs — picolibc headers can't be used because they macro-define

@@ -121,6 +121,20 @@ irq_soak and gui_lvgl figures go through `perf.py` like the board's.
 every build (`-DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y` builds at -Oz,
 `-DCONFIG_LTO=y` with LTO; the expectations are the same).
 
+**LLEXT extensions on the SD card** (not a validate.sh mode: it rewrites
+files on the card) — `zephyr/llext_sd.sh <outdir> [build] [backup] [upload]
+[run]` rebuilds the extensions the ssh_shell app loads from the card
+(`make ext-demos` in a staged copy, and ssh_shell's `apibackend.llext` and
+`ctrl.llext`), loads ssh_shell on the board, downloads every `.llext` on the
+card to `<outdir>/backup/`, uploads the new ones (refusing to overwrite a
+file it has not backed up), then `run`s each program over SSH and compares
+its output with the program's bare-metal baseline (`board-O1`, else
+`emu-O1`), and `svc load`s each backend and queries its HTTP route.  An
+extension built with an older toolchain is not refused at load time (nothing
+checks the ABI version in `e_flags`): one from before the instruction
+encoding change stops the CPU with an invalid-opcode crash dump at its
+`main`.
+
 **csmith N [FIRST]** — `csmith_run.sh`: each program's checksum from host gcc
 -O0 against KlaussCPU clang at -O0/-O1/-O2/-Os/-Oz (-Oz runs the
 MachineOutliner) on the emulator; `csmith_run.sh <first> <count> <dir>
@@ -291,6 +305,7 @@ change in any of it is a regression like any other.
 | `oracle.sh`, `oracle_diff.sh` | output-byte snapshot and diff |
 | `selftest.sh <out> <emu-O1 run> [<board-O1 run>]` | fault injection for compare.sh, perf.py and the Csmith scripts |
 | `zephyr/suite.sh` | Zephyr build, emulator and board runs; `zephyr/build.sh <app> <dir>` builds one app; `zephyr/sshrun.sh` drives an SSH session; `zephyr/vncgrab.py` grabs a VNC frame |
+| `zephyr/llext_sd.sh <out> [steps]` | rebuild, back up, upload and run the SD card's LLEXT extensions; `zephyr/llext_sd.py` lists, downloads and uploads card files over HTTP and drives `run`/`svc` over SSH |
 
 The perf_haz program (the per-kernel hazard breakdown: data, load-use,
 flags, SP, mul/div, branch flush, I-fetch miss and memory-wait stall cycles)
