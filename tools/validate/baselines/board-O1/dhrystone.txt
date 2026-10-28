@@ -1,0 +1,24 @@
+Load Complete OK
+Dhrystone Benchmark, Version 2.1 (Language: C) — KlaussCPU
+Timing via hardware cycle counter (REG_PERF_CYCLES @ 100 MHz).
+Verification (expected Dhrystone 2.1 end state):
+  Int_Glob           5            ok
+  Bool_Glob          1            ok
+  Ch_1_Glob          65           ok
+  Ch_2_Glob          66           ok
+  Arr_1_Glob[8]      7            ok
+  Ptr_Glob.Discr     0            ok
+  Ptr_Glob.Int_Comp  17           ok
+  Next.Int_Comp      18           ok
+  Int_1_Loc          5            ok
+  Int_2_Loc          13           ok
+  Int_3_Loc          7            ok
+  Enum_Loc           1            ok
+  Str_1_Loc          DHRYSTONE PROGRAM, 1'ST STRING ok
+  Str_2_Loc          DHRYSTONE PROGRAM, 2'ND STRING ok
+
+=== Results ===========================================
+Self-check           : PASS
+=======================================================
+
+CPU halted.

@@ -1,0 +1,12 @@
+--- Captured UART output ---
+
+=== KlaussCPU LiteEth Phase 5 bring-up ===
+
+  10M loopback result:
+    RX_EV_PENDING = 0  (1 = got valid frame)
+    RX_LENGTH     = 0  (expect 60)
+    RX_ERRORS     = 0  (delta=0)
+    RX slot dump: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+
+T4: external TX — ARP broadcast
+  link state: BMSR=0x0000

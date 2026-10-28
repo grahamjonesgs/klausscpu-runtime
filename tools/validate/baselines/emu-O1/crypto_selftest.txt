@@ -1,0 +1,3 @@
+--- Captured UART output ---
+=== KlaussCPU Hardware Crypto Self-Test ===
+--- end UART ---

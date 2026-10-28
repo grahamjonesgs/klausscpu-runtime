@@ -1,0 +1,12 @@
+--- Captured UART output ---
+=== KlaussCPU RTOS sync test ===
+semaphore: 40 items through 4-slot buffer
+
+timer_handler[0]    = 0x64000000 (expect 0x00004000 = push r0)
+
+=== sync test results ===
+semaphore (producer/consumer):
+  items produced : 40
+  consumed total : 820  (expected 820)  PASS
+event flag (setter/waiter):
+  signals set    : 10

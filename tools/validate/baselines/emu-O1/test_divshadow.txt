@@ -1,0 +1,4 @@
+--- Captured UART output ---
+Results: 17 pass, 0 fail
+test_divshadow PASSED
+--- end UART ---

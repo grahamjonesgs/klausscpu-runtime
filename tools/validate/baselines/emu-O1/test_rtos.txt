@@ -1,0 +1,12 @@
+--- Captured UART output ---
+=== KlaussCPU RTOS test ===
+tasks: A(yield) B(sleep 3 ticks) C(preempt) + reporter
+timer_handler[0]    = 0x64000000 (expect 0x00004000 = push r0)
+Starting RTOS...
+[A] 0 (yield)
+[B] 0 (sleep 3 ticks)
+[C] 0 (preempt)
+[B] 1 (sleep 3 ticks)
+[C] 1 (preempt)
+[B] 2 (sleep 3 ticks)
+[C] 2 (preempt)

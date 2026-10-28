@@ -1,0 +1,96 @@
+Load Complete OK
+=== test_big ===
+
+=== printf ===
+  %d:  0 42 -99
+  %i:  -2147483648
+  %u:  4294967295
+  %x:  deadbeef CAFEBABE
+  %o:  755
+  %s:  'hello world'
+  %c:  'K'
+  %%:  100%
+  %5d:   '   42'
+  %-5d:  '42   '
+  %05d:  '00042'
+  %8s:   '      hi'
+  %-8s:  'hi      '
+  %.3s:  'abc'
+  multi: 3 + 4 = 7, 'abc' len=3
+  %p:  0xbeefcafe
+  PASS printf-coverage
+
+=== 64-bit arithmetic ===
+  fact(10)=3628800  fact(20)=2432902008176640000
+  fib(10)=55  fib(30)=832040
+  1<<32=0x100000000  1<<63=0x8000000000000000
+  1M*1M=1000000000000
+  1T/7=142857142857 r1
+  isqrt(1T)=1000000
+  INT64_MIN=-9223372036854775808
+  PASS 64-bit-arith
+
+=== string ops ===
+  PASS string-ops
+
+=== recursion ===
+  A(3,3)=61
+  PASS ackermann
+
+=== FatFs ===
+  PASS f_mount
+  FAIL read hello.txt
+  PASS write big.txt
+  root dir:
+    .Spotlight-V100 0 B
+    KLCPU.TXT    27 B
+    adventure_pic.elf 94476 B
+    bst_pic.elf  98500 B
+    test_fp.llext 18408 B
+    expr_pic.elf 85036 B
+    test1        0 B
+    .Trashes     0 B
+    crypto_pic.elf 93176 B
+    hello_pic.elf 78548 B
+    queens_pic.elf 81408 B
+    test_64bit_pic.elf 108368 B
+    test_fp_pic.elf 95224 B
+    test_switch_pic.elf 80656 B
+    adventure.llext 7880 B
+    bst.llext    9756 B
+    crypto.llext 12148 B
+    expr.llext   7604 B
+    hello.llext  1660 B
+    queens.llext 5384 B
+    test_64bit.llext 9024 B
+    test_switch.llext 2568 B
+    test2        0 B
+    SSHKEY.BIN   121 B
+    eric         10 B
+    temp123.txt  15 B
+    tls_key.bin  121 B
+    tls_cert.bin 415 B
+    _putcheck.txt 20 B
+    index.html   8575 B
+    log          0 B
+    httpd.llext  92152 B
+    apibackend.llext 5104 B
+    ctrl.llext   2932 B
+    dhrystone.llext 7364 B
+    hello_rs.llext 30756 B
+    ext_hello.llext 47068 B
+    DOOM1.WAD    4196020 B
+    big.txt      25 B
+    ssh_host_key.bin 121 B
+  PASS f_readdir
+  PASS f_mkdir
+  PASS f_rename
+  PASS f_lseek
+  PASS f_unlink
+  PASS unlink-gone
+  free: 30504528 KB
+  PASS f_getfree
+
+=== Results: 13 pass, 1 fail ===
+
+CPU halted.

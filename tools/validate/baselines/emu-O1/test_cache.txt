@@ -1,0 +1,29 @@
+--- Captured UART output ---
+=== KlaussCPU cache profiler ===
+
+Cache geometry:
+  ways        = 0
+  sets        = 0
+  total size  = 0 KB
+
+
+Geometry check: FAIL
+
+=== W1 hot  — 256 B × 1000 passes (expect ~100% hits) ===
+
+=== W2 cold — 32 KB 1st pass (expect ~0% hits) ===
+
+=== W3 warm — 32 KB 2nd pass (expect ~100% hits) ===
+
+=== W4 write+readback — 32 KB (write miss, read hit) ===
+
+  (stride=4 elements = 32 B apart, cache line = 16 B)
+=== W5 stride — 32 KB every 4th element (spatial locality) ===
+
+=== W6 thrash — 128 KB (2× cache, dirty evictions expected) ===
+
+  (33 KB > 32 KB per way — probes associativity limit)
+=== W7 partial — 33 KB (just over one cache way) ===
+
+=== profiler done ===
+--- end UART ---

@@ -1,0 +1,12 @@
+--- Captured UART output ---
+
+=== blit_capture: looping dst+8 COPY (SRC 05000000 -> DST 06000008) ===
+pass 0: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 1: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 2: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 3: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 4: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 5: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 6: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 7: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 8: FAIL 47/48 wrong  first(1,0) got=0000 want=0001

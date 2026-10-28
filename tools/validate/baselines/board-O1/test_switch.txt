@@ -1,0 +1,12 @@
+Load Complete OK
+=== Switch / Jump-Table Test ===
+T1 classify(0..9): PASS
+T2 op_apply chars: PASS
+T3 score loop sw:  PASS
+T4 sparse switch:  PASS
+T5 interp loop:    PASS
+T6 sparse table:   PASS
+
+Results: 6 pass, 0 fail
+
+CPU halted.

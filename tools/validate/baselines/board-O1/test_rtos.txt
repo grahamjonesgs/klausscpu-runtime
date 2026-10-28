@@ -1,0 +1,39 @@
+Load Complete OK
+=== KlaussCPU RTOS test ===
+tasks: A(yield) B(sleep 3 ticks) C(preempt) + reporter
+timer_handler[0]    = 0x64000000 (expect 0x00004000 = push r0)
+Starting RTOS...
+[B] 0 (sleep 3 ticks)
+[C] 0 (preempt)
+[A] 0 (yield)
+[B] 1 (sleep 3 ticks)
+[B] 2 (sleep 3 ticks)
+[C] 1 (preempt)
+[A] 1 (yield)
+[B] 3 (sleep 3 ticks)
+[B] 4 (sleep 3 ticks)
+[B] 5 (sleep 3 ticks)
+[C] 2 (preempt)
+[A] 2 (yield)
+[B] 6 (sleep 3 ticks)
+[B] 7 (sleep 3 ticks)
+[A] 3 (yield)
+[C] 3 (preempt)
+[A] 4 (yield)
+[C] 4 (preempt)
+[A] 5 (yield)
+[C] 5 (preempt)
+[A] 6 (yield)
+[C] 6 (preempt)
+[A] 7 (yield)
+[C] 7 (preempt)
+
+=== all tasks done ===
+scheduling modes: A=yield  B=sleep(3 ticks)  C=preempt
+context switches:
+  [A yield  ] 55
+  [B sleep  ] 47
+  [C preempt] 55
+  [reporter ] 55
+switches: PASS  sleep timing: PASS
+Result: PASS

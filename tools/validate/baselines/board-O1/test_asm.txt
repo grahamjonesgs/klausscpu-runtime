@@ -1,0 +1,13 @@
+Load Complete OK
+=== Inline Assembly Test ===
+T1 add/sub constraints: PASS
+T2 multi-op ALU:        PASS
+T3 volatile mmio leds:  PASS
+T4 in-place (notr):     PASS
+T5 mul + clobber:       PASS
+T6 chained asm blocks:  PASS
+T7 asm in loop:         PASS
+
+Results: 7 pass, 0 fail
+
+CPU halted.

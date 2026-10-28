@@ -1,0 +1,7 @@
+--- Captured UART output ---
+=== KlaussCPU PIC loader ===
+
+loading: PROG.ELF
+loader: f_mount failed (3)
+done (rc=-1)
+--- end UART ---

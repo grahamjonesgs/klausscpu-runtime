@@ -1,0 +1,43 @@
+Load Complete OK
+=== KlaussCPU Hardware Crypto Self-Test ===
+
+=== AES-128-ECB (FIPS-197 Appendix B) ===
+PASS  ECB encrypt
+PASS  ECB decrypt
+PASS  ECB encrypt (A.1)
+
+=== AES-128-CTR (NIST SP 800-38A F.5.1) ===
+PASS  CTR encrypt 4 blocks
+PASS  CTR decrypt 4 blocks
+PASS  CTR 17-byte round-trip
+
+=== AES-128-GCM (NIST SP 800-38D Test Case 4) ===
+PASS  GCM ciphertext
+PASS  GCM auth tag
+PASS  GCM decrypt+verify
+PASS  GCM tamper detection
+
+=== SHA-256 (FIPS 180-4) ===
+PASS  SHA256("")
+PASS  SHA256("abc")
+PASS  SHA256(448-bit)
+
+=== HMAC-SHA-256 (RFC 4231) ===
+PASS  HMAC TC1 (sw)
+PASS  HMAC TC1 (hw)
+PASS  HMAC TC2 (sw)
+PASS  HMAC TC2 (hw)
+PASS  HMAC TC3 (sw)
+PASS  HMAC TC3 (hw)
+PASS  HMAC TC4 (sw)
+PASS  HMAC TC4 (hw)
+
+=== TRNG (sanity + health) ===
+PASS  TRNG health monitor
+PASS  TRNG non-zero output
+PASS  TRNG output varies across reads
+
+=== Results: 27 passed, 0 failed ===
+ALL PASS — hardware crypto is correct.
+
+CPU halted.

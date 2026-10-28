@@ -24,6 +24,20 @@ CoreMark -O2: 1977567715 cycles, 670639103 instructions for 2000 iterations;
 -Os: 2269098380 cycles, 743574155 instructions. Against the committed
 `ca184a1c92dc` tree (97.29 at -O2, see the notes) the -O2 gain is +3.9%.
 
+**Re-measured 2026-10-28** with `tools/validate/bench.sh` (part of `validate.sh board`; it runs
+`run-benchmarks.sh -O2 -Os` in a staged copy of `baremetal/`): the same
+toolchain build, `65f26a14dd03` (klausscpu-llvm `e436cb084003`; the commits
+after `65f26a14dd03` change only `CLAUDE.md`), runtime `98ae6f9`.  CoreMark
+-O2 101.13 (1977567966 cycles, 251 more than above), -Os 88.14 (2269098380
+cycles, identical).  Every Embench instruction count and `.text` size is
+identical, and so is every cycle count except edn (+42 cycles at both levels)
+and huffbench (+13 at -O2, +15 at -Os): the few cycles of DDR-refresh jitter
+that memory-bound code shows from run to run.  The speed and size geomeans
+are unchanged (-O2 0.555 / 2.269, -Os 0.501 / 1.603).
+CoreMark performance and validation CRCs OK, Embench 19/19 PASS at both
+levels.  These figures are the `bench.*` entries of
+`tools/validate/baselines/perf.tsv`.
+
 ## Setup
 
 | | |

@@ -1,0 +1,8 @@
+--- Captured UART output ---
+=== KlaussCPU lwIP ping demo (DHCP) ===
+
+PHY ID1 = 0x0000 (expect 0x0007)
+Waiting for link...
+Link timeout (BMSR=0x0000)
+Starting DHCP...
+--- end UART ---

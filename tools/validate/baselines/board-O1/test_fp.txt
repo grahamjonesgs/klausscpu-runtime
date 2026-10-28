@@ -1,0 +1,41 @@
+Load Complete OK
+=== Soft-FP Test ===
+T1a 42 round trip:        PASS
+T1b -1234567 round trip:  PASS
+T1c 0 round trip:         PASS
+T1d 2^24 round trip:      PASS
+T2a 2 + 3 == 5:           PASS
+T2b 1000000 + 234567:     PASS
+T2c -50 + 80 == 30:       PASS
+T2d 17 + -17 == 0:        PASS
+T3a 10 - 4 == 6:          PASS
+T3b 4 - 10 == -6:         PASS
+T3c x - x == 0:           PASS
+T4a 6 * 7 == 42:          PASS
+T4b -12 * 13 == -156:     PASS
+T4c 1000 * 1000 == 1e6:   PASS
+T5a 100 / 4 == 25:        PASS
+T5b 1024 / 32 == 32:      PASS
+T5c 1 / 2 == 0 (trunc):   PASS
+T5d 1 / 2 < 1:            PASS
+T5e 1 / 2 > 0:            PASS
+T6a (1+2)*3 == 9:         PASS
+T6b 100/10 + 100/2 == 60: PASS
+T6c (a+b)(a-b)=a^2-b^2:   PASS
+T7a 5 > 3:                PASS
+T7b 3 < 5:                PASS
+T7c 5 == 5:               PASS
+T7d 5 != 3:               PASS
+T7e 3 <= 5:               PASS
+T7f 5 >= 3:               PASS
+T7g 5 >= 5:               PASS
+T7h 0 == -0:              PASS
+T8a -17:                  PASS
+T8b --17 == 17:           PASS
+T8c -(-0):                PASS
+T9  geom sum trunc == 1:  PASS
+T9b geom*256 == 511:      PASS
+
+Results: 35 pass, 0 fail
+
+CPU halted.

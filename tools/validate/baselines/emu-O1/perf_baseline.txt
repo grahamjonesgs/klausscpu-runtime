@@ -1,0 +1,20 @@
+--- Captured UART output ---
+=== KlaussCPU perf baseline ===
+L1: ways=0 sets=0 line=0B total=0B
+working set: 256 KiB
+
+
+--- alu ---
+
+--- mem_stream ---
+
+--- ptr_chase ---
+
+--- branchy ---
+
+--- calls_fib ---
+
+--- muldiv ---
+
+=== done (sink=5295195395655698285) ===
+--- end UART ---

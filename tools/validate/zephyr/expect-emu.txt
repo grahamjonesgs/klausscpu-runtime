@@ -1,0 +1,11 @@
+# app<TAB>extended regex that the emulator capture must contain.
+# Every app must also stop at the instruction cap (no trap, no fault).
+hello	Hello World! nexys_a7
+dbg_synchronization	thread_b: Hello World from cpu 0 on nexys_a7
+irq_soak	IRQSOAK START
+llext_demo	llext_unload: 0
+llext_demo	=== LLEXT demo done ===
+mandel	KlaussCPU Mandelbrot
+gui_demo	KlaussCPU VNC GUI demo
+gui_lvgl	LVGL bench fill +: total=[0-9]+
+doom	KlaussCPU DOOM

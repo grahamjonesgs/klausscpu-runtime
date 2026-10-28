@@ -1,0 +1,35 @@
+--- Captured UART output ---
+=== KlaussCPU SD card test ===
+
+--- 1. Mount + free space ---
+  FAIL  mount  (f_mount failed)
+
+--- 2. Create directory ---
+  FAIL  mkdir  (f_mkdir failed)
+
+--- 3. Write / read text file ---
+  FAIL  text open-write  (f_open write failed)
+
+--- 4. f_stat ---
+  FAIL  stat  (wrong size)
+
+--- 5. Append ---
+  FAIL  append open  (f_open append failed)
+
+--- 6. Seek ---
+  FAIL  seek open  (f_open failed)
+
+--- 7. Rename ---
+  FAIL  rename  (f_rename failed)
+
+--- 8. 10 small files ---
+  FAIL  multi-file write/read  (one or more files failed)
+
+--- 9. 16 KiB pattern ---
+  FAIL  large open-write  (f_open failed)
+
+--- 10. Clean-up ---
+  FAIL  cleanup rmdir  (f_unlink dir failed)
+
+=== Results: 0 pass, 10 fail ===
+--- end UART ---

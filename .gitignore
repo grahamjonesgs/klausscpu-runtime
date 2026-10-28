@@ -10,6 +10,8 @@ crt-*.o
 # Hand-written assembly *.S — note macOS APFS/HFS+ is case-insensitive, so
 # `*.s` above would otherwise drop `.S` files too. Negate the rule here.
 !*.S
+# The validation harness's ISA coverage inputs are assembly sources.
+!tools/validate/oracle-inputs/*.s
 
 # Compiler-generated header dependency files (-MMD -MP)
 *.d

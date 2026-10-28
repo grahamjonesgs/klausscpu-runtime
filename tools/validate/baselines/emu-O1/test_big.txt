@@ -1,0 +1,56 @@
+--- Captured UART output ---
+=== test_big ===
+
+=== printf ===
+  %d:  0 42 -99
+  %i:  -2147483648
+  %u:  4294967295
+  %x:  deadbeef CAFEBABE
+  %o:  755
+  %s:  'hello world'
+  %c:  'K'
+  %%:  100%
+  %5d:   '   42'
+  %-5d:  '42   '
+  %05d:  '00042'
+  %8s:   '      hi'
+  %-8s:  'hi      '
+  %.3s:  'abc'
+  multi: 3 + 4 = 7, 'abc' len=3
+  %p:  0xbeefcafe
+  PASS printf-coverage
+
+=== 64-bit arithmetic ===
+  fact(10)=3628800  fact(20)=2432902008176640000
+  fib(10)=55  fib(30)=832040
+  1<<32=0x100000000  1<<63=0x8000000000000000
+  1M*1M=1000000000000
+  1T/7=142857142857 r1
+  isqrt(1T)=1000000
+  INT64_MIN=-9223372036854775808
+  PASS 64-bit-arith
+
+=== string ops ===
+  PASS string-ops
+
+=== recursion ===
+  A(3,3)=61
+  PASS ackermann
+
+=== FatFs ===
+  FAIL f_mount
+  mount err 3
+  FAIL read hello.txt
+  FAIL write big.txt
+  FAIL f_opendir
+  FAIL f_mkdir
+  mkdir err 3
+  FAIL f_rename
+  rename err 3
+  FAIL f_lseek
+  FAIL f_unlink
+  PASS unlink-gone
+  FAIL f_getfree
+
+=== Results: 5 pass, 9 fail ===
+--- end UART ---

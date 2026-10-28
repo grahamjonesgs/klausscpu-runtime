@@ -1,0 +1,5 @@
+Load Complete OK
+Results: 17 pass, 0 fail
+test_divshadow PASSED
+
+CPU halted.

@@ -1,0 +1,19 @@
+# app<TAB>extended regex that the board capture must contain (ssh_session is
+# the SSH session log of the ssh_shell run, <app>.vnc the VNC grab log).
+# No capture may contain "FATAL ERROR".
+hello	Hello World! nexys_a7
+dbg_synchronization	thread_b: Hello World from cpu 0 on nexys_a7
+irq_soak	BEAT t=60 s loops=[0-9]+ ticks=[0-9]+ viol=0 lost=0
+llext_demo	llext_unload: 0
+llext_demo	=== LLEXT demo done ===
+mandel	mandel: kiter/s=[0-9]+
+mandel.vnc	saved
+gui_demo	VNC GUI ready
+gui_demo.vnc	saved
+gui_lvgl	=== benchmark done ===
+gui_lvgl.vnc	saved
+doom	doom: drawfps=[0-9]+
+doom.vnc	saved
+ssh_shell	SSH session established
+ssh_session	Zephyr version 3\.7\.0
+ssh_session	Uptime: [0-9]+ ms

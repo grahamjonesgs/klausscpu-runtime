@@ -1,0 +1,4 @@
+--- Captured UART output ---
+test_flags: 284 instructions, 7384 runs, 0 failures, 0 wide
+test_flags: PASS
+--- end UART ---

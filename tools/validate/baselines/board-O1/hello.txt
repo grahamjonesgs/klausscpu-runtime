@@ -1,0 +1,11 @@
+Load Complete OK
+Hello, KlaussCPU! 1
+Hello, KlaussCPU! 2
+[test] 11 22 33 44 55 66
+[ctrl3] 11 22 33
+[u8-6 ] 11 22 33 44 55 66
+[i=aa] 11 22 33 aa 55 66
+[i=bb] 11 22 33 bb 55 66
+[i=cc] 11 22 33 cc 55 66
+
+CPU halted.

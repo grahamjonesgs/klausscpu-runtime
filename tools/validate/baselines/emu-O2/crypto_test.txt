@@ -1,0 +1,12 @@
+--- Captured UART output ---
+=== KlaussCPU crypto hardware self-test ===
+
+[1] AES-128 ECB (FIPS-197 Appendix B)
+  Encrypt:
+  expected CT: 3925841D 02DC09FB DC118597 196A0B32
+  actual   CT: 00000000 00000000 00000000 00000000
+  Decrypt (round-trip):
+  expected PT: 3243F6A8 885A308D 313198A2 E0370734
+  actual   PT: 00000000 00000000 00000000 00000000
+  encrypt=FAIL  decrypt=FAIL  => FAIL
+

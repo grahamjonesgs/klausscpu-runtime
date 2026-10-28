@@ -1,0 +1,25 @@
+--- Captured UART output ---
+=== N-Queens Backtracker ===
+N=1: 1  PASS
+N=2: 0  PASS
+N=3: 0  PASS
+N=4: 2  PASS
+N=5: 10  PASS
+N=6: 4  PASS
+N=7: 40  PASS
+N=8: 92  PASS
+Find first N=8:   PASS
+    cols=[0,4,7,5,2,6,1,3]
+Verify legal:     PASS
+    Q . . . . . . . 
+    . . . . Q . . . 
+    . . . . . . . Q 
+    . . . . . Q . . 
+    . . Q . . . . . 
+    . . . . . . Q . 
+    . Q . . . . . . 
+    . . . Q . . . . 
+N=9 count==352:   PASS
+
+Results: 11 pass, 0 fail
+--- end UART ---

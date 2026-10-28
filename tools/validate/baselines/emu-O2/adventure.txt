@@ -1,0 +1,12 @@
+--- Captured UART output ---
+========================================
+   DUNGEON ESCAPE
+   Running on KlaussCPU!
+========================================
+Commands: n/s/e/w=move l=look
+  g=get u=use i=inventory q=quit
+
+You awaken on cold stone...
+
+You are in a cold stone cell.
+Moonlight seeps through a crack.

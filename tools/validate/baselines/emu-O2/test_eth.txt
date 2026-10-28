@@ -1,0 +1,7 @@
+--- Captured UART output ---
+=== KlaussCPU Ethernet bring-up test ===
+
+Stage 1: MMIO scratch register
+  scratch = 0x00000000 (expected 0xCAFEBABE)
+  [FAIL] scratch
+--- end UART ---

@@ -1,0 +1,6 @@
+Load Complete OK
+=== test_varargs ===
+  mixed: a=11 b=2222222222 c=33 d=4444444444
+=== ALL PASS ===
+
+CPU halted.

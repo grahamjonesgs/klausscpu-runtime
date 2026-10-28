@@ -1,0 +1,21 @@
+Load Complete OK
+=== KlaussCPU perf baseline ===
+L1: ways=2 sets=1024 line=32B total=65536B
+working set: 256 KiB
+
+
+--- alu ---
+
+--- mem_stream ---
+
+--- ptr_chase ---
+
+--- branchy ---
+
+--- calls_fib ---
+
+--- muldiv ---
+
+=== done (sink=5295195395655698285) ===
+
+CPU halted.

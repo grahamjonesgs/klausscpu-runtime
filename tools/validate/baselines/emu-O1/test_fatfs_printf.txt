@@ -1,0 +1,6 @@
+--- Captured UART output ---
+A: before printf
+B: printf 42 hello
+C: neg=-7 hex=0xabcd
+D: after printf
+--- end UART ---

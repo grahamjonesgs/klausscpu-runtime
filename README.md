@@ -113,7 +113,19 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 | `build-*.sh`, `get-*.sh` | upstream fetch/build scripts |
 | `klausscpu_elf.h` | `EM_KLAUSSCPU` and the relocation types, for the run-time loaders |
 | `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words, the FreeRTOS/Zephyr stack alignment, the registers `setjmp.S` saves) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
+| `tools/validate/` | toolchain validation harness: `validate.sh quick\|full\|board\|zephyr\|csmith N\|csmith-board N\|oracle` runs the emulator corpus against committed UART baselines, Csmith (on the emulator, and on the board against the emulator), the ABI test, lit, the board suite with CoreMark/Embench against `baselines/perf.tsv`, and the Zephyr apps; see [`tools/validate/README.md`](tools/validate/README.md) |
 | `abi-test/` | C ABI conformance test: generated caller/callee pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, run on the emulator against host gcc (`./abi-test/run_abi_test.sh [first-seed] [count] [functions]`) |
+
+## Validating a toolchain change
+
+`tools/validate/validate.sh` is the check list for a klausscpu-llvm change
+([`tools/validate/README.md`](tools/validate/README.md)).  With
+`KLAUSSCPU_LLVM_BIN` exported: `validate.sh quick` (about a minute, emulator
+only), `validate.sh full` (adds 450 Csmith seeds, the ABI test, lit and an
+output-byte oracle), `BOARD_LOCK=<lock> validate.sh board` (board suite,
+CoreMark and Embench against the committed perf baseline) and `validate.sh
+zephyr`.  It builds in a staged copy under its output directory, never in
+this checkout.
 
 ## Gotchas
 

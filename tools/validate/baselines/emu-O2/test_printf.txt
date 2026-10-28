@@ -1,0 +1,28 @@
+--- Captured UART output ---
+=== test_printf ===
+T1: 42
+  PASS: T1 format %d
+T2: -99
+  PASS: T2 negative %d
+T3: 12345678
+  PASS: T3 %u
+T4: deadbeef
+  PASS: T4 %x
+T5: CAFEBABE
+  PASS: T5 %X
+T6: hello world
+  PASS: T6 %s
+T7: K
+  PASS: T7 %c
+T8: 100%
+  PASS: T8 %%
+T9: 3 + 4 = 7
+  PASS: T9 multiple args
+T10: 0 0 0
+  PASS: T10 zero values
+T11: name=KlaussCPU age=1 hex=0xabcd
+  PASS: T11 mixed types
+T12: 2147483647
+  PASS: T12 large int
+=== 12 passed, 0 failed ===
+--- end UART ---

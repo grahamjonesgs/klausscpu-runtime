@@ -1,0 +1,25 @@
+--- Captured UART output ---
+=== KlaussCPU FatFs Demo ===
+
+--- Mount ---
+  FAIL  f_mount
+  f_mount error: 3
+
+--- Root directory ---
+  f_opendir error: 3
+  FAIL  f_opendir
+
+--- Read 0:/hello.txt ---
+  f_open error: 3
+  FAIL  read hello.txt
+
+--- Write 0:/klcpu.txt ---
+  f_open error: 3
+  FAIL  write klcpu.txt
+
+--- 1 KiB pattern write/read ---
+  open error: 3
+  FAIL  1KiB pattern
+
+=== Results: 0 pass, 5 fail ===
+--- end UART ---
