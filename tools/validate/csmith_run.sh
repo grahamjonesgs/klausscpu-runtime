@@ -17,8 +17,13 @@
 #                 larger EMU_RETRY_MAX cap (csmith_recheck in csmith_lib.sh)
 #   instr-cap     ran past the cap, and so did every other level: a long
 #                 program, not a failure
-#   HANG          still running at EMU_RETRY_MAX while another level halted:
-#                 a likely miscompiled infinite loop
+#   long          still running at EMU_RETRY_MAX while another level halted,
+#                 in a program whose host build is heavy enough to explain it
+#                 (EMU_LONG_RATIO, csmith_recheck): not a failure, not checked
+#                 to the end
+#   HANG          still running at EMU_RETRY_MAX while another level halted,
+#                 in a program light on the host: a likely miscompiled
+#                 infinite loop
 #   MISMATCH, no-output, stop-<reason> (a trap or other abnormal end, even
 #                 after a good checksum), cc-fail, ld-fail
 #   gen-fail, host-cc-fail, host-timeout, host-ub (for the whole seed:
@@ -53,16 +58,16 @@ one() {
       if [ "${st[i]}" = instr-cap ] && [ $halted = 1 ]; then
         csmith_recheck "${opt[i]}"; st[i]=$ST; got[i]=$G; cnt[i]=$NI
       fi
-      case ${st[i]} in ok|ok-long|instr-cap) ;; *) bad=1 ;; esac
+      case ${st[i]} in ok|ok-long|long|instr-cap) ;; *) bad=1 ;; esac
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seed" "${opt[i]}" "${st[i]}" "$REF" "${got[i]}" "${cnt[i]}"
     done
   fi
   if [ $bad = 1 ]; then mkdir -p "$OUT/fail/$seed"; cp t.c ./*.err emu*.out t*.elf "$OUT/fail/$seed/" 2>/dev/null; fi
   cd "$OUT" && rm -rf "$W"
 }
-export -f one csmith_gen csmith_build csmith_classify csmith_recheck checksum_of emu emu_instructions stop_of
+export -f one csmith_gen csmith_build csmith_classify csmith_recheck host_instructions checksum_of emu emu_instructions stop_of
 export OUT OPTS MAXI LLVM_BIN RT KLAUSSCC CSMITH CSI CFLAGS RTOBJS PICO CSMITH_OPTS
 seq "$FIRST" $((FIRST + COUNT - 1)) | xargs -P "$JOBS" -I{} bash -c 'one {}' >>"$OUT/results.tsv"
 awk -F'\t' '{c[$3]++} END{for (k in c) print k, c[k]}' "$OUT/results.tsv" | sort
 [ -s "$OUT/no-strict-aliasing.txt" ] && echo "no-strict-aliasing $(sort -u "$OUT/no-strict-aliasing.txt" | wc -l)"
-! awk -F'\t' '$3 !~ /^(ok|ok-long|instr-cap|host-timeout|host-ub|gen-fail|host-cc-fail)$/' "$OUT/results.tsv" | grep -q .
+! awk -F'\t' '$3 !~ /^(ok|ok-long|long|instr-cap|host-timeout|host-ub|gen-fail|host-cc-fail)$/' "$OUT/results.tsv" | grep -q .

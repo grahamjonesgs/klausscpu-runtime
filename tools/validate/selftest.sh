@@ -17,7 +17,9 @@
 #   that stops halting.
 # Then Csmith on the emulator through a klausscc wrapper: a trap after a
 # correct checksum (stop-Trap), and one level that runs past the cap while
-# the others halt (ok-long with the default retry cap, HANG with a small one);
+# the others halt (ok-long with the default retry cap; with a small one, HANG
+# when the host's run is light and long when it is heavy, set by
+# EMU_LONG_RATIO);
 # csmith_board.sh with a wrong emulator checksum in a program too big for the
 # board (it never reaches the board); and perf.py with a metric that is no
 # longer measured.
@@ -102,8 +104,13 @@ check 1 "csmith: trap after a good checksum (stop-Trap)" \
 # Seed 120000 takes 332K instructions at -O0 and under 100K at -O1/-O2/-Os.
 check 0 "csmith: one level over the cap, halts on retry (ok-long)" \
   env EMU_MAX_INSTRUCTIONS=200000 "$HERE/csmith_run.sh" 120000 1 "$T/cs-long"
-check 1 "csmith: one level over the cap, also on retry (HANG)" \
-  env EMU_MAX_INSTRUCTIONS=200000 EMU_RETRY_MAX=250000 "$HERE/csmith_run.sh" 120000 1 "$T/cs-hang"
+# Its host build runs about 1e6 instructions: past the retry cap it is HANG
+# when KlaussCPU may take at most 0.001 times that (EMU_LONG_RATIO), long
+# when 1000 times (the program counts as heavy).
+check 1 "csmith: one level over the cap, also on retry, light on the host (HANG)" \
+  env EMU_MAX_INSTRUCTIONS=200000 EMU_RETRY_MAX=250000 EMU_LONG_RATIO=0.001 "$HERE/csmith_run.sh" 120000 1 "$T/cs-hang"
+check 0 "csmith: one level over the cap, also on retry, heavy on the host (long)" \
+  env EMU_MAX_INSTRUCTIONS=200000 EMU_RETRY_MAX=250000 EMU_LONG_RATIO=1000 "$HERE/csmith_run.sh" 120000 1 "$T/cs-heavy"
 # Csmith on the board script, without the board: the emulator checksum of
 # every level is wrong and every program counts as too big for the board.
 cat >"$T/klausscc-badck" <<'W'

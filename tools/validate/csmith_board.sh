@@ -23,7 +23,9 @@
 #                 of the same seed was all-equal, the emulator run is repeated
 #                 with the larger EMU_RETRY_MAX cap (csmith_recheck in
 #                 csmith_lib.sh) and must halt with the host's checksum
-#                 (skip-long-ok); otherwise the level is HANG (still running,
+#                 (skip-long-ok); otherwise the level is skip-long-long
+#                 (still running, in a program heavy on the host too: `long`
+#                 in csmith_recheck, not a failure), HANG (still running,
 #                 kept in compiler/), or COMPILER / no-output / stop-<reason>.
 #   stop-<reason> the emulator run ended other than by HALT (a trap, an
 #                 invalid opcode, ...), kept in compiler/.
@@ -81,10 +83,10 @@ one() {
       O=${opt[i]}
       if [ "${st[i]}" = skip-long ] && [ $good = 1 ]; then
         csmith_recheck "$O"; eck[i]=$G; cnt[i]=$NI
-        case $ST in ok-long) st[i]=skip-long-ok ;; MISMATCH) st[i]=COMPILER ;; *) st[i]=$ST ;; esac
+        case $ST in ok-long) st[i]=skip-long-ok ;; long) st[i]=skip-long-long ;; MISMATCH) st[i]=COMPILER ;; *) st[i]=$ST ;; esac
       fi
       case ${st[i]} in
-        all-equal|skip-long|skip-long-ok|skip-big) keep= ;;
+        all-equal|skip-long|skip-long-ok|skip-long-long|skip-big) keep= ;;
         BOARD-EMU|EMU-HOST) keep=board-emu ;;
         *) keep=compiler ;;
       esac
@@ -98,9 +100,9 @@ one() {
   fi
   cd "$OUT" && rm -rf "$W"
 }
-export -f one csmith_gen csmith_build csmith_classify csmith_recheck checksum_of emu emu_instructions stop_of board
+export -f one csmith_gen csmith_build csmith_classify csmith_recheck host_instructions checksum_of emu emu_instructions stop_of board
 export OUT OPTS MAXI MAX_TEXT LLVM_BIN RT KLAUSSCC CSMITH CSI CFLAGS RTOBJS PICO CSMITH_OPTS BOARD_LOCK
 seq "$FIRST" $((FIRST + COUNT - 1)) | xargs -P "$JOBS" -I{} bash -c 'one {}' >>"$OUT/results.tsv"
 awk -F'\t' '{c[$2 " " $3]++} END{for (k in c) print k, c[k]}' "$OUT/results.tsv" | sort
 [ -s "$OUT/no-strict-aliasing.txt" ] && echo "no-strict-aliasing $(sort -u "$OUT/no-strict-aliasing.txt" | wc -l)"
-! awk -F'\t' '$3 !~ /^(all-equal|skip-long|skip-long-ok|skip-big|host-timeout|host-ub|gen-fail|host-cc-fail)$/' "$OUT/results.tsv" | grep -q .
+! awk -F'\t' '$3 !~ /^(all-equal|skip-long|skip-long-ok|skip-long-long|skip-big|host-timeout|host-ub|gen-fail|host-cc-fail)$/' "$OUT/results.tsv" | grep -q .

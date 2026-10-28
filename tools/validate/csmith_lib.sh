@@ -122,6 +122,18 @@ csmith_classify() {
   esac
 }
 
+# host_instructions -- the number of instructions the host reference ./host
+# (gcc -O0) executes: perf stat's count, or, without a usable perf, its user
+# CPU time at a nominal 3e9 instructions per second.
+host_instructions() {
+  local n t
+  n=$(timeout 60 perf stat -x, -e instructions:u ./host 2>&1 >/dev/null |
+      awk -F, '$3 ~ /^instructions/ { print $1; exit }')
+  case $n in '' | *[!0-9]*) ;; *) echo "$n"; return ;; esac
+  t=$( { TIMEFORMAT=%U; time timeout 60 ./host >/dev/null 2>&1; } 2>&1 )
+  awk -v t="$t" 'BEGIN { printf "%.0f\n", (t + 0) * 3e9 }'
+}
+
 # csmith_recheck <opt> -- t<opt>.elf ran past the instruction cap while
 # another level of the same seed halted with the right checksum.  That is
 # usually a slow -O0 build of a loop the optimiser removed (seed 120376
@@ -129,11 +141,31 @@ csmith_classify() {
 # miscompiled infinite loop, so the level is run again with a much larger cap
 # (EMU_RETRY_MAX, default 2e10, about 2 minutes; EMU_RETRY_TIMEOUT seconds,
 # default 1800).  Sets G, NI and ST as csmith_classify does, except that a
-# good result is ok-long and a run that still does not halt is HANG (a
-# failure).
+# good result is ok-long, and a run that still does not halt is
+#   long  when the program is heavy on the host too: its gcc -O0 build
+#         executes at least EMU_RETRY_MAX / EMU_LONG_RATIO (default 100, so
+#         2e8) instructions, so that KlaussCPU code up to EMU_LONG_RATIO times
+#         as long as the host's could still be running.  Seed 700263 at -O0:
+#         an int32 loop that runs 2.39e8 times until it overflows, 1.19e10
+#         host instructions, about 6.6e11 on KlaussCPU (an hour on the
+#         emulator).  Not a failure, but not checked to the end either;
+#   HANG  otherwise (a failure): Csmith programs run about 1e6 host
+#         instructions, so a miscompiled infinite loop in one of them is
+#         still caught.
+# The host count is appended to emu<opt>.long.out.
 csmith_recheck() {
-  local O=$1
-  emu "${EMU_RETRY_MAX:-20000000000}" "t$O.elf" "emu$O.long.out" "${EMU_RETRY_TIMEOUT:-1800}"
+  local O=$1 H max=${EMU_RETRY_MAX:-20000000000}
+  emu "$max" "t$O.elf" "emu$O.long.out" "${EMU_RETRY_TIMEOUT:-1800}"
   csmith_classify "emu$O.long.out"
-  case $ST in ok) ST=ok-long ;; instr-cap|stop-none) ST=HANG ;; esac
+  case $ST in
+    ok) ST=ok-long ;;
+    instr-cap | stop-none)
+      H=$(host_instructions)
+      echo "--- host gcc -O0 run: $H instructions ---" >>"emu$O.long.out"
+      if awk -v h="$H" -v r="${EMU_LONG_RATIO:-100}" -v m="$max" 'BEGIN { exit !(h * r >= m) }'; then
+        ST=long
+      else
+        ST=HANG
+      fi ;;
+  esac
 }

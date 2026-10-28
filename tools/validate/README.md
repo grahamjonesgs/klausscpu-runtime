@@ -150,10 +150,20 @@ A run must end in HALT: a trap or other abnormal stop is `stop-<reason>`
 (a failure) even after a correct checksum.  When one level runs past the
 2G-instruction cap while another level of the same seed halts with the
 right checksum, that level is run again with `EMU_RETRY_MAX` (2e10, about
-two minutes): it must then halt with the right checksum (`ok-long`) or the
-seed fails as `HANG`.  A slow -O0 build of a loop the optimiser removed is
-the usual reason (seed 120376 with `--float`: 103K instructions at -O1,
-10.4G at -O0); a miscompiled infinite loop is the one to catch.  When every
+two minutes): it must then halt with the right checksum (`ok-long`).  A
+slow -O0 build of a loop the optimiser removed is the usual reason (seed
+120376 with `--float`: 103K instructions at -O1, 10.4G at -O0); a
+miscompiled infinite loop is the one to catch.  A level still running then
+is `HANG` (a failure), unless the program is heavy on the host as well: when
+its gcc -O0 build executes at least `EMU_RETRY_MAX / EMU_LONG_RATIO` (100,
+so 2e8) instructions (`perf stat`; without perf, its CPU time at 3e9 per
+second), KlaussCPU code up to 100 times as long could still be running, and
+the level is `long` (not a failure, not checked to the end; the host count
+is the last line of its `emu<opt>.long.out`).  Seed 700263 at -O0 is one: an
+int32 loop that runs 2.39e8 times until it overflows, 1.19e10 host
+instructions and 6.6e11 on KlaussCPU (an hour on the emulator), where -O1
+and up take 275K.  Csmith programs typically run about 1e6 host
+instructions, so a hang in one stays a `HANG`.  When every
 level hits the cap, the program is just long (`instr-cap`, not a failure).
 `CSMITH_OPTS=--float` for the FP runs.  Csmith's `--float` programs often
 pass a `float *` where an `int32_t *` is expected (128 of 150 seeds from
@@ -180,7 +190,8 @@ run exceeds `EMU_MAX_INSTRUCTIONS` (300M) are not run on the board
 (`skip-big`, only when the emulator's checksum is right; a big program with
 a wrong one is `COMPILER`).  A `skip-long` level of a seed whose other level was
 `all-equal` gets the same `EMU_RETRY_MAX` re-run on the emulator as above
-(`skip-long-ok`, or `HANG`).  The board run must print `CPU halted` too.
+(`skip-long-ok`, `skip-long-long` as `long` above, or `HANG`).  The board
+run must print `CPU halted` too.
 Csmith's default programs take about 150K instructions on average and a few
 million at most (2.5M in 858 runs), and load in under a second.
 
