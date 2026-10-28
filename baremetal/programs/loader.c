@@ -9,13 +9,19 @@
  *     Optionally stripped:  llvm-strip --strip-debug → .sd.elf
  *     Content:      ELF32 with PT_LOAD segments + SHT_RELA relocation sections.
  *     Runtime fixup: if loaded at a different address than the link base,
- *                    ABS32/ABS64 data pointers are patched by delta.
- *                    All code uses CALLREL/JMPREL/LEAPC (already correct).
+ *                    every ABS32/ABS64 in a loaded section is patched by
+ *                    delta: data pointers (ABS64) and switch jump tables,
+ *                    whose entries are absolute block addresses (ABS32)
+ *                    even under -fPIC.  The code's own references are
+ *                    PC-relative under -fPIC (CALLREL/JMPREL/LEAPC, the
+ *                    short CALL), so they need nothing.
  *
  *   Flat binary (any other magic):
  *     Produced by:  llvm-objcopy -O binary _pic.elf → .pic
  *     Entry point:  byte 0 (_start_loadable).
- *     Backward compat only; no runtime relocation support.
+ *     Backward compat only; no runtime relocation support: it runs only
+ *     when linked at PIC_LOAD_ADDR, or when it has no absolute data at all
+ *     (no initialised pointers, no switch that becomes a jump table).
  *
  * Memory layout:
  *   0x00000020 – 0x03FFFFFF : loader + its libraries (≤ 64 MB)

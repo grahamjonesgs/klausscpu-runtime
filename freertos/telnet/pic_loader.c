@@ -5,8 +5,14 @@
  * ELF format: ELF32 with PT_LOAD segments + SHT_RELA relocations,
  * produced by:  ld.lld --emit-relocs -T klausscpu_pic.ld
  *
+ * The ELF's ABS32/ABS64 relocations are applied when it is loaded away from
+ * its link address: data pointers, and switch jump tables, whose entries are
+ * absolute block addresses even under -fPIC.
+ *
  * Flat binary: any file not starting with the ELF magic is treated as a
- * position-independent flat binary; entry is at byte 0.
+ * flat binary; entry is at byte 0.  It is not relocated, so it runs only
+ * when linked at PIC_LOAD_ADDR or when it has no absolute data (no
+ * initialised pointers, no switch that becomes a jump table).
  *
  * Only one program runs at a time (g_pic_mutex serialises concurrent calls).
  */
