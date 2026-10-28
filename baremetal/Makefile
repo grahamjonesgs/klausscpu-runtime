@@ -523,9 +523,19 @@ test_fp.llext: test_fp_ext.o $(EXT_FP_OBJS)
 	$(LLD) -r -o $@ $^
 	@echo "==> $@ built (ELF32 ET_REL extension, soft-FP bundled)"
 
+# test_atomic: the __sync_* atomics resolve against the kernel's exports.
+# <stdatomic.h> is clang's own header (after ext_include/, whose stdint.h and
+# stddef.h it picks up).
+test_atomic.llext: programs/test_atomic.c
+	$(CC) $(EXT_CFLAGS) -isystem $(shell $(CC) -print-resource-dir)/include \
+	    -DKLAUSS_LLEXT -c -o $@ $<
+	@echo "==> $@ built (ELF32 ET_REL extension)"
+
+EXT_ALL = $(addsuffix .llext, $(EXT_DEMOS)) test_fp.llext test_atomic.llext
+
 .PHONY: ext-demos
-ext-demos: $(addsuffix .llext, $(EXT_DEMOS)) test_fp.llext
-	@echo "==> extensions built: $(addsuffix .llext, $(EXT_DEMOS)) test_fp.llext"
+ext-demos: $(EXT_ALL)
+	@echo "==> extensions built: $(EXT_ALL)"
 
 # ── Phony aliases ─────────────────────────────────────────────────────────────
 

@@ -189,7 +189,7 @@ From `runtime/baremetal/`:
 
 ```sh
 make ext-demos      # hello adventure expr bst crypto queens test_64bit test_switch
-                    # perf_baseline dhrystone test_fp .llext
+                    # perf_baseline dhrystone test_fp test_atomic .llext
 ```
 
 The ssh_shell build also emits the two `svc` backends, `apibackend.llext` and
@@ -197,16 +197,20 @@ The ssh_shell build also emits the two `svc` backends, `apibackend.llext` and
 <outdir>` (in klausscpu-runtime) rebuilds all of them, backs up every
 `.llext` on the card, uploads the new ones over HTTP and runs each on the
 board (see `tools/validate/README.md`).  Rebuild the card's extensions after
-any change of the instruction encoding or the C ABI: nothing checks the ABI
-version in `e_flags` at load time, and an extension from an older toolchain
-crashes the kernel (invalid opcode at its `main`).
+any change of the instruction encoding or the C ABI: `llext_load()` refuses
+an extension whose `e_flags` carry another C ABI version, or whose
+`e_machine` is not KlaussCPU (`arch_elf_check_header()` in
+`arch/klausscpu/core/elf.c`, a hook `zephyr-patches/llext-klausscpu.patch`
+adds), and `run` says why: "built for C ABI 0, this kernel is ABI 2 (e_flags
+0x0): rebuild it".
 
 Extensions compile with `-c` against the SDK headers in `runtime/ext_include/`
 (plain externs — picolibc headers can't be used because they macro-define
 `putchar`/`getchar` over `FILE*`). To add a program, drop it in `runtime/programs/`
 and add its name to `EXT_DEMOS` in the Makefile. It may call any symbol exported
 in `ssh/llext_exports.c` (printf, puts, putchar, getchar, malloc/calloc/realloc/
-free, mem*/str*) plus the inline MMIO helpers in `mmio.h`.
+free, mem*/str*, and the `__sync_*_N` functions behind every atomic
+read-modify-write) plus the inline MMIO helpers in `mmio.h`.
 
 Extensions are compiled with long calls (`-mllvm -klausscpu-short-calls=false`:
 the Makefile's `EXT_CFLAGS`, and `LLEXT_APPEND_FLAGS` from
@@ -244,7 +248,7 @@ so concurrent loads are safe.
 | File | Role |
 |---|---|
 | `ssh/llext_loader.c` | reads the `.llext` from SD, `llext_load`, resolves `main`, runs it on the connection thread, routes stdio per-thread |
-| `ssh/llext_exports.c` | `EXPORT_SYMBOL` table (kernel libc) + `getchar()` (minimal libc has none) |
+| `ssh/llext_exports.c` | `EXPORT_SYMBOL` table (kernel libc, the `__sync_*_N` atomics) + `getchar()` (minimal libc has none) |
 | `arch/klausscpu/core/elf.c` | `arch_elf_relocate` — ABS32 / ABS64 / PCREL32, little-endian |
 | `arch/klausscpu/core/irq.c` | `arch_printk_char_out` per-thread console-output router |
 | `runtime/ext_include/` | extension SDK headers (stdio/string/stdlib/stdint/stddef) |

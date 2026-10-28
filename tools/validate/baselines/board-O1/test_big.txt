@@ -45,16 +45,19 @@ Load Complete OK
     .Spotlight-V100 0 B
     KLCPU.TXT    27 B
     hello_rs.llext 10092 B
-    test_fp.llext 12280 B
+    test_fp.llext 12272 B
     test1        0 B
     .Trashes     0 B
     ext_hello.llext 15908 B
-    adventure.llext 5308 B
+    test_atomic.llext 25176 B
+    ext_atomics.llext 21776 B
+    abi_mismatch.llext 1416 B
+    adventure.llext 5300 B
     bst.llext    5992 B
-    crypto.llext 8048 B
+    crypto.llext 8024 B
     expr.llext   5244 B
     hello.llext  1416 B
-    queens.llext 3296 B
+    queens.llext 3288 B
     test_64bit.llext 7112 B
     test_switch.llext 3716 B
     test2        0 B
@@ -67,10 +70,10 @@ Load Complete OK
     log          0 B
     apibackend.llext 3352 B
     ctrl.llext   2228 B
-    dhrystone.llext 7504 B
+    dhrystone.llext 7496 B
     DOOM1.WAD    4196020 B
     big.txt      25 B
-    perf_baseline.llext 7764 B
+    perf_baseline.llext 7756 B
     ssh_host_key.bin 121 B
   PASS f_readdir
   PASS f_mkdir
@@ -78,7 +81,7 @@ Load Complete OK
   PASS f_lseek
   PASS f_unlink
   PASS unlink-gone
-  free: 30505488 KB
+  free: 30505328 KB
   PASS f_getfree
 
 === Results: 13 pass, 1 fail ===

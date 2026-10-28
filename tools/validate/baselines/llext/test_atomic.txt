@@ -1,0 +1,8 @@
+--- Captured UART output ---
+
+=== test_atomic: forced atomics (single core) ===
+T1/T2 per-width ops: 116 pass, 0 fail
+T3/T4 C11 + INT_MASK: 127 pass, 0 fail
+Results: 127 pass, 0 fail
+test_atomic PASSED
+--- end UART ---

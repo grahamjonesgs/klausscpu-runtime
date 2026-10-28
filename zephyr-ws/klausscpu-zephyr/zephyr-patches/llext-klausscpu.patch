@@ -28,7 +28,7 @@ index b0477416a43..6d7323b9ed0 100644
  typedef struct elf64_ehdr elf_ehdr_t;
  /** Machine sized section header structure */
 diff --git a/include/zephyr/llext/llext.h b/include/zephyr/llext/llext.h
-index 19fbe7a0b55..eb452a00dc1 100644
+index 19fbe7a0b55..b688eb11676 100644
 --- a/include/zephyr/llext/llext.h
 +++ b/include/zephyr/llext/llext.h
 @@ -126,6 +126,13 @@ struct llext_load_param {
@@ -45,6 +45,28 @@ index 19fbe7a0b55..eb452a00dc1 100644
  };
  
  /** Default initializer for @ref llext_load_param */
+@@ -241,6 +248,21 @@ int llext_add_domain(struct llext *ext, struct k_mem_domain *domain);
+ int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc,
+ 			     uintptr_t sym_base_addr, const char *sym_name, uintptr_t load_bias);
+ 
++/**
++ * @brief Architecture specific check of an extension's ELF header
++ *
++ * Called by llext_load() once the ELF magic and file type are known to be
++ * valid, before anything else is read or allocated.  An architecture whose
++ * extensions carry an ABI or ISA version (in e_machine or e_flags) refuses
++ * an incompatible one here instead of running code that would crash.  The
++ * default implementation accepts every header.
++ *
++ * @param[in] hdr The extension's ELF header
++ * @retval 0 The extension may be loaded
++ * @retval -ENOEXEC The extension was built for another machine or ABI
++ */
++int arch_elf_check_header(const elf_ehdr_t *hdr);
++
+ /**
+  * @brief Locates an ELF section in the file.
+  *
 diff --git a/subsys/llext/Kconfig b/subsys/llext/Kconfig
 index d3e85b6cb9f..e948f41f4fa 100644
 --- a/subsys/llext/Kconfig
@@ -90,10 +112,35 @@ index dcbd441d0e1..349c7a0a152 100644
  				LOG_ERR("Invalid entry size %zd for SHT_RELA section %d",
  					(size_t)shdr->sh_entsize, i);
 diff --git a/subsys/llext/llext_load.c b/subsys/llext/llext_load.c
-index de3cdd6402b..22729545bd3 100644
+index de3cdd6402b..189d5d1ffde 100644
 --- a/subsys/llext/llext_load.c
 +++ b/subsys/llext/llext_load.c
-@@ -184,6 +184,24 @@ static int llext_find_tables(struct llext_loader *ldr)
+@@ -38,6 +38,12 @@ LOG_MODULE_DECLARE(llext, CONFIG_LLEXT_LOG_LEVEL);
+ 
+ static const char ELF_MAGIC[] = {0x7f, 'E', 'L', 'F'};
+ 
++__weak int arch_elf_check_header(const elf_ehdr_t *hdr)
++{
++	ARG_UNUSED(hdr);
++	return 0;
++}
++
+ /*
+  * Load basic ELF file data
+  */
+@@ -80,6 +86,11 @@ static int llext_load_elf_data(struct llext_loader *ldr, struct llext *ext)
+ 		return -ENOEXEC;
+ 	}
+ 
++	ret = arch_elf_check_header(&ldr->hdr);
++	if (ret != 0) {
++		return ret;
++	}
++
+ 	/*
+ 	 * Read all ELF section headers and initialize maps.  Buffers allocated
+ 	 * below are freed when leaving do_llext_load(), so don't count them in
+@@ -184,6 +195,24 @@ static int llext_find_tables(struct llext_loader *ldr)
  		}
  	}
  
@@ -118,7 +165,7 @@ index de3cdd6402b..22729545bd3 100644
  	if (!ldr->sects[LLEXT_MEM_SHSTRTAB].sh_type ||
  	    !ldr->sects[LLEXT_MEM_STRTAB].sh_type ||
  	    !ldr->sects[LLEXT_MEM_SYMTAB].sh_type) {
-@@ -252,8 +270,16 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -252,8 +281,16 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  			 */
  			memcpy(region, shdr, sizeof(*region));
  		} else {
@@ -137,7 +184,7 @@ index de3cdd6402b..22729545bd3 100644
  				LOG_ERR("Unsupported section flags for %s (region %d)",
  					name, mem_idx);
  				return -ENOEXEC;
-@@ -295,6 +321,8 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -295,6 +332,8 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  			region->sh_addr = address;
  			region->sh_offset = bot_ofs;
  			region->sh_size = top_ofs - bot_ofs;
@@ -146,7 +193,7 @@ index de3cdd6402b..22729545bd3 100644
  		}
  	}
  
-@@ -313,6 +341,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -313,6 +352,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  				continue;
  			}
  
@@ -164,7 +211,7 @@ index de3cdd6402b..22729545bd3 100644
  			if (ldr->hdr.e_type == ET_DYN) {
  				/*
  				 * Test all merged VMA ranges for overlaps
-@@ -351,6 +390,39 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -351,6 +401,39 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  		}
  	}
  
@@ -204,7 +251,7 @@ index de3cdd6402b..22729545bd3 100644
  	/*
  	 * Calculate each ELF section's offset inside its memory region. This
  	 * is done as a separate pass so the final regions are already defined.
-@@ -361,6 +433,14 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -361,6 +444,14 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  
  		if (mem_idx != LLEXT_MEM_COUNT) {
  			ldr->sect_map[i].offset = shdr->sh_offset - ldr->sects[mem_idx].sh_offset;
@@ -219,7 +266,7 @@ index de3cdd6402b..22729545bd3 100644
  		}
  	}
  
-@@ -646,9 +726,13 @@ out:
+@@ -646,9 +737,13 @@ out:
  
  	/* Until proper inter-llext linking is implemented, the symbol table is
  	 * not useful outside of the loading process; keep it only if debugging

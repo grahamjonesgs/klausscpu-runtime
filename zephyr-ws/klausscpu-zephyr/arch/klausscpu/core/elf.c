@@ -1,8 +1,10 @@
 /*
- * elf.c — KlaussCPU architecture-specific LLEXT relocations.
+ * elf.c — KlaussCPU architecture-specific LLEXT hooks: the ELF header check
+ * and the relocations.
  *
- * PROPOSAL / NOT YET WIRED INTO THE BUILD.
- * This implements the arch hook that Zephyr's LLEXT subsystem
+ * arch_elf_check_header() refuses an extension built for another machine or
+ * C ABI version (the hook is added by zephyr-patches/llext-klausscpu.patch).
+ * arch_elf_relocate() is the hook that Zephyr's LLEXT subsystem
  * (subsys/llext/) calls to relocate a partially-linked (ET_REL) extension
  * after it has been copied into RAM.  It is the runtime-loader counterpart
  * of lld/ELF/Arch/KlaussCPU.cpp::relocate() — the formulas here MUST match
@@ -27,13 +29,59 @@
 
 #include <errno.h>
 
+#include <zephyr/arch/klausscpu/llext.h>
 #include <zephyr/llext/elf.h>
 #include <zephyr/llext/llext.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/byteorder.h>
 
 LOG_MODULE_REGISTER(elf, CONFIG_LLEXT_LOG_LEVEL);
+
+int klausscpu_llext_check_header(const elf_ehdr_t *hdr, char *why,
+				 size_t why_len)
+{
+	unsigned int abi = hdr->e_flags & KLAUSSCPU_EF_ABI_MASK;
+
+	if (hdr->e_machine != EM_KLAUSSCPU) {
+		if (why != NULL) {
+			snprintk(why, why_len, "built for machine %#x, not "
+				 "KlaussCPU (%#x)", (unsigned int)hdr->e_machine,
+				 EM_KLAUSSCPU);
+		}
+		return -ENOEXEC;
+	}
+	if (abi != KLAUSSCPU_ABI_VERSION) {
+		if (why != NULL) {
+			snprintk(why, why_len, "built for C ABI %u, this kernel "
+				 "is ABI %u (e_flags %#x): rebuild it", abi,
+				 KLAUSSCPU_ABI_VERSION,
+				 (unsigned int)hdr->e_flags);
+		}
+		return -ENOEXEC;
+	}
+	return 0;
+}
+
+/*
+ * Every llext_load() path (the SSH `run` and `svc` commands, llext_demo)
+ * comes through here.  The numbers are logged as arguments rather than as a
+ * formatted string: deferred logging would format it after this frame has
+ * gone.
+ */
+int arch_elf_check_header(const elf_ehdr_t *hdr)
+{
+	int ret = klausscpu_llext_check_header(hdr, NULL, 0);
+
+	if (ret != 0) {
+		LOG_ERR("extension refused: e_machine %#x, e_flags %#x; this "
+			"kernel runs machine %#x, C ABI %u",
+			(unsigned int)hdr->e_machine, (unsigned int)hdr->e_flags,
+			EM_KLAUSSCPU, KLAUSSCPU_ABI_VERSION);
+	}
+	return ret;
+}
 
 /*
  * KlaussCPU relocation types — mirror of

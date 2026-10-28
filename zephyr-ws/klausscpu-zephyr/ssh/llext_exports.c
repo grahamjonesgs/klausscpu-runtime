@@ -86,6 +86,47 @@ EXPORT_SYMBOL(strtoul);
 /* Zephyr formatted output (httpd builds responses with snprintk). */
 EXPORT_SYMBOL(snprintk);
 
+/* Atomics: the __sync_*_N functions the compiler calls for every atomic
+ * read-modify-write, exchange and compare-and-swap of 1, 2, 4 and 8 bytes
+ * (forced-atomics model; the ISA has no atomic RMW).  The kernel compiles them
+ * from klausscpu-runtime's src/atomic.c (arch/klausscpu/core/CMakeLists.txt),
+ * so the kernel and every extension share one set, masking interrupts through
+ * INT_MASK as arch_irq_lock() does.  Atomic loads, stores and fences are
+ * inline and need nothing.  The C names would clash with clang's __sync
+ * builtins (whose address cannot be taken), so each function is declared under
+ * another C name bound to its symbol, as atomic.c does, and exported under the
+ * symbol's name.  EXPORT_SYNC_ALL(N) is what klausscpu-llvm's
+ * rust/klauss-build looks for when it checks an extension's __sync_*_N
+ * imports. */
+#define EXPORT_SYNC(fn, n)                                                   \
+	extern void ksync_##fn##_##n(void) __asm__("__sync_" #fn "_" #n);     \
+	static const STRUCT_SECTION_ITERABLE(llext_const_symbol,                \
+					     ksync_##fn##_##n##_sym) = {       \
+		.name = "__sync_" #fn "_" #n,                                    \
+		.addr = (const void *)&ksync_##fn##_##n,                         \
+	}
+#define EXPORT_SYNC_ALL(n)                                                   \
+	EXPORT_SYNC(fetch_and_add, n);                                       \
+	EXPORT_SYNC(fetch_and_sub, n);                                       \
+	EXPORT_SYNC(fetch_and_and, n);                                       \
+	EXPORT_SYNC(fetch_and_or, n);                                        \
+	EXPORT_SYNC(fetch_and_xor, n);                                       \
+	EXPORT_SYNC(fetch_and_nand, n);                                      \
+	EXPORT_SYNC(fetch_and_max, n);                                       \
+	EXPORT_SYNC(fetch_and_min, n);                                       \
+	EXPORT_SYNC(fetch_and_umax, n);                                      \
+	EXPORT_SYNC(fetch_and_umin, n);                                      \
+	EXPORT_SYNC(lock_test_and_set, n);                                   \
+	EXPORT_SYNC(val_compare_and_swap, n)
+
+#if defined(CONFIG_LLEXT_EXPORT_BUILTINS_BY_SLID)
+#error "EXPORT_SYNC mirrors EXPORT_SYMBOL's by-name table only"
+#endif
+EXPORT_SYNC_ALL(1);
+EXPORT_SYNC_ALL(2);
+EXPORT_SYNC_ALL(4);
+EXPORT_SYNC_ALL(8);
+
 /* Filesystem API for extensions that serve files (the loadable HTTP server in
  * httpd.c/webapi.c).
  *

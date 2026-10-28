@@ -12,6 +12,8 @@ repository and in klausscc with them:
   klausscpu_elf.h                          EM_KLAUSSCPU, R_KLAUSSCPU_*, PCREL32 bias,
                                              the e_flags ABI version and mask
   zephyr-ws/.../arch/klausscpu/core/elf.c  R_KLAUSSCPU_* (all handled), bias
+  zephyr-ws/.../arch/klausscpu/llext.h     EM_KLAUSSCPU, the e_flags ABI version
+                                             and mask
   debug/klausscpu_rtos.py                  register names, DWARF and generic numbers
   klausscpu.ld                             == klausscpu-llvm's rust/klausscpu.ld
   src/setjmp.S                             saves and restores exactly the
@@ -125,6 +127,17 @@ def check_runtime(em, relocs, abi, llvm):
     expect("Zephyr elf.c KLAUSSCPU_PCREL_INSN_BIAS",
            defines(elf_c, "KLAUSSCPU_PCREL_INSN_BIAS").get(
                "KLAUSSCPU_PCREL_INSN_BIAS"), abi["Word1Offset"])
+    # ... and refuses an extension for another machine or C ABI version.
+    zl = read(os.path.join(HERE, "zephyr-ws", "klausscpu-zephyr", "include",
+                           "zephyr", "arch", "klausscpu", "llext.h"))
+    expect("Zephyr llext.h EM_KLAUSSCPU",
+           defines(zl, "EM_KLAUSSCPU").get("EM_KLAUSSCPU"), em)
+    expect("Zephyr llext.h KLAUSSCPU_ABI_VERSION",
+           defines(zl, "KLAUSSCPU_ABI_VERSION").get("KLAUSSCPU_ABI_VERSION"),
+           abi["ABIVersion"])
+    expect("Zephyr llext.h KLAUSSCPU_EF_ABI_MASK",
+           defines(zl, "KLAUSSCPU_EF_ABI_MASK").get("KLAUSSCPU_EF_ABI_MASK"),
+           abi["EFlagsABIMask"])
 
     # The lldb OS plugin's register layout (it mirrors klausscc's target XML).
     rtos = read(os.path.join(HERE, "debug", "klausscpu_rtos.py"))

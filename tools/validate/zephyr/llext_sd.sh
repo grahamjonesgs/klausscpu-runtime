@@ -6,25 +6,29 @@
 #
 # build   the bare-metal extensions (`make ext-demos`, in a staged copy of
 #         baremetal/: hello, adventure, expr, bst, crypto, queens, test_64bit,
-#         test_switch, perf_baseline, dhrystone, test_fp) and the ssh_shell app
-#         with its two HTTP API backends (apibackend.llext, ctrl.llext);
-#         everything goes to <outdir>/llext/, the kernel to <outdir>/elf/.
+#         test_switch, perf_baseline, dhrystone, test_fp, test_atomic), the
+#         ssh_shell app with its two HTTP API backends (apibackend.llext,
+#         ctrl.llext), and abi_mismatch.llext (hello.llext marked as built
+#         for C ABI 1); everything goes to <outdir>/llext/, the kernel to
+#         <outdir>/elf/.
 # backup  download every *.llext on the card to <outdir>/backup/.
 # upload  PUT <outdir>/llext/*.llext to the card's root.  A file that would
 #         overwrite one on the card is refused unless the backup step has
 #         saved it (llext_sd.py).
 # run     `run` each program over SSH (adventure with typed commands) and
 #         compare its output with the bare-metal baseline of the same program
-#         (baselines/board-O1/<prog>.txt, else emu-O1/<prog>.txt, after
+#         (baselines/llext/<prog>.txt for a program whose extension build
+#         differs, else board-O1/<prog>.txt, else emu-O1/<prog>.txt, after
 #         uart_filter; adventure, which the emulator stops while it waits for
 #         input, on the baseline's lines); `svc load` each backend and query
-#         its HTTP route.
+#         its HTTP route; `run` abi_mismatch.llext, which the kernel must
+#         refuse with the reason.
 #
 # The board steps run in one session: the ssh_shell kernel from the build
 # step (or <outdir>/elf/ssh_shell.elf) is loaded under flock $BOARD_LOCK and
 # kept running until they finish.  Board address: KLAUSSCPU_BOARD_IP.
 # Extensions on the card that this script does not build (the Rust ones,
-# hello_rs.llext and ext_hello.llext, from klausscpu-llvm's
+# hello_rs.llext, ext_hello.llext and ext_atomics.llext, from klausscpu-llvm's
 # llvm/lib/Target/KlaussCPU/rust/) are left alone.
 # Prints PASS/FAIL per check; exits 1 if any failed.
 set -uo pipefail
@@ -34,7 +38,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$(realpath -m "$1"); shift
 STEPS=${*:-build backup upload run}
 PY="python3 -I $HERE/llext_sd.py"
-RUNS="hello expr bst crypto queens test_64bit test_switch test_fp dhrystone perf_baseline adventure"
+RUNS="hello expr bst crypto queens test_64bit test_switch test_fp test_atomic dhrystone perf_baseline adventure"
 ADVENTURE_INPUT=l,g,n,i,q
 mkdir -p "$OUT/llext" "$OUT/elf" "$OUT/logs"
 fail=0
@@ -44,6 +48,14 @@ if has build; then
   stage_baremetal "$OUT/stage"
   if make -C "$STAGED_BM" -j"$JOBS" ext-demos >"$OUT/logs/build-ext.log" 2>&1; then
     cp "$STAGED_BM"/*.llext "$OUT/llext/" && echo "PASS build ext-demos ($(cd "$STAGED_BM" && echo *.llext))"
+    # abi_mismatch.llext: hello.llext claiming C ABI 1 (the low byte of the
+    # ELF32 e_flags, at offset 36), which the kernel must refuse.
+    python3 -I - "$OUT/llext/hello.llext" "$OUT/llext/abi_mismatch.llext" <<'PY'
+import sys
+b = bytearray(open(sys.argv[1], "rb").read())
+b[36] = 1
+open(sys.argv[2], "wb").write(b)
+PY
   else
     echo "FAIL build ext-demos (see $OUT/logs/build-ext.log)"; fail=1
   fi
@@ -90,7 +102,8 @@ board_steps() {
       sed -n '/^Running main @/,/^Program exited:/{/^Running main @/d;/^Program exited:/d;p}' \
         "$OUT/run/$name.llext.ssh" >"$OUT/run/$name.txt" 2>/dev/null
       got=$(uart_filter "$OUT/run/$name.txt" | body)
-      ref=$VALIDATE_DIR/baselines/board-O1/$name.txt
+      ref=$VALIDATE_DIR/baselines/llext/$name.txt
+      [ -e "$ref" ] || ref=$VALIDATE_DIR/baselines/board-O1/$name.txt
       [ -e "$ref" ] || ref=$VALIDATE_DIR/baselines/emu-O1/$name.txt
       ref=$(body <"$ref")
       if ! grep -aq '^Program exited: 0$' "$OUT/run/$name.llext.ssh" 2>/dev/null; then
@@ -107,6 +120,16 @@ board_steps() {
         diff <(echo "$ref") <(echo "$got") | head -20 | sed 's/^/    /'; r=1
       fi
     done
+    # An extension built for another C ABI version is refused, with the
+    # reason, and the kernel carries on.
+    $PY run "$OUT/run" abi_mismatch.llext >>"$OUT/run.log" 2>&1
+    if grep -aq 'abi_mismatch.llext: built for C ABI 1, this kernel is ABI [0-9]* (e_flags 0x1): rebuild it' \
+         "$OUT/run/abi_mismatch.llext.ssh" 2>/dev/null &&
+       grep -aq 'Load/run failed' "$OUT/run/abi_mismatch.llext.ssh"; then
+      echo "PASS run abi_mismatch: refused (built for C ABI 1)"
+    else
+      echo "FAIL run abi_mismatch: not refused (see $OUT/run/abi_mismatch.llext.ssh)"; r=1
+    fi
     while IFS=$'\t' read -r name url re; do
       if $PY svc "$OUT/run" "$name" "$url" "$re" >>"$OUT/run.log" 2>&1; then
         echo "PASS svc $name: $url matches $re"

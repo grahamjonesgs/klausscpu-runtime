@@ -19,6 +19,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/arch/klausscpu/llext.h>
 #include <zephyr/llext/llext.h>
 #include <zephyr/llext/buf_loader.h>
 #include <zephyr/logging/log.h>
@@ -194,6 +195,19 @@ int llext_run_from_sd(const char *filename, const struct shell *sh)
 	}
 
 	loader_printf(ssh, "'%s'  %lu bytes\r\n", filename, (unsigned long)size);
+
+	/* Say why an extension built for another C ABI (or machine) is
+	 * refused; llext_load() refuses it too, but only logs the reason on the
+	 * kernel console. */
+	char why[96];
+
+	if (size >= sizeof(elf_ehdr_t) && memcmp(buf, "\177ELF", 4) == 0 &&
+	    klausscpu_llext_check_header((const elf_ehdr_t *)buf, why,
+					 sizeof(why)) != 0) {
+		loader_printf(ssh, "%s: %s\r\n", filename, why);
+		k_free(buf);
+		return -2;
+	}
 
 	struct llext_buf_loader buf_loader = LLEXT_BUF_LOADER(buf, size);
 	struct llext_loader *ldr = &buf_loader.loader;

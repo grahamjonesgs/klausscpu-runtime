@@ -129,12 +129,12 @@ files on the card) — `zephyr/llext_sd.sh <outdir> [build] [backup] [upload]
 `ctrl.llext`), loads ssh_shell on the board, downloads every `.llext` on the
 card to `<outdir>/backup/`, uploads the new ones (refusing to overwrite a
 file it has not backed up), then `run`s each program over SSH and compares
-its output with the program's bare-metal baseline (`board-O1`, else
-`emu-O1`), and `svc load`s each backend and queries its HTTP route.  An
-extension built with an older toolchain is not refused at load time (nothing
-checks the ABI version in `e_flags`): one from before the instruction
-encoding change stops the CPU with an invalid-opcode crash dump at its
-`main`.
+its output with the program's bare-metal baseline (`llext` for a program
+whose extension build differs, such as test_atomic, else `board-O1`, else
+`emu-O1`), and `svc load`s each backend and queries its HTTP route.  The
+kernel refuses an extension built for another C ABI version (the low byte of
+`e_flags`): `run` prints "built for C ABI 0, this kernel is ABI 2 (e_flags
+0x0): rebuild it" instead of loading it.
 
 **csmith N [FIRST]** — `csmith_run.sh`: each program's checksum from host gcc
 -O0 against KlaussCPU clang at -O0/-O1/-O2/-Os/-Oz (-Oz runs the
@@ -309,7 +309,10 @@ every bare-metal program (also of those the cap stops, for their verdicts),
 program that ran into the cap, `.text` bytes) and `stop.tsv` (how each run
 ended).  `baselines/board-O1/`: the UART output and `stop.tsv` of the board
 suite (`Halt`, or `none` for test_rtos and test_sync, which idle until the
-timeout).  `baselines/perf.tsv`:
+timeout).  `baselines/llext/`: the expected output of an SD-card extension
+whose build differs from the bare-metal program's (`zephyr/llext_sd.sh`;
+test_atomic leaves out the tests that take over INT_MASK and the timer).
+`baselines/perf.tsv`:
 one board metric per line — key, value, the better direction (`lower`,
 `higher`, or `info`: reported, never judged) and the tolerance in percent.
 `validate.sh board` and `zephyr` flag a metric that got worse by more than its

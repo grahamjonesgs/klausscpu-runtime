@@ -118,12 +118,14 @@ over SSH:
 the board: it rebuilds the extensions (and ssh_shell's `apibackend.llext` /
 `ctrl.llext`), backs up every `.llext` on the card, uploads the new ones and
 runs each against its bare-metal baseline.  Rebuild the card's extensions
-whenever the toolchain's encoding or ABI changes: the loader does not check
-`e_flags`, and an old extension crashes the kernel (invalid opcode at `main`).
+whenever the toolchain's encoding or ABI changes: the loader refuses an
+extension built for another C ABI version (the low byte of `e_flags`) and
+`run` prints why.
 
 Add a program: drop it in `baremetal/programs/`, add its name to `EXT_DEMOS` in
 `baremetal/Makefile`. It may call any symbol exported in `ssh/llext_exports.c`
-(printf/puts/putchar/getchar, malloc family, mem*/str*) plus the `mmio.h` helpers.
+(printf/puts/putchar/getchar, malloc family, mem*/str*, and the `__sync_*_N`
+atomics) plus the `mmio.h` helpers.
 
 ## Gotchas (things that bite)
 

@@ -150,9 +150,11 @@ this checkout.
   handlers and RTOS preemption, not against core 2 (AMP): use the mailbox
   and a D-cache flush for that. Atomics wider than 8 bytes or misaligned
   become `__atomic_*` calls, which nothing provides (link error). The
-  bare-metal and FreeRTOS builds link `atomic.o`; the Zephyr port uses its
-  own `ATOMIC_OPERATIONS_C` and does not. `baremetal/programs/test_atomic.c`
-  is the test. This needs a klausscpu-llvm with "forced atomics" (an older
+  bare-metal, FreeRTOS and Zephyr builds all link it (Zephyr's own `atomic_t`
+  API is `ATOMIC_OPERATIONS_C` and does not use it), and the Zephyr kernel
+  exports the `__sync_*` functions to LLEXT extensions
+  (`ssh/llext_exports.c`). `baremetal/programs/test_atomic.c` is the test,
+  also as an extension (`test_atomic.llext`). This needs a klausscpu-llvm with "forced atomics" (an older
   toolchain makes every atomic an `__atomic_*` call, so `test_atomic` does
   not link).
 - `baremetal/programs/test_flags.c` checks which flags (Z S C V) every
@@ -201,8 +203,9 @@ this checkout.
   new compiler).  lld refuses to link objects of different ABI versions (the
   low byte of `e_flags`), so a stale object fails the link instead of the
   program, and the PIC loaders (`baremetal/programs/loader.c`,
-  `freertos/telnet/pic_loader.c`) refuse a program built for another ABI
-  version.  The hand-written assembly here (`setjmp.S`, the context
+  `freertos/telnet/pic_loader.c`) and Zephyr's LLEXT loader
+  (`arch_elf_check_header()` in `arch/klausscpu/core/elf.c`) refuse a program
+  or extension built for another ABI version.  The hand-written assembly here (`setjmp.S`, the context
   switches, the ISR wrappers) did not need changes: the register roles are
   the same.
 - A program ends with `HALT` (exit status in R12) when `main` returns or

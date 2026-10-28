@@ -15,6 +15,13 @@
 //      and reported, not checked).
 //
 // Atomic within one core only: see src/atomic.c.
+//
+// Built with -DKLAUSS_LLEXT it is also a Zephyr LLEXT extension
+// (test_atomic.llext), whose __sync_* calls resolve against the kernel's
+// exports (ssh/llext_exports.c).  An extension shares the CPU with the
+// kernel, so it must not write INT_MASK or a vector: T4 then only checks that
+// a libcall leaves the mask the kernel runs with as it was, and T5 (which
+// takes over the timer) is left out.
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -176,6 +183,20 @@ static void test_c11(void) {
 }
 
 // ── T4: INT_MASK is restored ─────────────────────────────────────────────
+#ifdef KLAUSS_LLEXT
+static void test_mask(void) {
+    static uint32_t v;
+    uint32_t m = REG_INT_MASK;
+    __atomic_fetch_add(&v, 1, SC);
+    uint32_t after = REG_INT_MASK;
+    __atomic_exchange_n(&v, 0, SC);
+    uint32_t after2 = REG_INT_MASK;
+    if (after != m || after2 != m)
+        printf("   INT_MASK %lu -> %lu / %lu\n", (unsigned long)m,
+               (unsigned long)after, (unsigned long)after2);
+    check("INT_MASK restored", after == m && after2 == m);
+}
+#else
 static void test_mask(void) {
     static uint32_t v;
     // Vectors are 0, so no source can fire whatever the mask says.
@@ -192,7 +213,9 @@ static void test_mask(void) {
     }
     REG_INT_MASK = 0;
 }
+#endif
 
+#ifndef KLAUSS_LLEXT
 // ── T5: main vs timer ISR ─────────────────────────────────────────────────
 #define ITERS        20000
 #define TIMER_CYCLES 3000
@@ -264,6 +287,7 @@ static void test_stress(void) {
                (unsigned long)st8, (unsigned long)st16, (unsigned long)st32,
                (unsigned long)st64, (unsigned long)stcas);
 }
+#endif
 
 int main(void) {
     printf("\n=== test_atomic: forced atomics (single core) ===\n");
@@ -275,7 +299,9 @@ int main(void) {
     test_c11();
     test_mask();
     printf("T3/T4 C11 + INT_MASK: %d pass, %d fail\n", pass, fail);
+#ifndef KLAUSS_LLEXT
     test_stress();
+#endif
     printf("Results: %d pass, %d fail\n", pass, fail);
     printf("test_atomic %s\n", fail ? "FAILED" : "PASSED");
     return fail != 0;
