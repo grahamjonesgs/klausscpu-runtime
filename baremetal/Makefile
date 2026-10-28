@@ -15,6 +15,7 @@
 #   make test_atomic    — C atomics (src/atomic.c) incl. a timer-ISR stress test
 #   make test_flags     — the flags each instruction writes vs the compiler's model
 #   make test_divshadow — a divide behind a taken fused branch (board only)
+#   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
 #   make coremark       — CoreMark (bench-build/<OPT>/), see benchmarks/README.md
 #   make embench        — Embench-IoT suite (bench-build/<OPT>/embench/)
@@ -152,7 +153,8 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf test_varargs test_atomic test_flags test_divshadow perf_baseline perf_haz fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture
+           netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
+           test_unaligned
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -268,6 +270,9 @@ test_printf.elf: test_printf.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_varargs.elf: test_varargs.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_varargs.o)
+
+test_unaligned.elf: test_unaligned.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_unaligned.o)
 
 test_atomic.elf: test_atomic.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_atomic.o)
@@ -511,6 +516,7 @@ test_fp:     test_fp.elf
 test_asm:    test_asm.elf
 test_printf:       test_printf.elf
 test_varargs:      test_varargs.elf
+test_unaligned:    test_unaligned.elf
 test_atomic:       test_atomic.elf
 test_divshadow:    test_divshadow.elf
 perf_baseline:     perf_baseline.elf

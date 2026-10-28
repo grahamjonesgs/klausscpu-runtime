@@ -154,6 +154,15 @@ this checkout.
   `python3 programs/gen_test_flags.py <klausscpu-llvm>` (it fails when the
   `.td` and its table of the RTL's flag masks disagree) and run it on the
   emulator and the board.
+- **Unaligned data:** only `MEMGET32` (a 32-bit load from `[r]`) reads an
+  unaligned address; every other 16/32/64-bit load and every store uses the
+  aligned-down address, silently. klausscpu-llvm compiles packed-struct
+  fields, `memcpy(&w, p, 4/8)` and bytes assembled into words to
+  `MEMGET32` (two for 64 bits) and splits unaligned stores into bytes, but a
+  plain `uint32_t *` (or `int *`) pointing at an unaligned address, e.g. the
+  address of a packed member, reads and writes the wrong word.
+  `baremetal/programs/test_unaligned.c` checks the compiler's unaligned
+  loads at every offset, across doublewords and cache lines, on the board.
 - **A divide right after a taken fused branch (FBR) returns a stale result
   on the board.** This is an RTL bug: the squashed divide keeps the divider
   busy, and the next real divide completes with its result. The emulator

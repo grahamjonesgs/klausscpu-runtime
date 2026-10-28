@@ -35,4 +35,5 @@ test_rtos	nohalt	14624
 test_sd	12862883	35096
 test_switch	83583	13336
 test_sync	nohalt	14344
+test_unaligned	7139673	18000
 test_varargs	45227	11176

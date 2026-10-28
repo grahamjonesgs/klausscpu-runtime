@@ -35,4 +35,5 @@ test_rtos	InstructionCap
 test_sd	Halt
 test_switch	Halt
 test_sync	InstructionCap
+test_unaligned	Halt
 test_varargs	Halt

@@ -1,0 +1,9 @@
+--- Captured UART output ---
+=== test_unaligned ===
+offsets: hash 767631f7c502b325
+offsets (evicted): hash 767631f7c502b325
+store then memget32: hash 5ff96b98cf60ade5
+packed frame/global/copy: hash c88c0da5349fc007
+packets: hash 94c0a67a7d52f3e5
+=== ALL PASS ===
+--- end UART ---

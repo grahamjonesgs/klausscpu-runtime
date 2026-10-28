@@ -19,4 +19,5 @@ test_printf	Halt
 test_rtos	none
 test_switch	Halt
 test_sync	none
+test_unaligned	Halt
 test_varargs	Halt
