@@ -189,6 +189,8 @@ static int load_elf(int sock, u32 load_base, pic_entry_fn *entry_out) {
             if (fread_at(ehdr.e_shoff + i * ehdr.e_shentsize, &shdr,
                          sizeof(shdr)) != 0) continue;
             if (shdr.sh_type != SHT_RELA || shdr.sh_entsize == 0) continue;
+            /* sh_info: the section the relocations apply to. */
+            if (shdr.sh_info == 0 || shdr.sh_info >= ehdr.e_shnum) continue;
             if (fread_at(ehdr.e_shoff + shdr.sh_info * ehdr.e_shentsize,
                          &target, sizeof(target)) != 0) continue;
             if (!(target.sh_flags & SHF_ALLOC)) continue;

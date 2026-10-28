@@ -112,7 +112,7 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 | `zephyr-ws/klausscpu-zephyr/` | Zephyr arch/SOC/board/drivers + `ssh_shell` app |
 | `build-*.sh`, `get-*.sh` | upstream fetch/build scripts |
 | `klausscpu_elf.h` | `EM_KLAUSSCPU` and the relocation types, for the run-time loaders |
-| `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
+| `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words, the FreeRTOS/Zephyr stack alignment) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
 
 ## Gotchas
 

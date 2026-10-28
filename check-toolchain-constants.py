@@ -13,6 +13,8 @@ repository and in klausscc with them:
   zephyr-ws/.../arch/klausscpu/core/elf.c  R_KLAUSSCPU_* (all handled), bias
   debug/klausscpu_rtos.py                  register names, DWARF and generic numbers
   klausscpu.ld                             == klausscpu-llvm's rust/klausscpu.ld
+  freertos portmacro.h, Zephyr arch.h and  the RTOS stack alignment (a multiple
+    arch/klausscpu/Kconfig                   of StackAlign)
   klausscc src/debug/arch.rs               TRAP_WORD, the gdbserver target XML
   klausscc src/isa/table.rs                NOP, HALT, TRAP, JMPREL templates
 
@@ -81,7 +83,7 @@ def llvm_facts(llvm):
     abi["GPRNames"] = re.findall(r'"(\w+)"', m.group(1))
     for key in ("NopWord", "HaltWord", "TrapWord", "JmpRelWord", "Word1Offset",
                 "DwarfSP", "DwarfRA", "FPReg", "AddressBits", "ArgGPRs",
-                "NumGPRs"):
+                "NumGPRs", "StackAlign"):
         if key not in abi:
             sys.exit("check-toolchain-constants: KlaussCPUABI.h has no %s" % key)
     if len(abi["GPRNames"]) != abi["NumGPRs"]:
@@ -131,6 +133,26 @@ def check_runtime(em, relocs, abi, llvm):
            {k: v for k, v in ast.literal_eval(m.group(1)).items()
             if v.startswith("arg") or v == "fp"}, want_generic(abi))
 
+    # The RTOS ports keep task stacks at least as aligned as the ABI's SP.
+    zephyr = os.path.join(HERE, "zephyr-ws", "klausscpu-zephyr")
+    aligns = (
+        ("freertos portmacro.h portBYTE_ALIGNMENT",
+         defines(read(os.path.join(HERE, "freertos", "portable", "KlaussCPU",
+                                   "portmacro.h")), "portBYTE_ALIGNMENT"
+                 ).get("portBYTE_ALIGNMENT")),
+        ("Zephyr arch.h ARCH_STACK_PTR_ALIGN",
+         defines(read(os.path.join(zephyr, "include", "zephyr", "arch",
+                                   "klausscpu", "arch.h")),
+                 "ARCH_STACK_PTR_ALIGN").get("ARCH_STACK_PTR_ALIGN")),
+        ("Zephyr Kconfig STACK_ALIGN_SIZE",
+         kconfig_default(read(os.path.join(zephyr, "arch", "klausscpu",
+                                           "Kconfig")), "STACK_ALIGN_SIZE")),
+    )
+    for what, got in aligns:
+        if got is None or got % abi["StackAlign"]:
+            fail("%s: %r, but klausscpu-llvm's StackAlign is %d (it must be a "
+                 "multiple)" % (what, got, abi["StackAlign"]))
+
     # The Rust bare-metal linker script is a copy of klausscpu.ld.
     rust_ld = os.path.join(llvm, "llvm", "lib", "Target", "KlaussCPU", "rust",
                            "klausscpu.ld")
@@ -138,6 +160,13 @@ def check_runtime(em, relocs, abi, llvm):
         strip = lambda t: re.sub(r"/\*.*?\*/", "", t, flags=re.S).strip()
         if strip(read(rust_ld)) != strip(read(os.path.join(HERE, "klausscpu.ld"))):
             fail("klausscpu.ld and %s differ (outside comments)" % rust_ld)
+
+
+def kconfig_default(text, name):
+    """The integer default of Kconfig symbol name."""
+    m = re.search(r"^config %s\n(?:[ \t].*\n)*?[ \t]+default (\w+)" % name,
+                  text, re.M)
+    return c_int(m.group(1)) if m else None
 
 
 def want_dwarf(abi):
