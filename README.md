@@ -81,10 +81,15 @@ cd baremetal
 make hello          # uart hello-world
 make test_fp        # soft-FP test (links compiler-rt crt-*.o from the fork)
 make all            # every .elf
+make all OPT=-Oz    # another level (default -O1); -Oz also runs the MachineOutliner
+make all LTO=1      # link-time optimisation (make clean when switching)
 ```
 Output is a `*.elf` with machine type `0x4b43` ("KC"). See the top of
 `baremetal/Makefile` for the full target list (adventure, expr, bst, crypto,
-queens, fs_demo, …).
+queens, fs_demo, …).  `LTO=1` compiles the programs to bitcode and lets
+`ld.lld` optimise each program whole; it pays at -Os/-Oz (`.text` -3.8% /
+-4.4% over the corpus) and not at -O1/-O2 (+2%, and Dhrystone 1.2% slower on
+the board at -O1), so it is off by default (`benchmarks/RESULTS.md`).
 
 ### FreeRTOS
 ```sh
@@ -114,7 +119,7 @@ The `apps/ssh_shell` app produces `zephyr.elf`, loaded to the FPGA with `klaussc
 | `klausscpu_elf.h` | `EM_KLAUSSCPU` and the relocation types, for the run-time loaders |
 | `check-toolchain-constants.py` | checks the constants copied from klausscpu-llvm (relocation types, register and DWARF numbers, NOP/HALT/TRAP words, the FreeRTOS/Zephyr stack alignment, the registers `setjmp.S` saves) in this repo and in klausscc against klausscpu-llvm's sources; run it after changing either side |
 | `tools/validate/` | toolchain validation harness: `validate.sh quick\|full\|board\|zephyr\|csmith N\|csmith-board N\|oracle` runs the emulator corpus against committed UART baselines, Csmith (on the emulator, and on the board against the emulator), the ABI test, lit, the board suite with CoreMark/Embench against `baselines/perf.tsv`, and the Zephyr apps; see [`tools/validate/README.md`](tools/validate/README.md) |
-| `abi-test/` | C ABI conformance test: generated caller/callee pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, run on the emulator against host gcc (`./abi-test/run_abi_test.sh [first-seed] [count] [functions]`) |
+| `abi-test/` | C ABI conformance test: generated caller/callee pairs in separate translation units, every mix of -O0/-O1/-O2/-Os/-Oz, run on the emulator against host gcc (`./abi-test/run_abi_test.sh [first-seed] [count] [functions]`) |
 
 ## Validating a toolchain change
 

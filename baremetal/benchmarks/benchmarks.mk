@@ -53,7 +53,7 @@ $(BENCH_OUT)/$(1)/core_portme.o: $(COREMARK_PORT)/core_portme.c $(COREMARK_SRC)/
 	$$(CC) $$(COREMARK_CFLAGS) -D$(2)=1 -c -o $$@ $$<
 $(BENCH_OUT)/$(1).elf: $(patsubst %,$(BENCH_OUT)/$(1)/%.o,$(CM_NAMES) core_portme) \
                        $(BENCH_CRT_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
-	$$(LLD) -T $$(LD_SCRIPT) --gc-sections -o $$@ $$(RUNTIME_OBJS) $$(LIBC_OBJS) \
+	$$(LLD) -T $$(LD_SCRIPT) --gc-sections $$(LTO_LDFLAGS) -o $$@ $$(RUNTIME_OBJS) $$(LIBC_OBJS) \
 	    $$(BENCH_CRT_OBJS) $(patsubst %,$(BENCH_OUT)/$(1)/%.o,$(CM_NAMES) core_portme) $$(LIBC_LINK)
 	@echo "==> $$@ built"
 endef
@@ -76,6 +76,12 @@ EMBENCH_BENCHES := aha-mont64 crc32 cubic edn huffbench matmult-int minver \
                    sglib-combined slre st statemate ud wikisort
 EMBENCH_CFLAGS = $(CFLAGS) -I$(EMBENCH_SRC)/support -I$(EMBENCH_PORT) \
                  -DHAVE_BOARDSUPPORT_H -DCPU_MHZ=$(EMBENCH_CPU_MHZ) -DWARMUP_HEAT=1
+# With LTO=1 the benchmark itself is bitcode, but Embench's support code
+# (main.c, beebsc.c, the dummy libraries) and the board support stay native:
+# whole-program optimisation across that boundary binds main.c's call of
+# verify_benchmark before lld's --wrap redirects it (verify=-2) and lets it
+# drop work whose result only verify_benchmark reads.
+EMB_NOLTO    := $(if $(filter 1,$(LTO)),-fno-lto)
 EMB_OUT      := $(BENCH_OUT)/embench
 EMB_SIZE_OUT := $(BENCH_OUT)/embench-size
 
@@ -86,16 +92,16 @@ $(EMBENCH_SRC)/support/support.h:
 # (the port's main() wraps it); main-size.o is the unmodified one for sizing.
 $(EMB_OUT)/support/main.o: $(EMBENCH_SRC)/support/main.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -Dmain=embench_main -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -Dmain=embench_main -c -o $@ $<
 $(EMB_OUT)/support/main-size.o: $(EMBENCH_SRC)/support/main.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -c -o $@ $<
 $(EMB_OUT)/support/beebsc.o: $(EMBENCH_SRC)/support/beebsc.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -c -o $@ $<
 $(EMB_OUT)/support/boardsupport-size.o: $(EMBENCH_PORT)/boardsupport.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -DEMBENCH_SIZE_BUILD -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -DEMBENCH_SIZE_BUILD -c -o $@ $<
 # Embench's dummy libraries (support/dummy-*.c) plus KlaussCPU's compiler-rt
 # stubs (embench-port/dummy-libklausscpu.c, standing in for dummy-libgcc.c,
 # which only covers Arm).  -fno-builtin: they redefine libc functions.
@@ -103,10 +109,10 @@ EMB_DUMMY_OBJS := $(patsubst %,$(EMB_OUT)/support/dummy-%.o,crt0 libc libm) \
                   $(EMB_OUT)/support/dummy-libklausscpu.o
 $(EMB_OUT)/support/dummy-%.o: $(EMBENCH_SRC)/support/dummy-%.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -fno-builtin -w -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -fno-builtin -w -c -o $@ $<
 $(EMB_OUT)/support/dummy-libklausscpu.o: $(EMBENCH_PORT)/dummy-libklausscpu.c
 	@mkdir -p $(@D)
-	$(CC) $(EMBENCH_CFLAGS) -fno-builtin -c -o $@ $<
+	$(CC) $(EMBENCH_CFLAGS) $(EMB_NOLTO) -fno-builtin -c -o $@ $<
 
 # $(call embench_rules,<benchmark>)
 define embench_rules
@@ -116,11 +122,11 @@ $(EMB_OUT)/$(1)/%.o: $(EMBENCH_SRC)/src/$(1)/%.c $(EMBENCH_SRC)/support/support.
 	$$(CC) $$(EMBENCH_CFLAGS) -c -o $$@ $$<
 $(EMB_OUT)/$(1)/boardsupport.o: $(EMBENCH_PORT)/boardsupport.c $(EMBENCH_SRC)/support/support.h
 	@mkdir -p $$(@D)
-	$$(CC) $$(EMBENCH_CFLAGS) -DEMBENCH_NAME='"$(1)"' -c -o $$@ $$<
+	$$(CC) $$(EMBENCH_CFLAGS) $$(EMB_NOLTO) -DEMBENCH_NAME='"$(1)"' -c -o $$@ $$<
 $(EMB_OUT)/$(1).elf: $$(EMB_OBJS_$(1)) $(EMB_OUT)/$(1)/boardsupport.o \
                      $(EMB_OUT)/support/main.o $(EMB_OUT)/support/beebsc.o \
                      $(BENCH_CRT_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
-	$$(LLD) -T $$(LD_SCRIPT) --gc-sections --wrap=verify_benchmark -o $$@ \
+	$$(LLD) -T $$(LD_SCRIPT) --gc-sections $$(LTO_LDFLAGS) --wrap=verify_benchmark -o $$@ \
 	    $$(RUNTIME_OBJS) $$(LIBC_OBJS) $$(BENCH_CRT_OBJS) $$(EMB_OBJS_$(1)) \
 	    $(EMB_OUT)/$(1)/boardsupport.o $(EMB_OUT)/support/main.o \
 	    $(EMB_OUT)/support/beebsc.o $$(LIBC_LINK)
@@ -131,7 +137,7 @@ $(EMB_SIZE_OUT)/$(1).elf: $$(EMB_OBJS_$(1)) $(EMB_OUT)/support/boardsupport-size
                           $(EMB_OUT)/support/main-size.o $(EMB_OUT)/support/beebsc.o \
                           $(EMB_DUMMY_OBJS)
 	@mkdir -p $$(@D)
-	$$(LLD) --gc-sections -e _start -o $$@ $$(EMB_OBJS_$(1)) \
+	$$(LLD) --gc-sections $$(LTO_LDFLAGS) -e _start -o $$@ $$(EMB_OBJS_$(1)) \
 	    $(EMB_OUT)/support/boardsupport-size.o $(EMB_OUT)/support/main-size.o \
 	    $(EMB_OUT)/support/beebsc.o $(EMB_DUMMY_OBJS)
 embench-$(1): $(EMB_OUT)/$(1).elf $(EMB_SIZE_OUT)/$(1).elf

@@ -102,6 +102,21 @@ CFLAGS = -target $(TRIPLE) $(OPT) \
          -D__IEEE_LITTLE_ENDIAN \
          -D_LDBL_EQ_DBL
 
+# ── Link-time optimisation: `make LTO=1` ─────────────────────────────────────
+# The objects built with CFLAGS become LLVM bitcode, and ld.lld optimises and
+# compiles each program as one module (--lto-O1/2/3 from OPT; -Os and -Oz are
+# function attributes in the bitcode and take the -O2 module pipeline, as
+# clang's own LTO link does).  Native: the compiler-rt builtins (CRT_FLAGS),
+# atomic.o (it defines the __sync_* functions that code generation calls, which
+# the LTO module would otherwise drop as unreferenced), assembly, the LLEXT
+# extensions (EXT_CFLAGS) and picolibc.  `make clean` when switching, as
+# after any toolchain change.
+LTO ?= 0
+ifeq ($(LTO),1)
+CFLAGS += -flto
+LTO_LDFLAGS = --lto-O$(or $(patsubst -O%,%,$(firstword $(filter -O0 -O1 -O3,$(OPT)))),2)
+endif
+
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────
 # compiler-rt sources live in the klausscpu-llvm fork, alongside the toolchain.
 # Derive the fork root from $(LLVM_BIN) (= <fork>/build/bin).  Like
@@ -185,7 +200,7 @@ syscalls.o:    $(ROOT)/src/syscalls.c    ; $(CC) $(CFLAGS) -c -o $@ $<
 stdio_handles.o: $(ROOT)/src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
 uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -I$(ROOT) -c -o $@ $<
 crt0.o:        $(ROOT)/src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
-atomic.o:      $(ROOT)/src/atomic.c      ; $(CC) $(CFLAGS) -c -o $@ $<
+atomic.o:      $(ROOT)/src/atomic.c      ; $(CC) $(CFLAGS) -fno-lto -c -o $@ $<
 
 
 # compiler-rt builtins compiled from in-tree source
@@ -223,7 +238,7 @@ test_sd.o: programs/test_sd.c
 # ── Link helper macro ─────────────────────────────────────────────────────────
 # $(call link, prog.elf, extra-objs...)
 define link
-	$(LLD) -T $(LD_SCRIPT) --gc-sections -o $1 \
+	$(LLD) -T $(LD_SCRIPT) --gc-sections $(LTO_LDFLAGS) -o $1 \
 	    $(RUNTIME_OBJS) $(LIBC_OBJS) $2 $(LIBC_LINK)
 	@echo "==> $1 built"
 	@file $1
@@ -630,7 +645,7 @@ c2_netutil.o: $(CORE2_DIR)/c2_netutil.c $(CORE2_DIR)/c2_prof.h $(CORE2_DIR)/lwip
 	$(CC) $(CORE2_FLAGS) -c -o $@ $<
 
 core2.elf: c2_crt0.o c2_main.o c2_vnc.o c2_netutil.o c2_eth.o c2_mdio.o $(CORE2_LWIP_OBJS) $(LIBC_OBJS) uart_stubs.o
-	$(LLD) -T $(CORE2_DIR)/core2.ld --gc-sections -o $@ \
+	$(LLD) -T $(CORE2_DIR)/core2.ld --gc-sections $(LTO_LDFLAGS) -o $@ \
 	    c2_crt0.o uart_stubs.o $(LIBC_OBJS) c2_main.o c2_vnc.o c2_netutil.o c2_eth.o c2_mdio.o \
 	    $(CORE2_LWIP_OBJS) $(LIBC_LINK)
 	@echo "==> $@ built"
