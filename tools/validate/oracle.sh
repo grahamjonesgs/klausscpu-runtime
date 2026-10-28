@@ -4,8 +4,10 @@
 # Snapshot the toolchain's output bytes, to prove that a change which should
 # not alter generated code (a refactor, a TableGen migration, a docs change)
 # really does not:
-#   corpus-O1/-O2/-Os  every bare-metal .o/.elf (.comment stripped) and an
-#                      llvm-objdump -d of every .elf
+#   corpus-O1/-O2/-Os/-Oz, corpus-Oz+-mno-outline
+#                      every bare-metal .o/.elf (.comment stripped) and an
+#                      llvm-objdump -d of every .elf (-Oz runs the
+#                      MachineOutliner, -Oz -mno-outline is -Oz without it)
 #   mc/                llvm-mc objects, disassembly and -show-encoding of the
 #                      ISA coverage inputs (oracle-inputs/) and of
 #                      llvm/test/MC/KlaussCPU/*.s, with short forms on and off
@@ -21,8 +23,9 @@ OUT=$(realpath -m "$1"); rm -rf "$OUT"; mkdir -p "$OUT"
 B=$LLVM_BIN
 fail=0   # a corpus build or write that failed (e.g. a full disk): exit 1
 [ -d "$LLVM_SRC/llvm/test/CodeGen/KlaussCPU" ] || die "no klausscpu-llvm tests under $LLVM_SRC"
-for OPT in -O1 -O2 -Os; do
-  D=$OUT/corpus$OPT; mkdir -p "$D"
+for L in -O1 -O2 -Os -Oz -Oz+-mno-outline; do
+  OPT=${L//+/ }   # a level's extra flags are joined by '+', as in csmith_run.sh
+  D=$OUT/corpus$L; mkdir -p "$D"
   stage_baremetal "$OUT/stage"
   make -C "$STAGED_BM" -j"$JOBS" -k all OPT="$OPT" >"$D/build.log" 2>&1 ||
     { note "oracle: the $OPT corpus build failed (see $D/build.log)"; fail=1; }

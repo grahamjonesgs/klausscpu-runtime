@@ -110,11 +110,16 @@ CFLAGS = -target $(TRIPLE) $(OPT) \
 # atomic.o (it defines the __sync_* functions that code generation calls, which
 # the LTO module would otherwise drop as unreferenced), assembly, the LLEXT
 # extensions (EXT_CFLAGS) and picolibc.  `make clean` when switching, as
-# after any toolchain change.
+# after any toolchain change.  clang's -moutline / -mno-outline are code
+# generator options that the bitcode does not record (-mno-outline also marks
+# the functions, -moutline does not), so they are passed to the LTO code
+# generator here, as clang's own LTO link passes them (-plugin-opt).
 LTO ?= 0
 ifeq ($(LTO),1)
 CFLAGS += -flto
 LTO_LDFLAGS = --lto-O$(or $(patsubst -O%,%,$(firstword $(filter -O0 -O1 -O3,$(OPT)))),2)
+LTO_LDFLAGS += $(if $(filter -moutline,$(OPT)),-mllvm -enable-machine-outliner)
+LTO_LDFLAGS += $(if $(filter -mno-outline,$(OPT)),-mllvm -enable-machine-outliner=never)
 endif
 
 # ── compiler-rt builtins (soft-FP + integer division) ────────────────────────

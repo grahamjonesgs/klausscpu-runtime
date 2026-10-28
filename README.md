@@ -90,6 +90,9 @@ queens, fs_demo, …).  `LTO=1` compiles the programs to bitcode and lets
 `ld.lld` optimise each program whole; it pays at -Os/-Oz (`.text` -3.8% /
 -4.4% over the corpus) and not at -O1/-O2 (+2%, and Dhrystone 1.2% slower on
 the board at -O1), so it is off by default (`benchmarks/RESULTS.md`).
+`OPT="-Os -moutline"` (or `-mno-outline`) also reaches the LTO code
+generator: the Makefile passes it to `ld.lld` as `-mllvm
+-enable-machine-outliner`, since the bitcode does not record it.
 
 ### FreeRTOS
 ```sh

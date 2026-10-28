@@ -6,10 +6,10 @@
 #                         UART baselines, instruction counts and .text sizes,
 #                         4 ABI conformance seeds, 30 Csmith seeds
 #   full                  quick, plus 300 Csmith seeds (-O0 -O1 -O2 -Os -Oz), 150
-#                         --float seeds, 30 ABI seeds, the KlaussCPU lit tests
-#                         and unit tests, lldb end to end on the emulator, and
-#                         an oracle snapshot (diffed against ORACLE_BASE when
-#                         set)
+#                         --float seeds, 30 ABI seeds, 100 g-invariance seeds,
+#                         the KlaussCPU lit tests and unit tests, lldb end to
+#                         end on the emulator, and an oracle snapshot (diffed
+#                         against ORACLE_BASE when set)
 #   board                 the board suite at -O1 (each program twice), CoreMark
 #                         and Embench-IoT at -O2 and -Os (BENCH=0 skips them),
 #                         compared with baselines/perf.tsv
@@ -19,6 +19,9 @@
 #   csmith-board N [FIRST]  N Csmith seeds, one ELF per level (-O1 -O2) run on
 #                         the emulator AND the board: board vs emulator vs host
 #   abi [N] [FIRST]       N ABI conformance seeds (default 8)
+#   g-invariance [N] [FIRST]  N Csmith programs (default 100) compiled with -g
+#                         and -g0 at -Oz and -Os -moutline: the .text must be
+#                         identical
 #   lldb                  lldb end to end on the emulator (lldb_e2e.sh):
 #                         dbgtest at -O0/-O1/-O2, Zephyr and FreeRTOS
 #   lldb-board            the same on the board (DEBUG_EN=1 bitstream, a
@@ -109,6 +112,13 @@ csmith() {   # csmith <name> <first> <count> [CSMITH_OPTS, default: $CSMITH_OPTS
   fi
   rm -rf "$d/work"
 }
+g_invariance() {   # g_invariance <count> <first>
+  if "$HERE/g_invariance.sh" "$2" "$1" "$OUT/g-invariance" >"$OUT/g-invariance.log" 2>&1; then
+    result PASS "-g/-g0 .text ($1 seeds from $2)" "$(tail -n 1 "$OUT/g-invariance.log")"
+  else
+    result FAIL "-g/-g0 .text ($1 seeds from $2)" "$(tail -n 1 "$OUT/g-invariance.log") -- see $OUT/g-invariance/fail"
+  fi
+}
 lit() {
   local L=$LLVM_SRC
   [ -x "$LLVM_BIN/llvm-lit" ] || { result FAIL "lit" "no llvm-lit in $LLVM_BIN"; return; }
@@ -168,6 +178,7 @@ full)
   abi 30
   csmith csmith "${CSMITH_SEED:-1}" 300 ""
   csmith csmith-float "$(( ${CSMITH_SEED:-1} + 300 ))" 150 --float
+  g_invariance 100 "${CSMITH_SEED:-1}"
   lit
   lldb_e2e emu
   oracle "${ORACLE_BASE:-}"
@@ -219,6 +230,7 @@ csmith-board)
   rm -rf "$OUT/csmith-board/work"
   ;;
 abi) abi "${1:-8}" "${2:-1}" ;;
+g-invariance) g_invariance "${1:-100}" "${2:-${CSMITH_SEED:-1}}" ;;
 selftest)
   E=${1:-}
   if [ -z "$E" ]; then "$HERE/emu_suite.sh" "$OUT/emu-O1" -O1; E=$OUT/emu-O1; fi
