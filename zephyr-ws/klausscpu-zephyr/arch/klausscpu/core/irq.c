@@ -121,12 +121,20 @@ void klausscpu_irq_init(void)
  */
 int (*klausscpu_console_out_hook)(int c);
 
+/*
+ * Returns the character as an unsigned char, like fputc().  This is also the
+ * minimal-libc stdout hook (below), and both printk's and printf's cbprintf
+ * abort the rest of the format on a negative return.  char is signed on
+ * KlaussCPU, so cbprintf hands a byte >= 0x80 of a "%s" argument or of the
+ * format (UTF-8 text, e.g. "free\u2192empty") over as a negative int:
+ * returning it unchanged cut the output off after that byte.
+ */
 int arch_printk_char_out(int c)
 {
     int (*hook)(int) = klausscpu_console_out_hook;
 
     if (hook != NULL && hook(c) != 0) {
-        return c;
+        return (unsigned char)c;
     }
 
     if (c == '\n') {
@@ -137,7 +145,7 @@ int arch_printk_char_out(int c)
     while (_UART_STATUS & _UART_TX_BUSY) {
     }
     _UART_TX = (uint32_t)(unsigned char)c;
-    return c;
+    return (unsigned char)c;
 }
 
 /*
