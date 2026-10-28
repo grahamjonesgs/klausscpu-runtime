@@ -10,3 +10,6 @@
 
 T4: external TX — ARP broadcast
   link state: BMSR=0x0000
+  PSCSR: 0x0000 (bits 4:2 should be 110 = 100M FD)
+  BMCR: 0x0000 (bit 14 should be 0)
+--- end UART ---

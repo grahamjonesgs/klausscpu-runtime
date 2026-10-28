@@ -22,28 +22,32 @@ RT=$(cd "${KLAUSSCPU_RUNTIME:-$VALIDATE_DIR/../..}" && pwd)
 die() { echo "validate: $*" >&2; exit 2; }
 note() { echo "validate: $*" >&2; }
 
-if [ -z "${KLAUSSCPU_LLVM_BIN:-}" ]; then
-  if [ -x "$RT/../klausscpu-llvm/build/bin/clang" ]; then
-    KLAUSSCPU_LLVM_BIN=$(cd "$RT/../klausscpu-llvm/build/bin" && pwd)
-  else
-    die "KLAUSSCPU_LLVM_BIN is not set and $RT/../klausscpu-llvm/build/bin has no clang"
+# A script that only compares text (compare.sh) sets VALIDATE_TEXT_ONLY=1
+# before sourcing this file and needs no toolchain.
+if [ -z "${VALIDATE_TEXT_ONLY:-}" ]; then
+  if [ -z "${KLAUSSCPU_LLVM_BIN:-}" ]; then
+    if [ -x "$RT/../klausscpu-llvm/build/bin/clang" ]; then
+      KLAUSSCPU_LLVM_BIN=$(cd "$RT/../klausscpu-llvm/build/bin" && pwd)
+    else
+      die "KLAUSSCPU_LLVM_BIN is not set and $RT/../klausscpu-llvm/build/bin has no clang"
+    fi
   fi
-fi
-export KLAUSSCPU_LLVM_BIN
-LLVM_BIN=$KLAUSSCPU_LLVM_BIN
-[ -x "$LLVM_BIN/clang" ] || die "no clang in KLAUSSCPU_LLVM_BIN=$LLVM_BIN"
-LLVM_SRC=${KLAUSSCPU_LLVM_SRC:-$(cd "$LLVM_BIN/../.." && pwd)}
+  export KLAUSSCPU_LLVM_BIN
+  LLVM_BIN=$KLAUSSCPU_LLVM_BIN
+  [ -x "$LLVM_BIN/clang" ] || die "no clang in KLAUSSCPU_LLVM_BIN=$LLVM_BIN"
+  LLVM_SRC=${KLAUSSCPU_LLVM_SRC:-$(cd "$LLVM_BIN/../.." && pwd)}
 
-if [ -z "${KLAUSSCC:-}" ]; then
-  if [ -x "$RT/../klausscc/target/release/klausscc" ]; then
-    KLAUSSCC=$(cd "$RT/../klausscc/target/release" && pwd)/klausscc
-  elif command -v klausscc >/dev/null 2>&1; then
-    KLAUSSCC=$(command -v klausscc)
-  else
-    die "KLAUSSCC is not set, ../klausscc is not built and klausscc is not on PATH"
+  if [ -z "${KLAUSSCC:-}" ]; then
+    if [ -x "$RT/../klausscc/target/release/klausscc" ]; then
+      KLAUSSCC=$(cd "$RT/../klausscc/target/release" && pwd)/klausscc
+    elif command -v klausscc >/dev/null 2>&1; then
+      KLAUSSCC=$(command -v klausscc)
+    else
+      die "KLAUSSCC is not set, ../klausscc is not built and klausscc is not on PATH"
+    fi
   fi
+  export KLAUSSCC
 fi
-export KLAUSSCC
 
 BOARD_LOCK=${BOARD_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/klausscpu-board.lock}
 export BOARD_LOCK
@@ -100,11 +104,14 @@ stop_of() {
   else echo none; fi
 }
 
-# uart_lines <capture> -- how many filtered lines to compare: a run stopped by
-# the instruction cap (a program that never halts on the emulator) is compared
-# on its first 12 lines only.
-uart_lines() {
-  if [ "$(stop_of "$1")" = InstructionCap ]; then echo 12; else echo 100000; fi
+# verdicts -- filter: the distinct self-check verdict lines of filtered UART
+# text on stdin (lines with a PASS or FAIL word, or "Result:"), with every run
+# of digits replaced by '#' so that a counter in the line ("pass 17: FAIL
+# ...", "consumed total : 820") does not make two verdicts differ.  compare.sh
+# checks these for a program the emulator stops at the instruction cap, whose
+# later output depends on how fast the code runs.
+verdicts() {
+  LC_ALL=C grep -aE '(^|[^A-Za-z])(PASS|FAIL)(ED)?([^A-Za-z]|$)|Result:' | sed -E 's/[0-9]+/#/g' | LC_ALL=C sort -u
 }
 
 # emu_instructions <capture> -- instructions the emulator executed.

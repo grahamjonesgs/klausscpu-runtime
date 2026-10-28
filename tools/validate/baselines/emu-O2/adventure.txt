@@ -10,3 +10,6 @@ You awaken on cold stone...
 
 You are in a cold stone cell.
 Moonlight seeps through a crack.
+A rusty TORCH sits on the wall.
+A passage leads NORTH.
+> --- end UART ---

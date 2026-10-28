@@ -10,3 +10,6 @@ semaphore (producer/consumer):
   consumed total : 820  (expected 820)  PASS
 event flag (setter/waiter):
   signals set    : 10
+  signals caught : 10  (expected 10)  PASS
+Result: PASS
+--- end UART ---

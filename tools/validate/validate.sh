@@ -87,7 +87,7 @@ emu_corpus() {
     else
       result FAIL "emulator corpus $O" "$(grep -E '^uart:|^build errors' "$OUT/emu$O.cmp" | tr '\n' ' ') -- see $OUT/emu$O.cmp"
     fi
-    grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF)|WARN|^instructions|^\.text' "$OUT/emu$O.cmp" | sed 's/^/     /'
+    grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF|VERDICT|ORDER)|WARN|^instructions|^\.text' "$OUT/emu$O.cmp" | sed 's/^/     /'
   done
 }
 abi() {   # abi <count> [first]
@@ -107,13 +107,30 @@ csmith() {   # csmith <name> <first> <count> [CSMITH_OPTS, default: $CSMITH_OPTS
 lit() {
   local L=$LLVM_SRC
   [ -x "$LLVM_BIN/llvm-lit" ] || { result FAIL "lit" "no llvm-lit in $LLVM_BIN"; return; }
+  # lldb's KlaussCPU tests (a KlaussCPU directory or a klausscpu-* file
+  # anywhere under lldb/test), when this build has lldb.
+  local -a lldb=()
+  if [ -x "$LLVM_BIN/lldb" ] && [ -d "$L/lldb/test" ]; then
+    mapfile -t lldb < <(find "$L/lldb/test" -path '*/Inputs' -prune -o \
+      \( -type d -name KlaussCPU -print -prune \) -o \( -type f -iname 'klausscpu-*' -print \) 2>/dev/null | sort)
+  fi
   run "lit (KlaussCPU)" "$OUT/lit.log" "$LLVM_BIN/llvm-lit" -s \
     "$L/llvm/test/CodeGen/KlaussCPU" "$L/llvm/test/MC/KlaussCPU" "$L/llvm/test/MC/Disassembler/KlaussCPU" \
     "$L/llvm/test/DebugInfo/KlaussCPU" "$L/llvm/test/Transforms/LoopUnroll/KlaussCPU" \
     "$L"/lld/test/ELF/klausscpu-*.s "$L"/clang/test/CodeGen/klausscpu-*.c \
-    "$L"/clang/test/Driver/klausscpu-*.c "$L"/clang/test/Preprocessor/klausscpu-*.c
+    "$L"/clang/test/Driver/klausscpu-*.c "$L"/clang/test/Preprocessor/klausscpu-*.c \
+    "${lldb[@]}"
   local U=$LLVM_BIN/../unittests/Target/KlaussCPU/KlaussCPUTests
   if [ -x "$U" ]; then run "unit tests (KlaussCPUTests)" "$OUT/unittests.log" "$U"; fi
+}
+oracle() {   # oracle [BASE] -- snapshot, then diff with BASE when given
+  if ! "$HERE/oracle.sh" "$OUT/oracle" >"$OUT/oracle.log" 2>&1; then
+    result FAIL "oracle snapshot" "oracle.sh failed: see $OUT/oracle.log"
+  elif [ -n "$1" ]; then
+    run "oracle vs $1" "$OUT/oracle.diff" "$HERE/oracle_diff.sh" "$1" "$OUT/oracle"
+  else
+    result PASS "oracle snapshot" "$OUT/oracle (give a base, or ORACLE_BASE in full mode, to diff)"
+  fi
 }
 perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex> <label>
   local b=$OUT/perf-baseline-$3.tsv
@@ -121,7 +138,7 @@ perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex> <label>
   # shellcheck disable=SC2086
   run "perf vs baseline ($3)" "$OUT/perf-$3.cmp" \
     python3 -I "$HERE/perf.py" compare "$b" "$1" ${PERF_TOL:+--tol $PERF_TOL}
-  grep -E 'REGRESSION|improved' "$OUT/perf-$3.cmp" | sed 's/^/     /'
+  grep -E 'REGRESSION|MISSING|improved' "$OUT/perf-$3.cmp" | sed 's/^/     /'
 }
 
 case $MODE in
@@ -136,12 +153,7 @@ full)
   csmith csmith "${CSMITH_SEED:-1}" 300 ""
   csmith csmith-float "$(( ${CSMITH_SEED:-1} + 300 ))" 150 --float
   lit
-  "$HERE/oracle.sh" "$OUT/oracle" >"$OUT/oracle.log" 2>&1
-  if [ -n "${ORACLE_BASE:-}" ]; then
-    run "oracle vs $ORACLE_BASE" "$OUT/oracle.diff" "$HERE/oracle_diff.sh" "$ORACLE_BASE" "$OUT/oracle"
-  else
-    result PASS "oracle snapshot" "$OUT/oracle (set ORACLE_BASE to diff)"
-  fi
+  oracle "${ORACLE_BASE:-}"
   ;;
 board)
   "$HERE/board_suite.sh" "$OUT/board-O1" -O1
@@ -150,7 +162,7 @@ board)
   else
     result FAIL "board suite -O1 (UART)" "$(grep '^uart:' "$OUT/board-O1.cmp") -- see $OUT/board-O1.cmp"
   fi
-  grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF)' "$OUT/board-O1.cmp" | sed 's/^/     /'
+  grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF|VERDICT|ORDER)' "$OUT/board-O1.cmp" | sed 's/^/     /'
   if [ -s "$OUT/board-O1/repeat.txt" ]; then result FAIL "board repeat run" "$(tr '\n' ' ' <"$OUT/board-O1/repeat.txt")"
   else result PASS "board repeat run" "the runs agree"; fi
   if grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O1/summary.txt" | grep -q .; then
@@ -193,11 +205,7 @@ selftest)
   if [ -z "$E" ]; then "$HERE/emu_suite.sh" "$OUT/emu-O1" -O1; E=$OUT/emu-O1; fi
   run "harness self-test" "$OUT/selftest.log" "$HERE/selftest.sh" "$OUT/selftest" "$E" ${2:+"$2"}
   ;;
-oracle)
-  "$HERE/oracle.sh" "$OUT/oracle" >"$OUT/oracle.log" 2>&1
-  if [ -n "${1:-}" ]; then run "oracle vs $1" "$OUT/oracle.diff" "$HERE/oracle_diff.sh" "$1" "$OUT/oracle"
-  else result PASS "oracle snapshot" "$OUT/oracle"; fi
-  ;;
+oracle) oracle "${1:-}" ;;
 baseline)
   [ $# -ge 1 ] || die "usage: validate.sh baseline <run-dir>..."
   for d in "$@"; do
@@ -206,7 +214,9 @@ baseline)
       rm -rf "${BASE:?}/$sub"; mkdir -p "$BASE/$sub"
       for f in "$d/$sub"/*.out; do
         n=$(basename "$f" .out)
-        uart_filter "$f" | head -"$(uart_lines "$f")" >"$BASE/$sub/$n.txt"
+        # The whole filtered text, also for a program stopped by the cap:
+        # compare.sh checks its first 12 lines and its verdicts.
+        uart_filter "$f" >"$BASE/$sub/$n.txt"
         printf '%s\t%s\n' "$n" "$(stop_of "$f")" >>"$BASE/$sub/stop.tsv"
       done
       [ -f "$d/$sub/stats.tsv" ] && cp "$d/$sub/stats.tsv" "$BASE/$sub/"

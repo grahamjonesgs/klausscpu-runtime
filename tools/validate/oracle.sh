@@ -19,18 +19,20 @@ set -uo pipefail
 [ $# -eq 1 ] || die "usage: oracle.sh <outdir>"
 OUT=$(realpath -m "$1"); rm -rf "$OUT"; mkdir -p "$OUT"
 B=$LLVM_BIN
+fail=0   # a corpus build or write that failed (e.g. a full disk): exit 1
 [ -d "$LLVM_SRC/llvm/test/CodeGen/KlaussCPU" ] || die "no klausscpu-llvm tests under $LLVM_SRC"
 for OPT in -O1 -O2 -Os; do
   D=$OUT/corpus$OPT; mkdir -p "$D"
   stage_baremetal "$OUT/stage"
-  make -C "$STAGED_BM" -j"$JOBS" -k all OPT="$OPT" >"$D/build.log" 2>&1
+  make -C "$STAGED_BM" -j"$JOBS" -k all OPT="$OPT" >"$D/build.log" 2>&1 ||
+    { note "oracle: the $OPT corpus build failed (see $D/build.log)"; fail=1; }
   for f in "$STAGED_BM"/*.o "$STAGED_BM"/*.elf; do
     [ -e "$f" ] || continue
-    "$B/llvm-objcopy" --remove-section=.comment "$f" "$D/$(basename "$f")" 2>>"$D/objcopy.err"
+    "$B/llvm-objcopy" --remove-section=.comment "$f" "$D/$(basename "$f")" 2>>"$D/objcopy.err" || fail=1
   done
-  for f in "$STAGED_BM"/*.elf; do "$B/llvm-objdump" -d "$f" >"$D/$(basename "$f" .elf).dis" 2>&1; done
+  for f in "$STAGED_BM"/*.elf; do "$B/llvm-objdump" -d "$f" >"$D/$(basename "$f" .elf).dis" 2>&1 || fail=1; done
   # objdump prints the file name it was given: make it relative.
-  sed -i "s|$STAGED_BM/||" "$D"/*.dis
+  sed -i "s|$STAGED_BM/||" "$D"/*.dis || fail=1
 done
 rm -rf "$OUT/stage"
 M=$OUT/mc; mkdir -p "$M"
@@ -60,5 +62,6 @@ C=$OUT/llc; mkdir -p "$C"
 for f in "$LLVM_SRC"/llvm/test/CodeGen/KlaussCPU/*.ll; do
   for O in 0 1 2; do "$B/llc" -mtriple=klausscpu -O$O "$f" -o "$C/$(basename "$f" .ll).O$O.s" 2>/dev/null; done
 done
-echo "toolchain $(toolchain_id)" >"$OUT/toolchain.log"
+echo "toolchain $(toolchain_id)" >"$OUT/toolchain.log" || fail=1
+if [ $fail != 0 ]; then echo "oracle: INCOMPLETE snapshot in $OUT (see the messages above)"; exit 1; fi
 echo "oracle written to $OUT ($(find "$OUT" -type f | wc -l) files)"

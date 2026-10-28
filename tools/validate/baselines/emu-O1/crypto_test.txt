@@ -10,3 +10,5 @@
   actual   PT: 00000000 00000000 00000000 00000000
   encrypt=FAIL  decrypt=FAIL  => FAIL
 
+[2] SHA-256("abc") (FIPS-180-4 B.1)
+--- end UART ---

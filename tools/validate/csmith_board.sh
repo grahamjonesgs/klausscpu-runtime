@@ -27,7 +27,10 @@
 #                 kept in compiler/), or COMPILER / no-output / stop-<reason>.
 #   stop-<reason> the emulator run ended other than by HALT (a trap, an
 #                 invalid opcode, ...), kept in compiler/.
-#   skip-big      .text larger than MAX_TEXT bytes (default 262144).
+#   skip-big      .text larger than MAX_TEXT bytes (default 262144) and the
+#                 emulator halted with the host's checksum: not run on the
+#                 board.  A big program whose emulator checksum is wrong is
+#                 COMPILER (without a board run).
 #   no-output, cc-fail, ld-fail   the emulator printed no checksum / the build
 #                 failed (kept in compiler/).
 #   gen-fail, host-cc-fail, host-timeout, host-ub   seed discarded.
@@ -57,7 +60,9 @@ one() {
         csmith_classify "emu$O.out"; n=$NI; emu_ck=$G
         if [ "$ST" = instr-cap ]; then ST=skip-long
         elif [ "$ST" != ok ] && [ "$ST" != MISMATCH ]; then :   # no-output, stop-<reason>
-        elif [ "$text" -gt "$MAX_TEXT" ]; then ST=skip-big
+        elif [ "$text" -gt "$MAX_TEXT" ]; then
+          # Too big for the board; the emulator's verdict still counts.
+          if [ "$ST" = ok ]; then ST=skip-big; else ST=COMPILER; fi
         else
           # 100 MHz and a CPI below 10, plus the load.
           t=$(( 20 + ${n:-0} / 10000000 ))

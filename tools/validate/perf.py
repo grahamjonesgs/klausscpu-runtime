@@ -12,8 +12,13 @@
 (baselines/perf.tsv) has the same columns, plus comments.  `compare` prints
 every metric with its change, marks REGRESSION when a metric got worse by more
 than its tolerance (or --tol, if given), IMPROVED when it got better by more,
-and exits 1 if anything regressed.  Metrics missing from either side are
-listed but do not fail.  'info' metrics are reported, never judged.
+and exits 1 if anything regressed.  A judged (not 'info') baseline metric
+that the new run did not produce is MISSING and fails too, when the run
+measured anything else of its group (the first two parts of the key:
+board.O1, bench.O2, zephyr.mandel, ...): a Dhrystone or perf_baseline line
+that is no longer printed, or no longer parses, must not pass silently.  A
+whole group that is absent (BENCH=0, a ZEPHYR_APPS subset) is listed as not
+measured.  New metrics are listed.  'info' metrics are reported, never judged.
 
 For the board suite, a second run (run2/) is also read: a metric whose two
 runs differ by more than its tolerance is reported as NOISY.
@@ -158,13 +163,22 @@ def load(path):
     return rows
 
 
+def group(key):
+    return '.'.join(key.split('.')[:2])
+
+
 def compare(base_path, new_path, tol_override):
     base, new = load(base_path), load(new_path)
     bad = 0
+    groups = {group(k) for k in new}
     print(f'{"metric":52s} {"baseline":>14s} {"now":>14s} {"change":>9s}')
     for k in sorted(set(base) | set(new)):
         if k not in new:
-            print(f'{k:52s} {fmt(base[k][0]):>14s} {"-":>14s}   not measured')
+            if base[k][1] != 'info' and group(k) in groups:
+                print(f'{k:52s} {fmt(base[k][0]):>14s} {"-":>14s}   MISSING')
+                bad += 1
+            else:
+                print(f'{k:52s} {fmt(base[k][0]):>14s} {"-":>14s}   not measured')
             continue
         if k not in base:
             print(f'{k:52s} {"-":>14s} {fmt(new[k][0]):>14s}   new metric')
@@ -185,7 +199,7 @@ def compare(base_path, new_path, tol_override):
             mark = 'improved'
         if n != b or mark:
             print(f'{k:52s} {fmt(b):>14s} {fmt(n):>14s} {ch:+8.2f}% {mark}')
-    print(f'{bad} regression(s) beyond tolerance' if bad else 'no regressions beyond tolerance')
+    print(f'{bad} regression(s) beyond tolerance or missing' if bad else 'no regressions beyond tolerance')
     return 1 if bad else 0
 
 

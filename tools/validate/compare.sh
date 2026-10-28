@@ -11,10 +11,21 @@
 # How each run ended must match too (stop_of in common.sh: Halt, the
 # emulator's InstructionCap, Trap, ...): a program that used to halt and now
 # hangs or traps fails with "STOP <prog>: Halt -> <new>", even when its output
-# up to that point is identical.  A program the base run stopped at the
-# instruction cap (one that never halts on the emulator: the network demos,
-# adventure) is compared on its first 12 filtered lines; every other program
-# on its whole output.
+# up to that point is identical.
+#
+# A program the base run stopped at the instruction cap (InstructionCap in
+# stop.tsv: one that idles or waits for a peripheral the emulator does not
+# model) prints more or less before the cap, and in a different interleaving,
+# as the code gets faster or slower.  Such a program is compared on its first
+# 12 filtered lines (in any order: "ORDER <prog>" is listed but does not
+# fail), plus its self-check verdicts anywhere in the output
+# (verdicts in common.sh: the distinct lines with a PASS or FAIL word or
+# "Result:", digits ignored): every verdict of the base must appear in the new
+# run ("VERDICT <prog> lost: ..."; e.g. test_rtos's "Result: PASS", which
+# comes on line 39), and a new verdict that says FAIL must appear in the base
+# ("VERDICT <prog> new: ...").  A new verdict without FAIL (a faster run now
+# reaches a later check) is listed as "VERDICT <prog> extra" but does not
+# fail.  Every other program is compared on its whole output.
 #
 # Then it reports the emulator instruction count and .text size of every
 # program whose numbers changed (stats.tsv in both), the totals over the
@@ -25,9 +36,11 @@
 # from either side, else 0 (size and instruction-count changes do not fail the
 # comparison).
 set -uo pipefail
+# shellcheck disable=SC2034  # read by common.sh
+VALIDATE_TEXT_ONLY=1
 . "$(dirname "$0")/common.sh"
 [ $# -eq 2 ] || die "usage: compare.sh <base> <new>"
-B=$1; N=$2; rc=0; ndiff=0; nstop=0; nprog=0
+B=$1; N=$2; rc=0; ndiff=0; nstop=0; nprog=0; nmiss=0
 TOL=${STATS_TOL:-2}
 # base_stop <prog> <base-file> -- how the base run of <prog> ended: from the
 # capture itself, from a baseline's stop.tsv, or (older baselines) from
@@ -50,16 +63,31 @@ for f in "$B"/*."$ext"; do
   n=$(basename "$f" ."$ext")
   case $n in summary|build_errors|build_failed|repeat|toolchain|stats|stop) continue ;; esac
   nprog=$((nprog + 1))
-  if [ ! -f "$N/$n.out" ]; then echo "MISSING $n"; rc=1; continue; fi
+  if [ ! -f "$N/$n.out" ]; then echo "MISSING $n"; rc=1; nmiss=$((nmiss + 1)); continue; fi
   s0=$(base_stop "$n" "$f"); s1=$(stop_of "$N/$n.out")
   if [ -n "$s0" ] && [ "$s0" != "$s1" ]; then
     echo "STOP $n: $s0 -> $s1"; rc=1; nstop=$((nstop + 1))
   fi
+  if [ $ext = txt ]; then text0() { cat "$f"; }; else text0() { uart_filter "$f"; }; fi
   lim=100000; [ "$s0" = InstructionCap ] && lim=12
-  if [ $ext = txt ]; then
-    d=$(diff <(head -"$lim" "$f") <(uart_filter "$N/$n.out" | head -"$lim"))
-  else
-    d=$(diff <(uart_filter "$f" | head -"$lim") <(uart_filter "$N/$n.out" | head -"$lim"))
+  d=$(diff <(text0 | head -"$lim") <(uart_filter "$N/$n.out" | head -"$lim"))
+  if [ "$s0" = InstructionCap ]; then
+    # The same lines in another order: preemptive tasks interleave by timer
+    # ticks, so test_rtos's task lines move with the code's speed.
+    if [ -n "$d" ] && diff -q <(text0 | head -"$lim" | LC_ALL=C sort) \
+        <(uart_filter "$N/$n.out" | head -"$lim" | LC_ALL=C sort) >/dev/null; then
+      echo "ORDER $n: the first $lim lines are the same lines in another order (not a failure)"; d=
+    fi
+    # comm needs both inputs in the same collation as verdicts' sort.
+    v0=$(text0 | verdicts); v1=$(uart_filter "$N/$n.out" | verdicts)
+    lost=$(LC_ALL=C comm -23 <(printf '%s\n' "$v0") <(printf '%s\n' "$v1") | grep .)
+    new=$(LC_ALL=C comm -13 <(printf '%s\n' "$v0") <(printf '%s\n' "$v1") | grep .)
+    newfail=$(printf '%s\n' "$new" | grep -aE '(^|[^A-Za-z])FAIL')
+    extra=$(printf '%s\n' "$new" | grep -avE '(^|[^A-Za-z])FAIL' | grep .)
+    [ -n "$lost" ] && d+=$'\n'$(printf '%s\n' "$lost" | sed "s/^/VERDICT $n lost: /")
+    [ -n "$newfail" ] && d+=$'\n'$(printf '%s\n' "$newfail" | sed "s/^/VERDICT $n new: /")
+    [ -n "$extra" ] && printf '%s\n' "$extra" | sed "s/^/VERDICT $n extra (not a failure): /"
+    d=$(printf '%s\n' "$d" | grep .)
   fi
   if [ -n "$d" ]; then echo "=== DIFF $n"; echo "$d" | head -20; rc=1; ndiff=$((ndiff + 1)); fi
 done
@@ -70,7 +98,7 @@ for f in "$N"/*.out; do
     echo "NOT IN BASE $n (a new program: update the baseline)"; rc=1
   fi
 done
-echo "uart: $nprog programs, $ndiff differ, $nstop stop differently"
+echo "uart: $nprog programs, $ndiff differ, $nstop stop differently, $nmiss missing"
 if [ -f "$B/stats.tsv" ] && [ -f "$N/stats.tsv" ]; then
   awk -F'\t' -v tol="$TOL" '
     NR==FNR { bi[$1]=$2; bt[$1]=$3; next }

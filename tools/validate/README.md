@@ -66,19 +66,33 @@ interrupt race count in test_atomic, Zephyr log timestamps: `uart_filter` in
 How each run ended must match the baseline too (`baselines/*/stop.tsv`:
 `Halt`, `InstructionCap`, `Trap`, `InvalidOpcode`, ...): a program that used
 to halt and now hangs, traps or is killed fails with `STOP <prog>: Halt ->
-<new>` even when every line it printed is the same.  A program that never
-halts on the emulator (the network demos, adventure: stopped by the cap) is
-compared on its first 12 lines, every other one on its whole output.  It
-also prints the emulator instruction count and `.text` size of every program
+<new>` even when every line it printed is the same.  A program whose
+baseline stop is `InstructionCap` (it idles or waits for a peripheral the
+emulator does not model, so the cap stops it; today test_rtos, test_sync,
+adventure, blit_capture, crypto_selftest, crypto_test, eth_test and the six
+network demos, see `stop.tsv`) prints more or less before the cap, and
+interleaves its tasks differently, as the code gets faster or slower.  It
+is compared on its first 12 lines (in any order: a reordering is listed as
+`ORDER` but does not fail) and on its self-check verdicts anywhere in the
+output: the distinct lines with a `PASS` or `FAIL` word or `Result:`,
+digits ignored (`verdicts` in `common.sh`).  Every verdict of the baseline
+must still be printed (`VERDICT <prog> lost: Result: PASS` fails, e.g.
+when test_rtos's line 39 turns FAIL or never comes), and a new verdict
+that says FAIL fails (`VERDICT <prog> new:`); a new PASS verdict, from a
+run that now gets further, is only listed.  Every other program is
+compared on its whole output.  The summary line reads `uart: N programs, D
+differ, S stop differently, M missing`.  It also prints the emulator instruction count and `.text` size of every program
 that changed, the totals, and a WARN for any program that grew by more than
 `STATS_TOL` (2%).  Then 4 ABI conformance seeds and 30 Csmith seeds.
 
 **full** — quick, plus 300 Csmith seeds at -O0/-O1/-O2/-Os (from
 `CSMITH_SEED`, default 1), 150 `--float` seeds, 30 ABI seeds, the KlaussCPU
 lit tests (`llvm/test/{CodeGen,MC,MC/Disassembler,DebugInfo,Transforms/LoopUnroll}/KlaussCPU`,
-`lld/test/ELF/klausscpu-*`, `clang/test/{CodeGen,Driver,Preprocessor}/klausscpu-*`)
-and `KlaussCPUTests`, and an oracle snapshot, diffed against `ORACLE_BASE`
-when that is set.
+`lld/test/ELF/klausscpu-*`, `clang/test/{CodeGen,Driver,Preprocessor}/klausscpu-*`,
+and when the build has lldb every `KlaussCPU` directory or `klausscpu-*`
+file under `lldb/test`) and `KlaussCPUTests`, and an oracle snapshot,
+diffed against `ORACLE_BASE` when that is set (a failed `oracle.sh` is a
+FAIL).
 
 **board** — `board_suite.sh` builds the self-checking programs at -O1, plus
 Dhrystone with `-fno-builtin` (`dhrystone_nobuiltin`, the like-for-like
@@ -138,7 +152,8 @@ emulator: an emulator bug, kept there too); or `COMPILER` (emulator = board
 != host: a compiler bug, in `csmith-board/compiler/`).  Seeds whose emulator
 run exceeds `EMU_MAX_INSTRUCTIONS` (300M) are not run on the board
 (`skip-long`), nor are programs with more than `MAX_TEXT` bytes of .text
-(`skip-big`).  A `skip-long` level of a seed whose other level was
+(`skip-big`, only when the emulator's checksum is right; a big program with
+a wrong one is `COMPILER`).  A `skip-long` level of a seed whose other level was
 `all-equal` gets the same `EMU_RETRY_MAX` re-run on the emulator as above
 (`skip-long-ok`, or `HANG`).  The board run must print `CPU halted` too.
 Csmith's default programs take about 150K instructions on average and a few
@@ -161,9 +176,15 @@ the harness itself: it tampers with copies of a -O1 emulator run (and of a
 board run when one is given) and checks that `compare.sh` catches a program
 that hangs part-way, traps after its last line, is killed, starts halting,
 changes an early line, or goes missing, a `PASS` line that turns into
-`FAIL`, and a board program that stops halting; then that Csmith flags a
-trap after a good checksum and a level that only halts with the larger cap
-(`ok-long`) or not at all (`HANG`).  Run it after changing any script here.
+`FAIL`, a capped program (test_rtos, test_sync) whose late verdict turns
+`FAIL`, that stops before its verdicts or that prints a new `FAIL` (and
+that a capped program that gets less far, interleaves differently or
+reaches a new `PASS` still passes), and a board program that stops halting;
+then that Csmith flags a trap after a good checksum and a level that only
+halts with the larger cap (`ok-long`) or not at all (`HANG`); that
+csmith-board flags a wrong emulator checksum in a program too big for the
+board (`COMPILER`, not `skip-big`); and that `perf.py` fails a metric that
+is no longer measured.  Run it after changing any script here.
 
 **baseline DIR...** — after an intended change of output or performance,
 rewrite the baselines from the output directories of quick, board and/or
@@ -173,8 +194,9 @@ of each existing metric are kept).  Commit the result with the change.
 
 ## Baselines
 
-`baselines/emu-O1/`, `baselines/emu-O2/`: the filtered UART output of every
-bare-metal program, `stats.tsv` (emulator instructions, `nohalt` for a
+`baselines/emu-O1/`, `baselines/emu-O2/`: the whole filtered UART output of
+every bare-metal program (also of those the cap stops, for their verdicts),
+`stats.tsv` (emulator instructions, `nohalt` for a
 program that ran into the cap, `.text` bytes) and `stop.tsv` (how each run
 ended).  `baselines/board-O1/`: the UART output and `stop.tsv` of the board
 suite (`Halt`, or `none` for test_rtos and test_sync, which idle until the
@@ -182,7 +204,12 @@ timeout).  `baselines/perf.tsv`:
 one board metric per line — key, value, the better direction (`lower`,
 `higher`, or `info`: reported, never judged) and the tolerance in percent.
 `validate.sh board` and `zephyr` flag a metric that got worse by more than its
-tolerance as a REGRESSION (and fail).  The board's cycle counts repeat to
+tolerance as a REGRESSION (and fail).  A judged metric that the run did not
+produce while it measured others of its group (the first two parts of the
+key: `board.O1`, `bench.O2`, `zephyr.mandel`) is MISSING and fails too, so
+a Dhrystone or perf_baseline line that stops being printed, or changes
+format, does not pass silently; a group that was not run at all (`BENCH=0`,
+a `ZEPHYR_APPS` subset) is only listed as not measured.  The board's cycle counts repeat to
 within a few cycles (kernels that miss the cache vary a little with DDR
 refresh), so the bare-metal tolerances are tight (0.2-0.5%); the Zephyr
 figures are wall-clock rates and are looser (1-10%).  The file's comments
@@ -213,13 +240,13 @@ change in any of it is a regression like any other.
 | `validate.sh` | the driver |
 | `common.sh` | tool lookup, `board`/`emu` helpers, `uart_filter`, the staged build tree |
 | `emu_suite.sh <out> [OPT]` | build and run the corpus on the emulator |
-| `compare.sh <base> <new>` | UART, instruction-count and size comparison of two runs, or of a run and a baseline dir |
+| `compare.sh <base> <new>` | UART, instruction-count and size comparison of two runs, or of a run and a baseline dir (needs no toolchain) |
 | `board_suite.sh <out> [OPT]` | build and run the board programs (`BOARD_RUNS`, `BOARD_PROGS`) |
 | `bench.sh <out> [OPT...]` | CoreMark + Embench-IoT on the board (`baremetal/benchmarks/run-benchmarks.sh`) |
 | `perf.py` | extract board figures; compare with or merge into a baseline |
 | `csmith_run.sh`, `csmith_board.sh`, `csmith_lib.sh` | Csmith on the emulator / on the board and the emulator |
 | `oracle.sh`, `oracle_diff.sh` | output-byte snapshot and diff |
-| `selftest.sh <out> <emu-O1 run> [<board-O1 run>]` | fault injection for compare.sh and the Csmith scripts |
+| `selftest.sh <out> <emu-O1 run> [<board-O1 run>]` | fault injection for compare.sh, perf.py and the Csmith scripts |
 | `zephyr/suite.sh` | Zephyr build, emulator and board runs; `zephyr/build.sh <app> <dir>` builds one app; `zephyr/sshrun.sh` drives an SSH session; `zephyr/vncgrab.py` grabs a VNC frame |
 
 The perf_haz program (the per-kernel hazard breakdown: data, load-use,
