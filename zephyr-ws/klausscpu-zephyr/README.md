@@ -183,11 +183,14 @@ origin to match.
 - **Thread entry**: a thread starts in `z_thread_entry` (by IRET, with a 0
   return address above it, so a backtrace ends there); an entry function that
   returns comes back to it and the thread is aborted, Zephyr's convention.
-- **`BUILD_ASSERT` is a no-op** in this build: Zephyr's `toolchain/gcc.h`
-  maps it to `_Static_assert` only for GCC > 4.6 or C11, and clang says GCC
-  4.2 while the port builds with the default `-std=c99`.  (`CONFIG_STD_C11=y`
-  turns the checks on; the hello sample builds clean with it.)  Use `#error`
-  for a check that must fire.
+- **C11, so that `BUILD_ASSERT` works**: `CPU_KLAUSSCPU` selects
+  `REQUIRES_STD_C11`, so every app builds with `-std=c11`.  Zephyr's
+  `toolchain/gcc.h` maps `BUILD_ASSERT` to `_Static_assert` only for GCC 4.6+
+  or C11, and clang says GCC 4.2, so under Zephyr's default `-std=c99` every
+  kernel, arch and driver build-time check expanded to nothing.  The
+  validation harness's Zephyr build step (`tools/validate/zephyr/suite.sh`)
+  builds a `BUILD_ASSERT(0)` probe that must fail, and checks that
+  `CONFIG_DYNAMIC_INTERRUPTS=y` is refused.
 - **`OUTPUT_FORMAT("elf32-klausscpu")`** entry has been added to lld's
   `ScriptParser.cpp` `StringSwitch` table (in the LLVM tree, not here).
 

@@ -17,6 +17,10 @@ config CPU_KLAUSSCPU
 	# Toolchain emits ELFCLASS32 relocatable objects even though the C ABI
 	# uses 64-bit pointers (CONFIG_64BIT=y), so llext must parse 32-bit ELF.
 	select LLEXT_ELF_CLASS32 if LLEXT
+	# Build in C11.  Clang reports __GNUC__ 4.2, so under -std=c99
+	# toolchain/gcc.h defines BUILD_ASSERT() as nothing and every
+	# kernel, arch and driver build-time check is silently skipped.
+	select REQUIRES_STD_C11
 
 config ARCH_HAS_USERSPACE
 	bool

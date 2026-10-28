@@ -89,8 +89,9 @@ void z_irq_spurious(const void *unused)
  * Ethernet drivers poll.
  */
 #ifdef CONFIG_DYNAMIC_INTERRUPTS
-/* #error, not BUILD_ASSERT: with clang and -std=c99 (the default C standard)
- * Zephyr's BUILD_ASSERT expands to nothing (toolchain/gcc.h). */
+/* #error rather than BUILD_ASSERT: it stops the build at the preprocessor
+ * whatever the C standard (BUILD_ASSERT is live only because the port selects
+ * C11; see arch/klausscpu/Kconfig).  zephyr/suite.sh checks it fires. */
 #error "KlaussCPU: CONFIG_DYNAMIC_INTERRUPTS is not supported (only the timer interrupt has a handler; see arch/klausscpu/core/irq.c)"
 #endif
 
