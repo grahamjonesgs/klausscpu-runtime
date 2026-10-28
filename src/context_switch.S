@@ -19,6 +19,9 @@
 //   the first task.  Switches SP, restores the fake register frame, enables
 //   the timer interrupt, and IRETs into the task entry function.
 //
+// rtos_task_return
+//   The return address of every task entry function (see below).
+//
 // Register conventions:
 //   R0–R3   : args / caller-saved scratch
 //   R4–R7   : callee-saved (preserved across pick_next_task)
@@ -246,3 +249,24 @@ rtos_yield:
     //    rtos_yield() call, with the timer interrupt re-enabled.
     iret
     .size rtos_yield, . - rtos_yield
+
+// rtos_task_return
+//   Where a task entry function that returns goes: task_create puts
+//   rtos_task_return_point above each task's initial frame as the entry
+//   function's return address.  The NOP puts that address after an
+//   instruction of this function, as a CALL's return address is, so a
+//   debugger shows this frame (it looks a return address up at address - 1);
+//   the CFI marks it as the outermost frame.  rtos_task_exit (rtos.c) ends
+//   the task.
+    .cfi_sections .debug_frame
+    .globl  rtos_task_return
+    .type   rtos_task_return, @function
+rtos_task_return:
+    .cfi_startproc
+    .cfi_undefined 17               // the return-address column (DwarfRA)
+    nop
+    .globl  rtos_task_return_point
+rtos_task_return_point:
+    call    rtos_task_exit
+    .cfi_endproc
+    .size rtos_task_return, . - rtos_task_return

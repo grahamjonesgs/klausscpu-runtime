@@ -19,7 +19,7 @@ set -uo pipefail
 [ $# -ge 1 ] || die "usage: board_suite.sh <outdir> [OPT]"
 OUT=$(realpath -m "$1"); OPT=${2:--O1}
 RUNS=${BOARD_RUNS:-2}
-PROGS=${BOARD_PROGS:-"hello test_64bit test_varargs test_printf test_fp test_switch test_asm queens bst expr test_big test_cache dhrystone perf_baseline perf_haz crypto_selftest test_rtos test_sync test_atomic test_divshadow test_flags test_unaligned"}
+PROGS=${BOARD_PROGS:-"hello test_64bit test_varargs test_printf test_fp test_switch test_asm queens bst expr test_big test_cache dhrystone perf_baseline perf_haz crypto_selftest test_rtos test_sync test_task_exit test_atomic test_divshadow test_flags test_unaligned"}
 # Programs that never halt on the board (they idle after printing the result).
 timeout_for() {
   case $1 in

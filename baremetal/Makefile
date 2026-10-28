@@ -17,6 +17,7 @@
 #   make test_divshadow — a divide behind a taken fused branch (board only)
 #   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
 #   make test_setjmp    — setjmp / longjmp (SP, callee-saved registers, stack args after longjmp)
+#   make test_task_exit — RTOS tasks that return or call rtos_task_exit
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
 #   make coremark       — CoreMark (bench-build/<OPT>/), see benchmarks/README.md
 #   make embench        — Embench-IoT suite (bench-build/<OPT>/embench/)
@@ -177,7 +178,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
-           test_unaligned test_setjmp
+           test_unaligned test_setjmp test_task_exit
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -577,7 +578,7 @@ test_cache.elf: test_cache.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_cache: test_cache.elf
 
-# RTOS objects (linked only into test_rtos)
+# RTOS objects (linked into test_rtos, test_task_exit and test_sync)
 RTOS_OBJS = rtos.o context_switch.o
 
 rtos.o: $(ROOT)/src/rtos.c
@@ -593,6 +594,14 @@ test_rtos.elf: test_rtos.o $(RTOS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(RTOS_OBJS) test_rtos.o)
 
 test_rtos: test_rtos.elf
+
+test_task_exit.o: programs/test_task_exit.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_task_exit.elf: test_task_exit.o $(RTOS_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(RTOS_OBJS) test_task_exit.o)
+
+test_task_exit: test_task_exit.elf
 
 test_sync.o: programs/test_sync.c
 	$(CC) $(CFLAGS) -c -o $@ $<

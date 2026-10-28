@@ -1,0 +1,9 @@
+Load Complete OK
+=== KlaussCPU RTOS: tasks that end ===
+timer_handler[0]    = 0x64000000 (expect 0x00004000 = push r0)
+[exit] calling rtos_task_exit
+[ret ] work = 5712, returning
+ended tasks scheduled again: no
+test_task_exit PASSED
+
+CPU halted.

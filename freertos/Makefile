@@ -4,6 +4,7 @@
 #   make demo         — FreeRTOS task demo (no network); `make -B demo.elf DBG=-g`
 #                       for source-level debugging (../DEBUGGING.md)
 #   make net_demo     — FreeRTOS + lwIP: DHCP + NTP + HTTP in parallel tasks
+#   make task_return.elf — a task function that returns (emulator test)
 #
 # Prerequisites:
 #   bash get-freertos.sh          (clones FreeRTOS-Kernel once)
@@ -348,6 +349,14 @@ demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) demo/demo.o $(RUNTIME_OBJS)
 demo.bin: demo.elf
 	$(OBJCOPY) -O binary $< $@
 
+# A task function that returns (the port's configTASK_RETURN_ADDRESS); runs on
+# the emulator: klausscc --emulate -i task_return.elf (exit status 0 = pass).
+demo/task_return.o: demo/task_return.c | check-kernel
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+task_return.elf: $(KERNEL_OBJS) $(PORT_OBJS) demo/task_return.o $(RUNTIME_OBJS)
+	$(LD) $(LDFLAGS) -o $@ $^ $(PICOLIBC)/lib/libc.a
+
 net_demo.elf: $(KERNEL_OBJS) $(PORT_OBJS) $(LWIP_OBJS) $(LWIP_PORT_OBJS) \
               demo/net_demo.o $(RUNTIME_OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^ $(PICOLIBC)/lib/libc.a
@@ -382,7 +391,7 @@ clean:
 	rm -rf $(OBJ)
 	rm -f $(KERNEL_OBJS) $(PORT_OBJS) \
 	      $(LWIP_OBJS) \
-	      demo/demo.o demo/net_demo.o demo/console_demo.o \
+	      demo/demo.o demo/net_demo.o demo/console_demo.o demo/task_return.o \
 	      telnet/telnet.o telnet/pic_loader.o \
 	      wolfssl_hw.o ssh/ssh_server.o ssh/sshkeys.o \
 	      sys_arch.lo \

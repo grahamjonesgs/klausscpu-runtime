@@ -1,11 +1,12 @@
 /*
  * port.S — KlaussCPU FreeRTOS context-switch assembly.
  *
- * Three entry points:
+ * Entry points:
  *
  *   vPortTickISR      — timer interrupt handler (INT_VEC0).
  *   vPortStartFirstTask — launches the first task after xPortStartScheduler.
  *   vPortYield        — voluntary context switch (called as normal C function).
+ *   vPortTaskReturn   — where a task function that returns goes.
  *
  * Per-task stack frame layout after portSAVE_CONTEXT (low → high address):
  *
@@ -287,3 +288,25 @@ vPortYield:
     iret
     .cfi_endproc
     .size vPortYield, . - vPortYield
+
+/* ── vPortTaskReturn ───────────────────────────────────────────────────── */
+/*
+ * Where a task function that returns goes: pxPortInitialiseStack puts
+ * vPortTaskReturnPoint (the default configTASK_RETURN_ADDRESS, port.c) above
+ * each task's initial frame as the task function's return address.  The NOP
+ * puts that address after an instruction of this function, as a CALL's
+ * return address is, so a debugger shows this frame (it looks a return
+ * address up at address - 1); the CFI marks this as the outermost frame.
+ * vPortTaskExitError (port.c) deletes the task.
+ */
+    .globl  vPortTaskReturn
+    .type   vPortTaskReturn, @function
+vPortTaskReturn:
+    .cfi_startproc
+    .cfi_undefined 17               /* the return-address column (DwarfRA) */
+    nop
+    .globl  vPortTaskReturnPoint
+vPortTaskReturnPoint:
+    call    vPortTaskExitError
+    .cfi_endproc
+    .size vPortTaskReturn, . - vPortTaskReturn

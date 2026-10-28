@@ -21,6 +21,8 @@
  *   R1
  *   R0   ← pvParameters (ABI arg0)
  *   hw_frame  ← IRET pops this last
+ *   configTASK_RETURN_ADDRESS  ← the task function's return address
+ *   0    ← the top of the stack (see "Task return" below)
  *
  * Each slot is 8 bytes (StackType_t = uint64_t).
  */
@@ -43,6 +45,37 @@ uint32_t g_freertos_kernel_sp;  /* read by port.S — must be uint32_t */
 /* ── Critical-section nesting counter ─────────────────────────────────── */
 uint32_t uxPortCriticalNesting = 0;
 
+/* ── Task return ───────────────────────────────────────────────────────── */
+/*
+ * A task function must not return; one that wants to end calls
+ * vTaskDelete(NULL).  Every task is entered as if called (ABI.md: [SP] is the
+ * return address), with configTASK_RETURN_ADDRESS as that address: by
+ * default vPortTaskReturnPoint, in port.S's vPortTaskReturn, which calls
+ * vPortTaskExitError.  That deletes the task on its behalf (as the FreeRTOS
+ * POSIX port does after its task function returns), or, without
+ * INCLUDE_vTaskDelete, fails configASSERT and stops with interrupts off (the
+ * FreeRTOS ports' prvTaskExitError).  Above the return address is a 0, the
+ * return address of a configTASK_RETURN_ADDRESS function the task's RET
+ * enters directly: an unwinder stops there, and nothing above the stack is
+ * read.
+ */
+void vPortTaskExitError(void);
+void vPortTaskExitError(void) {
+#if INCLUDE_vTaskDelete == 1
+    vTaskDelete(NULL);
+#else
+    configASSERT(0);
+#endif
+    portDISABLE_INTERRUPTS();
+    for (;;) {
+    }
+}
+
+#ifndef configTASK_RETURN_ADDRESS
+extern void vPortTaskReturnPoint(void);   /* port.S */
+#define configTASK_RETURN_ADDRESS vPortTaskReturnPoint
+#endif
+
 /* ── pxPortInitialiseStack ─────────────────────────────────────────────── */
 
 StackType_t *pxPortInitialiseStack(StackType_t *pxTopOfStack,
@@ -59,6 +92,13 @@ StackType_t *pxPortInitialiseStack(StackType_t *pxTopOfStack,
      *
      * We build from pxTopOfStack downward to match this layout.
      */
+
+    /* A 0, then the task function's return address: configTASK_RETURN_ADDRESS
+       (see "Task return" above). */
+    *pxTopOfStack = 0;
+    pxTopOfStack--;
+    *pxTopOfStack = (uint64_t)(uint32_t)(unsigned long)configTASK_RETURN_ADDRESS;
+    pxTopOfStack--;
 
     /* Hardware IRET frame: INT_MASK[0]=1 so timer fires immediately on task
        entry; flags=0; PC = task entry function. */

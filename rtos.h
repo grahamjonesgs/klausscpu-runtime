@@ -71,6 +71,9 @@ static inline void rtos_mutex_unlock(void) { REG_INT_MASK = 1; }
 void     rtos_init(void);
 int      task_create(const char *name, void (*entry)(void));
 void     rtos_start(void);           // installs timer, launches first task, never returns
+// End the calling task (it is not scheduled again).  A task entry function
+// that returns does the same.
+__attribute__((noreturn)) void rtos_task_exit(void);
 uint32_t rtos_task_switches(int id); // query context-switch count for task id
 
 // Yield the CPU to the next ready task immediately.  The caller resumes

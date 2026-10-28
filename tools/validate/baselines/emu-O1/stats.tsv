@@ -31,10 +31,11 @@ test_fatfs_printf	43578	10160
 test_flags	527419	42560
 test_fp	239987	17160
 test_printf	110515	10896
-test_rtos	nohalt	13024
+test_rtos	nohalt	13136
 test_sd	12914433	34808
 test_setjmp	124089	11648
 test_switch	83863	12136
-test_sync	nohalt	13320
+test_sync	nohalt	13416
+test_task_exit	2972140	12288
 test_unaligned	13195953	16944
 test_varargs	45532	10408

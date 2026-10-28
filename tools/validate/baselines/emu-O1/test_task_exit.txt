@@ -1,0 +1,8 @@
+--- Captured UART output ---
+=== KlaussCPU RTOS: tasks that end ===
+timer_handler[0]    = 0x64000000 (expect 0x00004000 = push r0)
+[ret ] work = 5712, returning
+[exit] calling rtos_task_exit
+ended tasks scheduled again: no
+test_task_exit PASSED
+--- end UART ---

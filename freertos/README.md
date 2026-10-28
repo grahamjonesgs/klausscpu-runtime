@@ -54,7 +54,12 @@ Per-task frame in memory (low → high address, SP saved at lowest):
 ```
 
 `pxPortInitialiseStack` builds this layout, returning the R15 slot address
-as the new `pxTopOfStack`.
+as the new `pxTopOfStack`.  Above a new task's hw_frame it puts the task
+function's return address, `configTASK_RETURN_ADDRESS` (default
+`vPortTaskReturnPoint` in port.S, which calls `vPortTaskExitError`: the
+task is deleted, as the FreeRTOS POSIX port does for a task function that
+returns), and a 0 at the top of the stack.  `make task_return.elf` is the
+emulator test (`klausscc --emulate -i task_return.elf`, exit status 0).
 
 ## Key design decisions
 

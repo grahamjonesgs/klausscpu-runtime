@@ -28,6 +28,8 @@ uint32_t g_tick_count;
 
 // ── task_create ────────────────────────────────────────────────────────────
 
+extern void rtos_task_return_point(void);   // context_switch.S
+
 int task_create(const char *name, void (*entry)(void)) {
     if (n_tasks >= RTOS_MAX_TASKS) return -1;
 
@@ -40,6 +42,13 @@ int task_create(const char *name, void (*entry)(void)) {
     // Build initial stack frame as if the task was interrupted before starting.
     // Stack grows downward; start from the top.
     uint64_t *sp = sk + RTOS_STACK_WORDS;
+
+    // The task is entered as if called (ABI.md: [SP] is the return address):
+    // an entry function that returns goes to rtos_task_return_point
+    // (context_switch.S), which calls rtos_task_exit.  The 0 above it ends
+    // the stack for anything that reads one word further.
+    *--sp = 0;
+    *--sp = (uint64_t)(uint32_t)(unsigned long)rtos_task_return_point;
 
     // Fake IRET context slot: bits[31:0] = entry PC, bits[42:39] = INT_MASK=1.
     // IRET will restore PC = entry and re-enable the timer interrupt.
@@ -59,6 +68,18 @@ int task_create(const char *name, void (*entry)(void)) {
 
     n_tasks++;
     return t->id;
+}
+
+// ── rtos_task_exit ─────────────────────────────────────────────────────────
+// Ends the calling task: it is never scheduled again.  A task entry function
+// that returns comes here too.  When no other task is ready the scheduler
+// keeps the current one, so this loops, yielding, until one is.
+
+void rtos_task_exit(void) {
+    rtos_mutex_lock();
+    g_current_tcb->state = TASK_DEAD;
+    for (;;)
+        rtos_yield();
 }
 
 // ── tick_count_update ──────────────────────────────────────────────────────
