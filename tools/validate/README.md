@@ -22,6 +22,11 @@ Each run writes into `-o <outdir>` (default
 `${VALIDATE_OUT:-${TMPDIR:-/tmp}/klausscpu-validate}/<mode>-<time>`), ends
 with `validate <mode>: PASSED` or `FAILED`, and exits 0 or 1.  Every check's
 log is in the output directory; `summary.txt` repeats the PASS/FAIL lines.
+A full run needs about 300 MB in the output directory while it runs (the
+oracle alone is 80 MB).  On a tmpfs `/tmp` with a per-user quota, a full
+quota makes builds and links fail ("Disk quota exceeded", even a linker bus
+error): that shows up as FAILs, never as a PASS, but it is not a compiler
+problem.
 
 ## What it needs
 
@@ -30,7 +35,7 @@ log is in the output directory; `summary.txt` repeats the PASS/FAIL lines.
 | `KLAUSSCPU_LLVM_BIN` | the toolchain's `bin/` (default `<runtime>/../klausscpu-llvm/build/bin`) |
 | `KLAUSSCPU_LLVM_SRC` | the klausscpu-llvm source tree, for the compiler-rt sources, lit and the oracle's test inputs (default `$KLAUSSCPU_LLVM_BIN/../..`) |
 | `KLAUSSCC` | klausscc (default `<runtime>/../klausscc/target/release/klausscc`, then `klausscc` on `PATH`).  The emulator and the board loader. |
-| `BOARD_LOCK` | every board command runs under `flock $BOARD_LOCK`, so several sessions can share the board (default `${XDG_RUNTIME_DIR:-/tmp}/klausscpu-board.lock`; everyone sharing the board must use the same file) |
+| `BOARD_LOCK` | every board command runs under `flock $BOARD_LOCK`, so several sessions can share the board (default `${XDG_RUNTIME_DIR:-/tmp}/klausscpu-board.lock`; everyone sharing the board must use the same file, and the board modes print the one they use in their first lines) |
 | `JOBS` | parallel jobs (default `nproc`) |
 | `KLAUSSCPU_BOARD_IP`, `KLAUSSCPU_SSH_PASS` | the board's address for the Zephyr VNC grabs and SSH session (default 192.168.68.59, and ssh_server.c's default password) |
 | `ZEPHYR_WS` | the west workspace (default `<runtime>/zephyr-ws`) |
@@ -40,7 +45,8 @@ The runtime checkout must have its gitignored prerequisites: `picolibc-install`
 (`./build-picolibc.sh`), and for the network programs `lwip` (`./get-lwip.sh`);
 for Zephyr the west workspace, the wolfSSL/wolfSSH sources and doomgeneric.
 In a fresh clone, `validate.sh deps <other checkout>` symlinks all of them
-from an existing checkout instead.  The benchmark sources are fetched on
+from an existing checkout instead (and lists the links in
+`.git/info/exclude`, so `git status` and `git add -A` leave them alone).  The benchmark sources are fetched on
 first use if `baremetal/benchmarks/{coremark,embench-iot}` are missing.
 
 The harness never builds in the checkout: each bare-metal build runs in a
@@ -56,11 +62,16 @@ several runs can go at once.  `make clean` in `baremetal/` is not needed.
 `baselines/emu-O2`, after filtering the lines that change legitimately with
 code generation (cycle and time figures, addresses, the loader's lines, the
 interrupt race count in test_atomic, Zephyr log timestamps: `uart_filter` in
-`common.sh`).  A program that does not halt (the network demos, adventure)
-is compared on its first 12 lines.  It also prints the emulator instruction
-count and `.text` size of every program that changed, the totals, and a WARN
-for any program that grew by more than `STATS_TOL` (2%).  Then 4 ABI
-conformance seeds and 30 Csmith seeds.
+`common.sh`; a line that starts with `PASS` or `FAIL` is always kept).
+How each run ended must match the baseline too (`baselines/*/stop.tsv`:
+`Halt`, `InstructionCap`, `Trap`, `InvalidOpcode`, ...): a program that used
+to halt and now hangs, traps or is killed fails with `STOP <prog>: Halt ->
+<new>` even when every line it printed is the same.  A program that never
+halts on the emulator (the network demos, adventure: stopped by the cap) is
+compared on its first 12 lines, every other one on its whole output.  It
+also prints the emulator instruction count and `.text` size of every program
+that changed, the totals, and a WARN for any program that grew by more than
+`STATS_TOL` (2%).  Then 4 ABI conformance seeds and 30 Csmith seeds.
 
 **full** — quick, plus 300 Csmith seeds at -O0/-O1/-O2/-Os (from
 `CSMITH_SEED`, default 1), 150 `--float` seeds, 30 ABI seeds, the KlaussCPU
@@ -94,8 +105,26 @@ irq_soak and gui_lvgl figures go through `perf.py` like the board's.
 with undefined behaviour that the host can see are discarded first: the host
 build under `-fsanitize=undefined,address,float-cast-overflow` must run clean
 and print the same checksum (status `host-ub`).  Packed structs are off.
-Results in `csmith/results.tsv` (`seed opt status host target`), failing
-seeds' sources in `csmith/fail/`.  `CSMITH_OPTS=--float` for the FP runs.
+Results in `csmith/results.tsv` (`seed opt status host target
+instructions`), failing seeds' sources, outputs and ELFs in `csmith/fail/`.
+A run must end in HALT: a trap or other abnormal stop is `stop-<reason>`
+(a failure) even after a correct checksum.  When one level runs past the
+2G-instruction cap while another level of the same seed halts with the
+right checksum, that level is run again with `EMU_RETRY_MAX` (2e10, about
+two minutes): it must then halt with the right checksum (`ok-long`) or the
+seed fails as `HANG`.  A slow -O0 build of a loop the optimiser removed is
+the usual reason (seed 120376 with `--float`: 103K instructions at -O1,
+10.4G at -O0); a miscompiled infinite loop is the one to catch.  When every
+level hits the cap, the program is just long (`instr-cap`, not a failure).
+`CSMITH_OPTS=--float` for the FP runs.  Csmith's `--float` programs often
+pass a `float *` where an `int32_t *` is expected (128 of 150 seeds from
+121300; no integer seed tried does): reading a float through an int lvalue
+is aliasing UB the sanitizers cannot see, and TBAA then changes the result
+(seed 121439: a different checksum at -O1 and above, the same one on host
+clang -O1 for x86, the right one with `-fno-strict-aliasing`).  A seed
+whose source has incompatible pointer types is therefore built with
+`-fno-strict-aliasing` (listed in `csmith/no-strict-aliasing.txt`, counted
+in the summary); every other seed keeps TBAA.
 The C library follows the toolchain's ABI (the low byte of `e_flags`): an
 ABI-0 toolchain (before klausscpu-llvm's ABI v2) links
 `picolibc-install-oldabi`, since lld refuses to mix ABI versions.
@@ -109,8 +138,11 @@ emulator: an emulator bug, kept there too); or `COMPILER` (emulator = board
 != host: a compiler bug, in `csmith-board/compiler/`).  Seeds whose emulator
 run exceeds `EMU_MAX_INSTRUCTIONS` (300M) are not run on the board
 (`skip-long`), nor are programs with more than `MAX_TEXT` bytes of .text
-(`skip-big`); Csmith's default programs need well under 1M instructions and
-load in under a second.
+(`skip-big`).  A `skip-long` level of a seed whose other level was
+`all-equal` gets the same `EMU_RETRY_MAX` re-run on the emulator as above
+(`skip-long-ok`, or `HANG`).  The board run must print `CPU halted` too.
+Csmith's default programs take about 150K instructions on average and a few
+million at most (2.5M in 858 runs), and load in under a second.
 
 **abi [N] [FIRST]** — `abi-test/run_abi_test.sh` (generated caller/callee
 pairs in separate translation units, every mix of -O0/-O1/-O2/-Os, against
@@ -124,6 +156,15 @@ Disassembler tests, and llc -O0/-O1/-O2 of every CodeGen test.
 `oracle_diff.sh A B` lists every file that differs.  Use it to show that a
 refactor changes no output.
 
+**selftest [EMU_RUN [BOARD_RUN]]** — `selftest.sh`, fault injection for
+the harness itself: it tampers with copies of a -O1 emulator run (and of a
+board run when one is given) and checks that `compare.sh` catches a program
+that hangs part-way, traps after its last line, is killed, starts halting,
+changes an early line, or goes missing, a `PASS` line that turns into
+`FAIL`, and a board program that stops halting; then that Csmith flags a
+trap after a good checksum and a level that only halts with the larger cap
+(`ok-long`) or not at all (`HANG`).  Run it after changing any script here.
+
 **baseline DIR...** — after an intended change of output or performance,
 rewrite the baselines from the output directories of quick, board and/or
 zephyr runs: `baselines/emu-O1`, `emu-O2`, `board-O1` (filtered UART text and
@@ -133,8 +174,11 @@ of each existing metric are kept).  Commit the result with the change.
 ## Baselines
 
 `baselines/emu-O1/`, `baselines/emu-O2/`: the filtered UART output of every
-bare-metal program, and `stats.tsv` (emulator instructions, `.text` bytes).
-`baselines/board-O1/`: the same for the board suite.  `baselines/perf.tsv`:
+bare-metal program, `stats.tsv` (emulator instructions, `nohalt` for a
+program that ran into the cap, `.text` bytes) and `stop.tsv` (how each run
+ended).  `baselines/board-O1/`: the UART output and `stop.tsv` of the board
+suite (`Halt`, or `none` for test_rtos and test_sync, which idle until the
+timeout).  `baselines/perf.tsv`:
 one board metric per line — key, value, the better direction (`lower`,
 `higher`, or `info`: reported, never judged) and the tolerance in percent.
 `validate.sh board` and `zephyr` flag a metric that got worse by more than its
@@ -143,6 +187,24 @@ within a few cycles (kernels that miss the cache vary a little with DDR
 refresh), so the bare-metal tolerances are tight (0.2-0.5%); the Zephyr
 figures are wall-clock rates and are looser (1-10%).  The file's comments
 name the toolchain each figure came from.
+
+### Expected FAIL lines
+
+The baselines are what the programs print today, not a list of what works,
+and some of it is a known failure that no compiler change should alter; a
+change in any of it is a regression like any other.
+
+- Emulator (no model of these peripherals): `test_sd`, `fs_demo`, `loader`
+  and the FatFs part of `test_big` (no SD card: `f_mount` fails with 3);
+  `blit_selftest` and `blit_capture` (no blitter); `crypto_test` (no
+  AES engine: the result reads 0); `test_eth` (`[FAIL] scratch`: the
+  Ethernet controller's scratch register reads 0, and the test stops
+  there); `test_cache` (`Geometry check: FAIL`: the cache-info register
+  reads 0).
+- Board: `test_cache` `Geometry check: FAIL` (the test expects 2048 sets,
+  the cache reports 2 ways x 1024 sets, 64 KB: a stale expectation in the
+  test); `test_big` `FAIL read hello.txt` (the SD card in the board has no
+  `hello.txt`; the other FatFs checks pass).
 
 ## Scripts
 
@@ -157,6 +219,7 @@ name the toolchain each figure came from.
 | `perf.py` | extract board figures; compare with or merge into a baseline |
 | `csmith_run.sh`, `csmith_board.sh`, `csmith_lib.sh` | Csmith on the emulator / on the board and the emulator |
 | `oracle.sh`, `oracle_diff.sh` | output-byte snapshot and diff |
+| `selftest.sh <out> <emu-O1 run> [<board-O1 run>]` | fault injection for compare.sh and the Csmith scripts |
 | `zephyr/suite.sh` | Zephyr build, emulator and board runs; `zephyr/build.sh <app> <dir>` builds one app; `zephyr/sshrun.sh` drives an SSH session; `zephyr/vncgrab.py` grabs a VNC frame |
 
 The perf_haz program (the per-kernel hazard breakdown: data, load-use,

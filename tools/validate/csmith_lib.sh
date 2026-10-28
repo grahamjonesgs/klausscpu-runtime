@@ -10,6 +10,17 @@
 # (--no-packed-struct): they give misaligned accesses that the host cannot
 # flag when its own layout happens to be aligned.
 #
+# Csmith's --float programs often pass a float * where an int32_t * is
+# expected (128 of seeds 121300-121449; no integer-only seed in 121000-121149
+# does).  Reading a float through an int32_t lvalue breaks C's aliasing rules
+# and neither sanitizer sees it, and TBAA then legitimately changes the
+# result: seed 121439 --float gives a different checksum at -O1/-O2/-Os, the
+# same on host clang -O1 for x86, and the right one with
+# -fno-strict-aliasing.  So a seed whose source has incompatible pointer
+# types (gcc -Werror=incompatible-pointer-types) is built for KlaussCPU with
+# -fno-strict-aliasing (SEED_CFLAGS; the seeds are listed in
+# <outdir>/no-strict-aliasing.txt), and every other seed keeps TBAA.
+#
 #   CSMITH        csmith binary            (default: csmith on PATH)
 #   CSMITH_INC    csmith runtime headers   (default /usr/include/csmith)
 #   CSMITH_OPTS   extra csmith options     (e.g. --float for the FP runs)
@@ -50,7 +61,8 @@ csmith_rt() {
 }
 
 # csmith_gen <seed> -- in the current directory: generate t.c, build and run
-# the host reference.  Prints nothing and sets REF on success; otherwise
+# the host reference.  Prints nothing and sets REF (and SEED_CFLAGS, see
+# above) on success; otherwise
 # prints the seed's status line (gen-fail, host-cc-fail, host-timeout,
 # host-ub) and returns 1.
 csmith_gen() {
@@ -60,6 +72,9 @@ csmith_gen() {
     { printf '%s\t-\tgen-fail\t-\t-\n' "$seed"; return 1; }
   gcc -w -fpermissive -O0 -I"$CSI" t.c -o host 2>/dev/null ||
     { printf '%s\t-\thost-cc-fail\t-\t-\n' "$seed"; return 1; }
+  SEED_CFLAGS=
+  gcc -fsyntax-only -w -Werror=incompatible-pointer-types -I"$CSI" t.c 2>/dev/null ||
+    { SEED_CFLAGS=-fno-strict-aliasing; echo "$seed" >>"$OUT/no-strict-aliasing.txt"; }
   REF=$(timeout 10 ./host | grep -o 'checksum = [0-9A-F]*' | cut -d' ' -f3)
   [ -n "$REF" ] || { printf '%s\t-\thost-timeout\t-\t-\n' "$seed"; return 1; }
   gcc -w -fpermissive -O0 -I"$CSI" -fsanitize=undefined,address,float-cast-overflow \
@@ -73,7 +88,8 @@ csmith_gen() {
 # ST to cc-fail or ld-fail and return 1.
 csmith_build() {
   local O=$1
-  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS $O -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
+  # shellcheck disable=SC2086
+  if ! timeout 300 "$LLVM_BIN/clang" $CFLAGS $O ${SEED_CFLAGS:-} -I"$CSI" -c t.c -o "t$O.o" 2>"cc$O.err"; then
     ST=cc-fail; return 1
   fi
   # shellcheck disable=SC2086
@@ -84,3 +100,38 @@ csmith_build() {
 }
 
 checksum_of() { grep -ao 'checksum = [0-9A-F]*' "$1" | head -1 | cut -d' ' -f3; }
+
+# csmith_classify <emulator-capture> -- sets G (checksum, or -), NI
+# (instructions, or -) and ST from how the run ended:
+#   ok / MISMATCH / no-output   halted; checksum equal to REF / different / none
+#   instr-cap                   ran past the instruction cap (no verdict yet)
+#   stop-<reason>               any other end (Trap, InvalidOpcode, ...; "none"
+#                               when the emulator was killed by its timeout):
+#                               always a failure, even after a good checksum
+csmith_classify() {
+  local s
+  G=$(checksum_of "$1"); G=${G:--}
+  NI=$(emu_instructions "$1"); NI=${NI:--}
+  s=$(stop_of "$1")
+  case $s in
+    Halt) if [ "$G" = - ]; then ST=no-output; elif [ "$G" = "$REF" ]; then ST=ok; else ST=MISMATCH; fi ;;
+    InstructionCap) ST=instr-cap ;;
+    *) ST=stop-$s ;;
+  esac
+}
+
+# csmith_recheck <opt> -- t<opt>.elf ran past the instruction cap while
+# another level of the same seed halted with the right checksum.  That is
+# usually a slow -O0 build of a loop the optimiser removed (seed 120376
+# --float: 103K instructions at -O1, 10.4G at -O0), but it could be a
+# miscompiled infinite loop, so the level is run again with a much larger cap
+# (EMU_RETRY_MAX, default 2e10, about 2 minutes; EMU_RETRY_TIMEOUT seconds,
+# default 1800).  Sets G, NI and ST as csmith_classify does, except that a
+# good result is ok-long and a run that still does not halt is HANG (a
+# failure).
+csmith_recheck() {
+  local O=$1
+  emu "${EMU_RETRY_MAX:-20000000000}" "t$O.elf" "emu$O.long.out" "${EMU_RETRY_TIMEOUT:-1800}"
+  csmith_classify "emu$O.long.out"
+  case $ST in ok) ST=ok-long ;; instr-cap|stop-none) ST=HANG ;; esac
+}

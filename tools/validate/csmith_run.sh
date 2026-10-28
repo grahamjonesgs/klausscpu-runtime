@@ -7,12 +7,22 @@
 # undefined-behaviour screen and the environment variables.
 #
 # Appends to <outdir>/results.tsv one line per seed and level:
-#   seed  opt  status  host-checksum  klausscpu-checksum
-# status: ok, MISMATCH, no-output, cc-fail, ld-fail, instr-cap (the program
-# ran past the instruction cap: not a failure), or, for the whole seed,
-# gen-fail, host-cc-fail, host-timeout, host-ub (discarded).  The source and
-# outputs of every seed with a failure are kept in <outdir>/fail/<seed>/.
-# Prints the status counts; exits 1 if any seed failed.
+#   seed  opt  status  host-checksum  klausscpu-checksum  instructions
+# status:
+#   ok            halted with the host's checksum
+#   ok-long       ran past the instruction cap while another level of the same
+#                 seed halted, then halted with the right checksum under the
+#                 larger EMU_RETRY_MAX cap (csmith_recheck in csmith_lib.sh)
+#   instr-cap     ran past the cap, and so did every other level: a long
+#                 program, not a failure
+#   HANG          still running at EMU_RETRY_MAX while another level halted:
+#                 a likely miscompiled infinite loop
+#   MISMATCH, no-output, stop-<reason> (a trap or other abnormal end, even
+#                 after a good checksum), cc-fail, ld-fail
+#   gen-fail, host-cc-fail, host-timeout, host-ub (for the whole seed:
+#                 discarded)
+# The source and outputs of every seed with a failure are kept in
+# <outdir>/fail/<seed>/.  Prints the status counts; exits 1 if any seed failed.
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
 . "$(dirname "$0")/csmith_lib.sh"
@@ -23,28 +33,34 @@ MAXI=${EMU_MAX_INSTRUCTIONS:-2000000000}
 mkdir -p "$OUT/fail" "$OUT/work"
 csmith_rt "$OUT"
 one() {
-  local seed=$1 W=$OUT/work/$1 bad=0 O got
+  local seed=$1 W=$OUT/work/$1 bad=0 halted=0 O i
+  local -a opt st got cnt
   mkdir -p "$W"; cd "$W" || return
   if csmith_gen "$seed"; then
+    i=0
     for O in $OPTS; do
-      got=-
+      G=-; NI=-
       if csmith_build "$O"; then
         emu "$MAXI" "t$O.elf" "emu$O.out"
-        got=$(checksum_of "emu$O.out")
-        if [ -z "$got" ] && grep -q 'stop = InstructionCap' "emu$O.out"; then ST=instr-cap; got=-
-        elif [ -z "$got" ]; then ST=no-output; got=-
-        elif [ "$got" = "$REF" ]; then ST=ok
-        else ST=MISMATCH; fi
+        csmith_classify "emu$O.out"
+        [ "$ST" = ok ] && halted=1
       fi
-      case $ST in ok|instr-cap) ;; *) bad=1 ;; esac
-      printf '%s\t%s\t%s\t%s\t%s\n' "$seed" "$O" "$ST" "$REF" "$got"
+      opt[i]=$O; st[i]=$ST; got[i]=$G; cnt[i]=$NI; i=$((i + 1))
+    done
+    for i in "${!opt[@]}"; do
+      if [ "${st[i]}" = instr-cap ] && [ $halted = 1 ]; then
+        csmith_recheck "${opt[i]}"; st[i]=$ST; got[i]=$G; cnt[i]=$NI
+      fi
+      case ${st[i]} in ok|ok-long|instr-cap) ;; *) bad=1 ;; esac
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$seed" "${opt[i]}" "${st[i]}" "$REF" "${got[i]}" "${cnt[i]}"
     done
   fi
-  if [ $bad = 1 ]; then mkdir -p "$OUT/fail/$seed"; cp t.c ./*.err emu*.out "$OUT/fail/$seed/" 2>/dev/null; fi
+  if [ $bad = 1 ]; then mkdir -p "$OUT/fail/$seed"; cp t.c ./*.err emu*.out t*.elf "$OUT/fail/$seed/" 2>/dev/null; fi
   cd "$OUT" && rm -rf "$W"
 }
-export -f one csmith_gen csmith_build checksum_of emu
+export -f one csmith_gen csmith_build csmith_classify csmith_recheck checksum_of emu emu_instructions stop_of
 export OUT OPTS MAXI LLVM_BIN RT KLAUSSCC CSMITH CSI CFLAGS RTOBJS PICO CSMITH_OPTS
 seq "$FIRST" $((FIRST + COUNT - 1)) | xargs -P "$JOBS" -I{} bash -c 'one {}' >>"$OUT/results.tsv"
 awk -F'\t' '{c[$3]++} END{for (k in c) print k, c[k]}' "$OUT/results.tsv" | sort
-! awk -F'\t' '$3!="ok" && $3!="instr-cap" && $3!="host-timeout" && $3!="host-ub" && $3!="gen-fail" && $3!="host-cc-fail"' "$OUT/results.tsv" | grep -q .
+[ -s "$OUT/no-strict-aliasing.txt" ] && echo "no-strict-aliasing $(sort -u "$OUT/no-strict-aliasing.txt" | wc -l)"
+! awk -F'\t' '$3 !~ /^(ok|ok-long|instr-cap|host-timeout|host-ub|gen-fail|host-cc-fail)$/' "$OUT/results.tsv" | grep -q .

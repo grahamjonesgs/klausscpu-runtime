@@ -65,8 +65,14 @@ emu() {
 # uart_filter <capture> -- the program's UART text with the lines that change
 # legitimately with code generation or timing removed (cycle counts, timers,
 # addresses, the loader's progress lines, interrupt-count races; Zephyr log
-# timestamps and colour codes are stripped).  Everything
-# else (self-check results, computed values) must not change.
+# timestamps and colour codes are stripped).  Everything else (self-check
+# results, computed values) must not change.  A line that starts with PASS or
+# FAIL is a self-check result and is always kept, whatever else it mentions
+# (e.g. crypto_selftest's "PASS  SHA256 ... (55 bytes)").
+UART_DROP1='^[0-9]{2}:[0-9]{2}:[0-9]{2}|DMIPS|tick count|Sent |bytes|baud'
+UART_DROP2='time=|cycles|CPI|instr=|Calibrated|iterations|Dhrystones|DMIPS|us/run|ms/run|FASTPATH|^mix|^cyc:|^cache:|^branch:|^CSV|^HAZ,|^haz:|Microseconds|per Second|Emulator finished|Arr_2_Glob|^Cycles|^Instructions +:|/Dhrystone|time +:|CLOCK_MS|addr +=|INT_VEC|Runs +:|0x0000[0-9a-f]{4}$'
+UART_DROP3='Sending to board|Completed with|heap_start|^ +sample: |^ +(wbacks|stalls|rd|wr|hits|miss|evict|total)[a-z_]* *:|bigdir|entries|ISR increments; plain counter lost'
+export UART_DROP1 UART_DROP2 UART_DROP3
 uart_filter() {
   local f=$1
   {
@@ -78,16 +84,27 @@ uart_filter() {
       cat "$f"
     fi
   } | tr -d '\r' | sed -E 's/\x1b\[[0-9;]*m//g; s/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3},[0-9]{3}\] //' \
-    | grep -avE '^[0-9]{2}:[0-9]{2}:[0-9]{2}|DMIPS|tick count|Sent |bytes|baud' \
-    | grep -avE 'time=|cycles|CPI|instr=|Calibrated|iterations|Dhrystones|DMIPS|us/run|ms/run|FASTPATH|^mix|^cyc:|^cache:|^branch:|^CSV|^HAZ,|^haz:|Microseconds|per Second|Emulator finished|Arr_2_Glob|^Cycles|^Instructions +:|/Dhrystone|time +:|CLOCK_MS|addr +=|INT_VEC|Runs +:|0x0000[0-9a-f]{4}$' \
-    | grep -avE 'Sending to board|Completed with|heap_start|^ +sample: |^ +(wbacks|stalls|rd|wr|hits|miss|evict|total)[a-z_]* *:|bigdir|entries|ISR increments; plain counter lost'
+    | LC_ALL=C awk '/^[ \t]*(PASS|FAIL)/ { print; next }
+        $0 !~ ENVIRON["UART_DROP1"] && $0 !~ ENVIRON["UART_DROP2"] && $0 !~ ENVIRON["UART_DROP3"]'
+}
+
+# stop_of <capture> -- why the run ended: the emulator's stop reason (Halt,
+# InstructionCap, Trap, InvalidOpcode, PcOutOfRange, WaitForever), Halt for a
+# board run that printed "CPU halted", and "none" otherwise (a board run
+# stopped by its timeout, or an emulator run killed by its own timeout).
+stop_of() {
+  local s
+  s=$(grep -ao 'stop = [A-Za-z]*' "$1" | head -1)
+  if [ -n "$s" ]; then echo "${s#stop = }"
+  elif grep -aq 'CPU halted' "$1"; then echo Halt
+  else echo none; fi
 }
 
 # uart_lines <capture> -- how many filtered lines to compare: a run stopped by
 # the instruction cap (a program that never halts on the emulator) is compared
 # on its first 12 lines only.
 uart_lines() {
-  if grep -aq 'stop = InstructionCap' "$1"; then echo 12; else echo 100000; fi
+  if [ "$(stop_of "$1")" = InstructionCap ]; then echo 12; else echo 100000; fi
 }
 
 # emu_instructions <capture> -- instructions the emulator executed.

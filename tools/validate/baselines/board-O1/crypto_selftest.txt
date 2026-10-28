@@ -21,6 +21,9 @@ PASS  GCM tamper detection
 PASS  SHA256("")
 PASS  SHA256("abc")
 PASS  SHA256(448-bit)
+PASS  SHA256 streaming == one-shot (55 bytes)
+PASS  SHA256 two-block padding edge case (56 bytes)
+PASS  SHA256 streaming 3-block (130 bytes)
 
 === HMAC-SHA-256 (RFC 4231) ===
 PASS  HMAC TC1 (sw)

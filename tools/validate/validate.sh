@@ -19,6 +19,9 @@
 #                         the emulator AND the board: board vs emulator vs host
 #   abi [N] [FIRST]       N ABI conformance seeds (default 8)
 #   oracle [BASE]         snapshot the toolchain's output bytes; diff with BASE
+#   selftest [EMU_RUN [BOARD_RUN]]  fault injection for the harness itself
+#                         (selftest.sh); runs the -O1 corpus first unless an
+#                         emu_suite.sh -O1 output dir is given
 #   baseline DIR...       rewrite baselines/ from the output dirs of a quick,
 #                         board and/or zephyr run (after an intended change)
 #   deps CHECKOUT         link the gitignored prerequisites (picolibc-install,
@@ -48,7 +51,13 @@ if [ "$MODE" = deps ]; then
            zephyr-ws/zephyr zephyr-ws/modules zephyr-ws/.west zephyr-ws/.venv \
            zephyr-ws/klausscpu-zephyr/apps/doom/doomgeneric-src \
            baremetal/benchmarks/coremark baremetal/benchmarks/embench-iot; do
-    if [ -e "$SRC/$p" ] && [ ! -e "$RT/$p" ]; then ln -s "$SRC/$p" "$RT/$p" && echo "linked $p"; fi
+    if [ -e "$SRC/$p" ] && [ ! -e "$RT/$p" ]; then
+      ln -s "$SRC/$p" "$RT/$p" && echo "linked $p"
+      # .gitignore names these as directories ("lwip/"), which does not match
+      # a symlink: keep the links out of 'git status' and 'git add -A'.
+      ex=$(git -C "$RT" rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null) &&
+        { mkdir -p "$(dirname "$ex")"; grep -qxF "/$p" "$ex" 2>/dev/null || echo "/$p" >>"$ex"; }
+    fi
   done
   exit 0
 fi
@@ -67,6 +76,7 @@ run() {      # run <check> <logfile> <command...> -- PASS/FAIL on the command's 
   else result FAIL "$name" "see $log"; fi
 }
 echo "validate $MODE: toolchain $(toolchain_id) (KLAUSSCPU_LLVM_BIN=$LLVM_BIN), klausscc $KLAUSSCC, output $OUT"
+case $MODE in board|zephyr|csmith-board) echo "validate $MODE: board lock $BOARD_LOCK (every session sharing the board must use the same file)" ;; esac
 
 emu_corpus() {
   local O
@@ -77,7 +87,7 @@ emu_corpus() {
     else
       result FAIL "emulator corpus $O" "$(grep -E '^uart:|^build errors' "$OUT/emu$O.cmp" | tr '\n' ' ') -- see $OUT/emu$O.cmp"
     fi
-    grep -E 'WARN|^instructions|^\.text' "$OUT/emu$O.cmp" | sed 's/^/     /'
+    grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF)|WARN|^instructions|^\.text' "$OUT/emu$O.cmp" | sed 's/^/     /'
   done
 }
 abi() {   # abi <count> [first]
@@ -85,12 +95,12 @@ abi() {   # abi <count> [first]
     "$RT/abi-test/run_abi_test.sh" "${2:-1}" "$1"
   rm -rf "$OUT/abi"
 }
-csmith() {   # csmith <name> <first> <count> [CSMITH_OPTS]
-  local d=$OUT/$1
-  if CSMITH_OPTS=${4:-} "$HERE/csmith_run.sh" "$2" "$3" "$d" >"$d.log" 2>&1; then
-    result PASS "$1 ($3 seeds from $2)" "$(tr '\n' ' ' <"$d.log")"
+csmith() {   # csmith <name> <first> <count> [CSMITH_OPTS, default: $CSMITH_OPTS]
+  local d=$OUT/$1 o=${4-${CSMITH_OPTS:-}}
+  if CSMITH_OPTS=$o "$HERE/csmith_run.sh" "$2" "$3" "$d" >"$d.log" 2>&1; then
+    result PASS "$1 ($3 seeds from $2${o:+ $o})" "$(tr '\n' ' ' <"$d.log")"
   else
-    result FAIL "$1 ($3 seeds from $2)" "$(tr '\n' ' ' <"$d.log") -- see $d/fail"
+    result FAIL "$1 ($3 seeds from $2${o:+ $o})" "$(tr '\n' ' ' <"$d.log") -- see $d/fail"
   fi
   rm -rf "$d/work"
 }
@@ -118,12 +128,12 @@ case $MODE in
 quick)
   emu_corpus
   abi 4
-  csmith csmith "${CSMITH_SEED:-1}" 30
+  csmith csmith "${CSMITH_SEED:-1}" 30 ""
   ;;
 full)
   emu_corpus
   abi 30
-  csmith csmith "${CSMITH_SEED:-1}" 300
+  csmith csmith "${CSMITH_SEED:-1}" 300 ""
   csmith csmith-float "$(( ${CSMITH_SEED:-1} + 300 ))" 150 --float
   lit
   "$HERE/oracle.sh" "$OUT/oracle" >"$OUT/oracle.log" 2>&1
@@ -140,6 +150,7 @@ board)
   else
     result FAIL "board suite -O1 (UART)" "$(grep '^uart:' "$OUT/board-O1.cmp") -- see $OUT/board-O1.cmp"
   fi
+  grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF)' "$OUT/board-O1.cmp" | sed 's/^/     /'
   if [ -s "$OUT/board-O1/repeat.txt" ]; then result FAIL "board repeat run" "$(tr '\n' ' ' <"$OUT/board-O1/repeat.txt")"
   else result PASS "board repeat run" "the runs agree"; fi
   if grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O1/summary.txt" | grep -q .; then
@@ -177,6 +188,11 @@ csmith-board)
   rm -rf "$OUT/csmith-board/work"
   ;;
 abi) abi "${1:-8}" "${2:-1}" ;;
+selftest)
+  E=${1:-}
+  if [ -z "$E" ]; then "$HERE/emu_suite.sh" "$OUT/emu-O1" -O1; E=$OUT/emu-O1; fi
+  run "harness self-test" "$OUT/selftest.log" "$HERE/selftest.sh" "$OUT/selftest" "$E" ${2:+"$2"}
+  ;;
 oracle)
   "$HERE/oracle.sh" "$OUT/oracle" >"$OUT/oracle.log" 2>&1
   if [ -n "${1:-}" ]; then run "oracle vs $1" "$OUT/oracle.diff" "$HERE/oracle_diff.sh" "$1" "$OUT/oracle"
@@ -191,6 +207,7 @@ baseline)
       for f in "$d/$sub"/*.out; do
         n=$(basename "$f" .out)
         uart_filter "$f" | head -"$(uart_lines "$f")" >"$BASE/$sub/$n.txt"
+        printf '%s\t%s\n' "$n" "$(stop_of "$f")" >>"$BASE/$sub/stop.tsv"
       done
       [ -f "$d/$sub/stats.tsv" ] && cp "$d/$sub/stats.tsv" "$BASE/$sub/"
       result PASS "baseline $sub" "from $d/$sub ($(toolchain_id))"
