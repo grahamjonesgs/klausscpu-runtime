@@ -120,7 +120,12 @@ in `zephyr/expect-emu.txt` and `zephyr/expect-board.txt`; the mandel, doom,
 irq_soak and gui_lvgl figures go through `perf.py` like the board's.
 `ZEPHYR_APPS` picks a subset, and `ZEPHYR_CMAKE_ARGS` adds `-D` options to
 every build (`-DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y` builds at -Oz,
-`-DCONFIG_LTO=y` with LTO; the expectations are the same).
+`-DCONFIG_LTO=y` with LTO; the expectations are the same).  The build step
+also runs two builds that must fail (`build-neg`; `ZEPHYR_NEG_CHECKS=0`
+skips them, a few seconds): hello with `CONFIG_DYNAMIC_INTERRUPTS=y` must stop
+at the port's `#error`, and `zephyr/build_assert_probe/` (a `BUILD_ASSERT(0)`)
+must stop at the static assertion, which shows the port's C11 keeps Zephyr's
+build-time checks live.
 
 **LLEXT extensions on the SD card** (not a validate.sh mode: it rewrites
 files on the card) — `zephyr/llext_sd.sh <outdir> [build] [backup] [upload]

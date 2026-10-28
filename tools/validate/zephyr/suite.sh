@@ -5,7 +5,10 @@
 #        copy zephyr.elf to <outdir>/elf/<app>.elf (logs in <outdir>/logs/);
 #        the build dir is removed afterwards unless KEEP_BUILD=1;
 #        ZEPHYR_CMAKE_ARGS adds -D options to every build (e.g.
-#        -DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y for -Oz, -DCONFIG_LTO=y)
+#        -DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y for -Oz, -DCONFIG_LTO=y);
+#        then two builds that must fail (skip with ZEPHYR_NEG_CHECKS=0):
+#        hello with CONFIG_DYNAMIC_INTERRUPTS=y (the port's #error), and
+#        build_assert_probe/ (a BUILD_ASSERT(0): the checks are live)
 # emu    run each ELF on the emulator for 200M instructions (<outdir>/emu/)
 #        and check expect-emu.txt: the expected lines, and a stop at the
 #        instruction cap (a trap or fault fails)
@@ -51,6 +54,19 @@ for step in $STEPS; do
         echo "FAIL build $a (see $OUT/logs/build-$a.log)"; fail=1
       fi
     done
+    if [ "${ZEPHYR_NEG_CHECKS:-1}" != 0 ]; then
+      # neg <label> <pattern> <app> [-D...]: the build must fail with <pattern>.
+      neg() {
+        local l=$1 re=$2 log="$OUT/logs/build-neg-$1.log"; shift 2
+        if "$HERE/build.sh" "$1" "$OUT/build/neg-$l" "${@:2}" >"$log" 2>&1; then
+          echo "FAIL build-neg $l: the build succeeded (see $log)"; fail=1
+        elif grep -aq -- "$re" "$log"; then echo "PASS build-neg $l: refused ($re)"
+        else echo "FAIL build-neg $l: failed without '$re' (see $log)"; fail=1; fi
+        rm -rf "$OUT/build/neg-$l"
+      }
+      neg dynamic_interrupts 'CONFIG_DYNAMIC_INTERRUPTS is not supported' hello -DCONFIG_DYNAMIC_INTERRUPTS=y
+      neg build_assert 'static assertion failed: KLAUSSCPU_BUILD_ASSERT_PROBE' "$HERE/build_assert_probe"
+    fi
     echo "toolchain $(toolchain_id)" >"$OUT/toolchain.txt"
     ;;
   emu)
