@@ -90,7 +90,7 @@ index dcbd441d0e1..349c7a0a152 100644
  				LOG_ERR("Invalid entry size %zd for SHT_RELA section %d",
  					(size_t)shdr->sh_entsize, i);
 diff --git a/subsys/llext/llext_load.c b/subsys/llext/llext_load.c
-index de3cdd6402b..4c203ab0802 100644
+index de3cdd6402b..22729545bd3 100644
 --- a/subsys/llext/llext_load.c
 +++ b/subsys/llext/llext_load.c
 @@ -184,6 +184,24 @@ static int llext_find_tables(struct llext_loader *ldr)
@@ -137,7 +137,16 @@ index de3cdd6402b..4c203ab0802 100644
  				LOG_ERR("Unsupported section flags for %s (region %d)",
  					name, mem_idx);
  				return -ENOEXEC;
-@@ -313,6 +339,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+@@ -295,6 +321,8 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+ 			region->sh_addr = address;
+ 			region->sh_offset = bot_ofs;
+ 			region->sh_size = top_ofs - bot_ofs;
++			region->sh_addralign = MAX(region->sh_addralign,
++						   shdr->sh_addralign);
+ 		}
+ 	}
+ 
+@@ -313,6 +341,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
  				continue;
  			}
  
@@ -155,7 +164,62 @@ index de3cdd6402b..4c203ab0802 100644
  			if (ldr->hdr.e_type == ET_DYN) {
  				/*
  				 * Test all merged VMA ranges for overlaps
-@@ -646,9 +683,13 @@ out:
+@@ -351,6 +390,39 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+ 		}
+ 	}
+ 
++	/*
++	 * A region is copied from the file as one block and its sections keep
++	 * their file-offset distances, so a section is aligned in memory only
++	 * if its offset from the region's start is.  The file offsets are
++	 * aligned, but the region starts at its first section, which may need
++	 * less alignment than a later one (.rodata.str1.1 then .rodata): start
++	 * an ET_REL region's copy at its offset rounded down to the largest
++	 * alignment in it (the bytes before the first section are unused).
++	 * The region's memory is allocated at least that aligned (llext_mem.c).
++	 * Done after the overlap test, which the extra bytes would trip, and
++	 * only for the code and data regions: the readers of the string,
++	 * symbol and export tables take their region to start at the section.
++	 */
++	if (ldr->hdr.e_type == ET_REL) {
++		static const enum llext_mem padded[] = {
++			LLEXT_MEM_TEXT, LLEXT_MEM_DATA, LLEXT_MEM_RODATA,
++		};
++
++		for (i = 0; i < ARRAY_SIZE(padded); i++) {
++			elf_shdr_t *region = ldr->sects + padded[i];
++			size_t align = region->sh_addralign;
++			size_t pad;
++
++			if (region->sh_type == SHT_NULL || region->sh_size == 0 ||
++			    align <= 1) {
++				continue;
++			}
++			pad = region->sh_offset % align;
++			region->sh_offset -= pad;
++			region->sh_size += pad;
++		}
++	}
++
+ 	/*
+ 	 * Calculate each ELF section's offset inside its memory region. This
+ 	 * is done as a separate pass so the final regions are already defined.
+@@ -361,6 +433,14 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
+ 
+ 		if (mem_idx != LLEXT_MEM_COUNT) {
+ 			ldr->sect_map[i].offset = shdr->sh_offset - ldr->sects[mem_idx].sh_offset;
++			if (ldr->hdr.e_type == ET_REL && shdr->sh_addralign > 1 &&
++			    ldr->sect_map[i].offset % shdr->sh_addralign != 0) {
++				LOG_ERR("Section %d is misaligned in region %d "
++					"(offset 0x%zx, alignment %zd)",
++					i, mem_idx, (size_t)ldr->sect_map[i].offset,
++					(size_t)shdr->sh_addralign);
++				return -ENOEXEC;
++			}
+ 		}
+ 	}
+ 
+@@ -646,9 +726,13 @@ out:
  
  	/* Until proper inter-llext linking is implemented, the symbol table is
  	 * not useful outside of the loading process; keep it only if debugging
@@ -171,3 +235,20 @@ index de3cdd6402b..4c203ab0802 100644
  		llext_free(ext->sym_tab.syms);
  		ext->sym_tab.sym_cnt = 0;
  		ext->sym_tab.syms = NULL;
+diff --git a/subsys/llext/llext_mem.c b/subsys/llext/llext_mem.c
+index 78ea782dcec..621599f48da 100644
+--- a/subsys/llext/llext_mem.c
++++ b/subsys/llext/llext_mem.c
+@@ -86,7 +86,11 @@ static int llext_copy_section(struct llext_loader *ldr, struct llext *ext,
+ 	 */
+ #ifndef CONFIG_ARM_MPU
+ 	const uintptr_t sect_alloc = ROUND_UP(ldr->sects[mem_idx].sh_size, LLEXT_PAGE_SIZE);
+-	const uintptr_t sect_align = LLEXT_PAGE_SIZE;
++	/* At least the region's largest section alignment (llext_map_sections
++	 * lays its sections out relative to an address aligned that much).
++	 */
++	const uintptr_t sect_align = MAX(LLEXT_PAGE_SIZE,
++					 (uintptr_t)ldr->sects[mem_idx].sh_addralign);
+ #else
+ 	uintptr_t sect_alloc = LLEXT_PAGE_SIZE;
+ 

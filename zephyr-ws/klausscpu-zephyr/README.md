@@ -281,11 +281,19 @@ so concurrent loads are safe.
     `include/zephyr/llext/elf.h` parses ELF32 under `CONFIG_64BIT` when that is set;
     `subsys/llext/llext_link.c` accepts `SHT_RELA` on the generic path;
     `subsys/llext/llext_load.c` recovers the merged LLVM string table, treats an
-    identical SHSTRTAB/STRTAB alias as non-overlapping, and honours a new
+    identical SHSTRTAB/STRTAB alias as non-overlapping, puts LLVM's
+    `SHF_MERGE`/`SHF_STRINGS` sections (`.rodata.str1.1`) in the read-only region
+    with `.rodata`, starts each code/data region's copy at its file offset rounded
+    down to its largest section alignment (and refuses a section that would still
+    be misaligned; `subsys/llext/llext_mem.c` allocates the region at least that
+    aligned), and honours a new
     `keep_symtab` load-param flag (`include/zephyr/llext/llext.h`) so `main` can be
-    resolved by name after load.
+    resolved by name after load.  Without the alignment rounding, `.rodata`
+    followed a 1-aligned string section at its file distance: a `.text` 4 bytes
+    shorter left bst.llext's `long long` key table 4 bytes off 8, and the
+    force-aligning 64-bit loads read the wrong doublewords.
 
   Not patched / not needed: `samples/hello_world/{prj.conf,src/main.c}` are
   incidental bring-up scratch — discard with `git -C zephyr checkout samples/hello_world`.
   To re-verify nothing else drifted into the core: `git -C zephyr status` should
-  show only the 10 files the two patches cover.
+  show only the 12 files the patches in `zephyr-patches/` cover.
