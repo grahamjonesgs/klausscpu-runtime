@@ -44,18 +44,9 @@ Load Complete OK
   root dir:
     .Spotlight-V100 0 B
     KLCPU.TXT    27 B
-    adventure_pic.elf 94476 B
-    bst_pic.elf  98500 B
     test_fp.llext 12280 B
-    expr_pic.elf 85036 B
     test1        0 B
     .Trashes     0 B
-    crypto_pic.elf 93176 B
-    hello_pic.elf 78548 B
-    queens_pic.elf 81408 B
-    test_64bit_pic.elf 108368 B
-    test_fp_pic.elf 95224 B
-    test_switch_pic.elf 80656 B
     adventure.llext 5308 B
     bst.llext    5992 B
     crypto.llext 8048 B
@@ -70,15 +61,11 @@ Load Complete OK
     temp123.txt  15 B
     tls_key.bin  121 B
     tls_cert.bin 415 B
-    _putcheck.txt 20 B
     index.html   8575 B
     log          0 B
-    httpd.llext  92152 B
     apibackend.llext 3352 B
     ctrl.llext   2228 B
     dhrystone.llext 7504 B
-    hello_rs.llext 30756 B
-    ext_hello.llext 47068 B
     DOOM1.WAD    4196020 B
     big.txt      25 B
     perf_baseline.llext 7764 B
@@ -89,7 +76,7 @@ Load Complete OK
   PASS f_lseek
   PASS f_unlink
   PASS unlink-gone
-  free: 30504480 KB
+  free: 30505520 KB
   PASS f_getfree
 
 === Results: 13 pass, 1 fail ===

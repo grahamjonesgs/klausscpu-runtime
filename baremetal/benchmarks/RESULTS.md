@@ -5,6 +5,29 @@ How the benchmarks are built and run, and how they are scored, is in
 work under way will change them, and they will be measured again when it
 lands.
 
+## Milestone 5: toolchain `759085ccb9c3` (2026-10-28)
+
+The default levels after klausscpu-llvm's phase 5 (under-aligned loads,
+the MUL/DIV EX-hold scheduling fix, 64-bit compares for branches on 32-bit
+arithmetic, the MachineOutliner at -Oz, LTO), with picolibc and the
+builtins rebuilt by that toolchain.  `tools/validate/bench.sh -O2 -Os`, run
+twice with identical results.  "Was" is `65f26a14dd03` (milestone 4).
+
+| OPT | CoreMark | CoreMark/MHz | CoreMark CPI | Embench speed | Embench size | Verification |
+|---|---:|---:|---:|---:|---:|---|
+| -O2 | 101.09 (was 101.13) | 1.011 | 2.95 | 0.554 (was 0.555) | 2.259 (was 2.269) | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+| -Os | 89.07 (was 88.14, +1.1%) | 0.891 | 3.02 | 0.501 (was 0.501) | 1.597 (was 1.603) | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+
+CoreMark -O2: 1978438597 cycles, 669990599 instructions; -Os: 2245472926
+cycles, 742926155 instructions.  Embench nbody (+3.2% cycles) and cubic
+(+1.6% at -O2, +1.9% at -Os) are slower because of picolibc's `sqrt`
+alone: the rebuilt library saves one instruction there (SHLV + CMPLTV
+becomes CMPLTVW), which moves its bit loop by 4 bytes, so two 8-byte
+instructions in the loop now straddle a 16-byte fetch line.  nbody runs
+0.9% fewer instructions.  Relinking with the milestone-4 `libc.a` gives the
+milestone-4 cycle counts exactly.  The fetch-line bubble is proposal 3 in
+klausscpu-llvm's `HARDWARE_PROPOSALS.md`.
+
 ## Code size: MachineOutliner and LTO (2026-10-28)
 
 klausscpu-llvm's 'size-opts' step: the MachineOutliner (on by default at
