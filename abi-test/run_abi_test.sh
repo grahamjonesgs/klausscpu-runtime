@@ -23,6 +23,9 @@ EMU=${KLAUSSCC:-$RT/../klausscc/target/release/klausscc}
 PICO=${PICOLIBC:-$RT/picolibc-install}
 OPTS=${OPTS:-"-O0 -O1 -O2 -Os -Oz"}
 FIRST=${1:-1}; COUNT=${2:-4}; NFUNCS=${3:-60}
+for v in "$FIRST" "$COUNT" "$NFUNCS"; do
+  [[ $v =~ ^[0-9]+$ ]] || { echo "abi-test: '$v' is not a number (usage: run_abi_test.sh [FIRST_SEED] [COUNT] [NFUNCS])"; exit 2; }
+done
 if [ -n "${OUT:-}" ]; then mkdir -p "$OUT"; else OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT; fi
 
 CC="$LLVM_BIN/clang -target klausscpu-unknown-elf"
@@ -60,5 +63,6 @@ for seed in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
     done
   done
 done
+[ "$runs" -gt 0 ] || fail=1   # nothing ran (COUNT 0, or every build failed)
 echo "abi-test: $runs runs, seeds $FIRST..$((FIRST + COUNT - 1)), $NFUNCS functions each: $([ $fail = 0 ] && echo PASS || echo FAIL)"
 exit $fail
