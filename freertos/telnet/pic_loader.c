@@ -144,6 +144,13 @@ static int load_elf(int sock, u32 load_base, pic_entry_fn *entry_out) {
                     (unsigned)ehdr.e_machine);
         return -1;
     }
+    if ((ehdr.e_flags & KLAUSSCPU_EF_ABI_MASK) != KLAUSSCPU_ABI_VERSION) {
+        sock_printf(sock, "Built for C ABI %u, this loader is ABI %u "
+                    "(e_flags 0x%x): rebuild it\r\n",
+                    (unsigned)(ehdr.e_flags & KLAUSSCPU_EF_ABI_MASK),
+                    (unsigned)KLAUSSCPU_ABI_VERSION, (unsigned)ehdr.e_flags);
+        return -1;
+    }
 
     u32 link_base = 0xFFFFFFFFu;
     Elf32_Phdr phdr;

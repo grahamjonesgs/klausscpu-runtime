@@ -116,6 +116,13 @@ static int load_elf(u32 load_base, pic_entry_fn *entry_out) {
                (unsigned)ehdr.e_machine);
         return -1;
     }
+    if ((ehdr.e_flags & KLAUSSCPU_EF_ABI_MASK) != KLAUSSCPU_ABI_VERSION) {
+        printf("loader: built for C ABI %u, this loader is ABI %u "
+               "(e_flags 0x%x): rebuild it\n",
+               (unsigned)(ehdr.e_flags & KLAUSSCPU_EF_ABI_MASK),
+               (unsigned)KLAUSSCPU_ABI_VERSION, (unsigned)ehdr.e_flags);
+        return -1;
+    }
 
     /* Find link base = lowest PT_LOAD VMA. */
     u32 link_base = 0xFFFFFFFFu;

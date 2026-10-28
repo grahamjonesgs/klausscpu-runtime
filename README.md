@@ -190,7 +190,9 @@ this checkout.
   and `make clean` the bare-metal and FreeRTOS builds (make does not notice a
   new compiler).  lld refuses to link objects of different ABI versions (the
   low byte of `e_flags`), so a stale object fails the link instead of the
-  program.  The hand-written assembly here (`setjmp.S`, the context
+  program, and the PIC loaders (`baremetal/programs/loader.c`,
+  `freertos/telnet/pic_loader.c`) refuse a program built for another ABI
+  version.  The hand-written assembly here (`setjmp.S`, the context
   switches, the ISR wrappers) did not need changes: the register roles are
   the same.
 - A program ends with `HALT` (exit status in R12) when `main` returns or

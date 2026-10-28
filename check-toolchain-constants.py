@@ -9,7 +9,8 @@ TRAP/JMPREL words; KlaussCPU unittests check that header against the
 backend's TableGen files).  This script compares the copies in this
 repository and in klausscc with them:
 
-  klausscpu_elf.h                          EM_KLAUSSCPU, R_KLAUSSCPU_*, PCREL32 bias
+  klausscpu_elf.h                          EM_KLAUSSCPU, R_KLAUSSCPU_*, PCREL32 bias,
+                                             the e_flags ABI version and mask
   zephyr-ws/.../arch/klausscpu/core/elf.c  R_KLAUSSCPU_* (all handled), bias
   debug/klausscpu_rtos.py                  register names, DWARF and generic numbers
   klausscpu.ld                             == klausscpu-llvm's rust/klausscpu.ld
@@ -85,7 +86,8 @@ def llvm_facts(llvm):
     abi["GPRNames"] = re.findall(r'"(\w+)"', m.group(1))
     for key in ("NopWord", "HaltWord", "TrapWord", "JmpRelWord", "Word1Offset",
                 "DwarfSP", "DwarfRA", "FPReg", "AddressBits", "ArgGPRs",
-                "CalleeSavedGPRs", "NumGPRs", "StackAlign"):
+                "CalleeSavedGPRs", "NumGPRs", "StackAlign", "ABIVersion",
+                "EFlagsABIMask"):
         if key not in abi:
             sys.exit("check-toolchain-constants: KlaussCPUABI.h has no %s" % key)
     if len(abi["GPRNames"]) != abi["NumGPRs"]:
@@ -105,6 +107,12 @@ def check_runtime(em, relocs, abi, llvm):
     expect("klausscpu_elf.h KLAUSSCPU_PCREL32_BIAS",
            defines(hdr, "KLAUSSCPU_PCREL32_BIAS").get("KLAUSSCPU_PCREL32_BIAS"),
            abi["Word1Offset"])
+    expect("klausscpu_elf.h KLAUSSCPU_ABI_VERSION",
+           defines(hdr, "KLAUSSCPU_ABI_VERSION").get("KLAUSSCPU_ABI_VERSION"),
+           abi["ABIVersion"])
+    expect("klausscpu_elf.h KLAUSSCPU_EF_ABI_MASK",
+           defines(hdr, "KLAUSSCPU_EF_ABI_MASK").get("KLAUSSCPU_EF_ABI_MASK"),
+           abi["EFlagsABIMask"])
 
     # Zephyr's LLEXT relocates ET_REL extensions, which may hold any type.
     elf_c = read(os.path.join(HERE, "zephyr-ws", "klausscpu-zephyr", "arch",

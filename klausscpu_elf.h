@@ -1,8 +1,10 @@
 /* klausscpu_elf.h — KlaussCPU ELF constants for run-time loaders
  *
  * Mirror of klausscpu-llvm's llvm/include/llvm/BinaryFormat/ELF.h
- * (EM_KLAUSSCPU) and llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def
- * (the relocation types), for the loaders that relocate code at run time:
+ * (EM_KLAUSSCPU), llvm/include/llvm/BinaryFormat/ELFRelocs/KlaussCPU.def
+ * (the relocation types) and llvm/include/llvm/TargetParser/KlaussCPUABI.h
+ * (the C ABI version in e_flags), for the loaders that relocate code at run
+ * time:
  * baremetal/programs/loader.c and freertos/telnet/pic_loader.c.  The Zephyr
  * arch keeps its own copy (arch/klausscpu/core/elf.c).
  * check-toolchain-constants.py compares all of them with the LLVM sources.
@@ -11,6 +13,13 @@
 #define KLAUSSCPU_ELF_H
 
 #define EM_KLAUSSCPU 0x4B43u /* 'K' << 8 | 'C' */
+
+/* The low byte of e_flags is the C ABI version the object was compiled for
+ * (ABI.md in klausscpu-llvm).  lld refuses to link objects of different
+ * versions; a loader refuses a program built for another one, which would
+ * pass and return its arguments differently from the code it calls. */
+#define KLAUSSCPU_EF_ABI_MASK   0xFFu
+#define KLAUSSCPU_ABI_VERSION   2u
 
 /* Relocation types: S = symbol, A = addend, P = the relocated field. */
 #define R_KLAUSSCPU_NONE    0u
