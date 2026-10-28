@@ -21,7 +21,9 @@
 #define R_KLAUSSCPU_PC32    4u /* S + A - P, 32-bit data */
 #define R_KLAUSSCPU_PC64    5u /* S + A - P, 64-bit data */
 #define R_KLAUSSCPU_CALL18  6u /* (S + A - P) / 4 in word0[17:0] of a
-                                  short CALL, P = the instruction */
+                                  short CALL (0x63000000) or a tail
+                                  call's short jump (0x61000000),
+                                  P = the instruction */
 
 /* A PCREL32 field sits in word 1, this far after its instruction. */
 #define KLAUSSCPU_PCREL32_BIAS 4

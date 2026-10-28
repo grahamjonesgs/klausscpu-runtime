@@ -117,7 +117,8 @@ int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc, uintptr_t sym_base_addr,
 		break;
 
 	case R_KLAUSSCPU_CALL18: {
-		/* ISA v3 short CALL (word 0 0x63000000): simm18 word displacement
+		/* ISA v3 short CALL (word 0 0x63000000) or a tail call's short
+		 * jump (0x61000000): simm18 word displacement
 		 * (S + A - P) / 4 in word0[17:0], P = the instruction itself (the
 		 * relocation is at its start).  It reaches +-512 KiB; lld calls a
 		 * further callee through a thunk, which this loader cannot add.
