@@ -5,6 +5,25 @@ How the benchmarks are built and run, and how they are scored, is in
 work under way will change them, and they will be measured again when it
 lands.
 
+## Latest: toolchain `65f26a14dd03` (2026-10-28)
+
+The same board, flags and command (`run-benchmarks.sh -O2 -Os`), after the
+second round of backend work: interlock-aware scheduling, jump tables,
+1-word short calls, GlobalMerge, absolute MMIO loads/stores, inline small
+memcpy/memset, C ABI version 2 and frameless leaf functions. Runtime at
+`722003c` with picolibc and compiler-rt rebuilt by that toolchain. Only the
+summary is repeated here; the sections after this one are the 2026-10-27
+baseline.
+
+| OPT | CoreMark | CoreMark/MHz | CoreMark CPI | Embench speed | Embench size | Verification |
+|---|---:|---:|---:|---:|---:|---|
+| -O2 | 101.11 (was 98.33, +2.8%) | 1.011 | 2.95 | 0.555 (was 0.509, +9.0%) | 2.269 (was 2.563, -11.5%) | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+| -Os | 88.14 (was 84.89, +3.8%) | 0.881 | 3.05 | 0.501 (was 0.471, +6.4%) | 1.603 (was 1.826, -12.2%) | CoreMark perf + validation CRCs OK; Embench 19/19 PASS |
+
+CoreMark -O2: 1977567715 cycles, 670639103 instructions for 2000 iterations;
+-Os: 2269098380 cycles, 743574155 instructions. Against the committed
+`ca184a1c92dc` tree (97.29 at -O2, see the notes) the -O2 gain is +3.9%.
+
 ## Setup
 
 | | |
