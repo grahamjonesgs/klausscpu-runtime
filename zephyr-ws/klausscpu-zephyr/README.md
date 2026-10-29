@@ -180,6 +180,15 @@ origin to match.
   wrapper that also copes with the timer ISR nesting inside it; and
   `arch_switch()`/`arch_new_thread()` resume threads with only the timer
   enabled.  The blitter and Ethernet drivers poll.  (`irq.c` has the details.)
+- **VGA output needs a VGA bitstream.** `CONFIG_KLAUSSCPU_VGA` (`vnc/vga_out.c`,
+  on in the doom, gui_demo, gui_lvgl and mandel `prj.conf`) also shows the
+  framebuffer on the board's VGA port.  The VGA controller (`0xF011_xxxx`,
+  vsync = interrupt source 3) exists only in klaussCPU bitstreams built from
+  its `vga-output` branch.  On klaussCPU master the block is unmapped MMIO,
+  which reads 0 and ignores writes (no trap, no hang).  `vga_out` probes
+  for the controller at boot.  Without one it logs `VGA: no controller ...
+  - VGA output off` and stays idle, so these apps run as before over VNC.
+  The bare-metal `test_vga` and `test_vga_scan` print SKIP there.
 - **Thread entry**: a thread starts in `z_thread_entry` (by IRET, with a 0
   return address above it, so a backtrace ends there); an entry function that
   returns comes back to it and the thread is aborted, Zephyr's convention.

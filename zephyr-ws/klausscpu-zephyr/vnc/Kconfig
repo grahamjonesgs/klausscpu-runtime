@@ -20,6 +20,11 @@ config KLAUSSCPU_VGA
 	  vga_out_indexed_buffer()/vga_out_present_indexed() (triple-buffered,
 	  tear-free; needs 3 x w x h bytes of CONFIG_HEAP_MEM_POOL_SIZE).
 
+	  The VGA controller is only in klaussCPU bitstreams built with its
+	  VGA work (the vga-output branch).  On one without it, vga_out
+	  finds no controller at boot, logs a warning and stays idle, so a
+	  VGA build still runs (VNC only).
+
 config KLAUSSCPU_AMP_VNC
 	bool "VNC served by AMP core 2 (this core only renders)"
 	default n

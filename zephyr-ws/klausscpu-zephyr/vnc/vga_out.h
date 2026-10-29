@@ -12,6 +12,11 @@
  * Apps that already render 8-bit palette indices (doom) can instead hand the
  * frame to vga_out_show_indexed(): it is triple-buffered into the VGA's 8-bit
  * palette mode and flipped at vblank (no tearing, no RGB565 conversion).
+ *
+ * The VGA controller exists only in klaussCPU bitstreams built with its VGA
+ * work (the vga-output branch).  vga_out_init() probes for it; without one
+ * it logs a warning and every call below does nothing (the indexed calls
+ * return NULL / -ENODEV), so the same build runs unchanged on either board.
  */
 #ifndef KLAUSSCPU_VGA_OUT_H_
 #define KLAUSSCPU_VGA_OUT_H_
@@ -25,14 +30,16 @@ void vga_out_kick(void);
 /* Show a w x h frame of 8-bit palette indices (w = 320 shown doubled, or 640;
  * rows tightly packed).  The pixels are copied, so `src` may be reused at
  * once.  `pal_rgb888` (256 x 0x00RRGGBB) updates the palette when non-NULL.
- * Returns 0, or -EINVAL / -ENOMEM.  The first call switches VGA to this mode. */
+ * Returns 0, or -EINVAL / -ENOMEM / -ENODEV (no VGA controller).  The first
+ * call switches VGA to this mode. */
 int vga_out_show_indexed(const uint8_t *src, int w, int h, const uint32_t *pal_rgb888);
 
 /* Zero-copy variant: render the next w x h 8-bit frame straight into a VGA
  * buffer.  vga_out_indexed_buffer() returns one that is neither on screen nor
  * waiting to flip (triple-buffered); write the WHOLE frame into it, then
  * vga_out_present_indexed() it (flush + flip at vblank).  Returns NULL /
- * -EINVAL / -ENOMEM on bad geometry, a foreign buffer, or no memory. */
+ * -EINVAL / -ENOMEM / -ENODEV on bad geometry, a foreign buffer, no memory,
+ * or no VGA controller. */
 uint8_t *vga_out_indexed_buffer(int w, int h);
 int vga_out_present_indexed(uint8_t *buf, const uint32_t *pal_rgb888);
 

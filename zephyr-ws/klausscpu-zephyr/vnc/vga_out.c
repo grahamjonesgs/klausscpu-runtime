@@ -23,6 +23,13 @@ BUILD_ASSERT(FB_HEIGHT * (FB_WIDTH == 320 ? 2 : 1) <= VGA_SCREEN_H,
 /* fb dirty since the last flush */
 static atomic_t fb_pending;
 
+/* A VGA controller answered at boot (vga_detect).  Bitstreams without one
+ * (klaussCPU master before its vga-output work) read the registers as 0 and
+ * ignore writes: then every vga_out call is a no-op, so the app pays no
+ * per-frame cache flush and allocates no indexed buffers for a display that
+ * is not there. */
+static bool vga_ok;
+
 /* Indexed (8-bit) frames: a pool of three 32 B-aligned buffers, allocated on
  * first use.  At any time one is on screen (FB_ACTIVE), one may be presented
  * but not yet latched (it flips at the next vblank), and the third is free to
@@ -50,6 +57,9 @@ static void show_fb_mode(void)
 
 void vga_out_show_fb(void)
 {
+	if (!vga_ok) {
+		return;
+	}
 	idx_active = false;
 	vga_cache_flush();
 	show_fb_mode();
@@ -86,7 +96,7 @@ static int idx_alloc(int w, int h)
 
 uint8_t *vga_out_indexed_buffer(int w, int h)
 {
-	if (idx_alloc(w, h) != 0) {
+	if (!vga_ok || idx_alloc(w, h) != 0) {
 		return NULL;
 	}
 	uint32_t on_screen = (uint32_t)REG_VGA_FB_ACTIVE;
@@ -105,6 +115,9 @@ int vga_out_present_indexed(uint8_t *buf, const uint32_t *pal_rgb888)
 {
 	bool ours = false;
 
+	if (!vga_ok) {
+		return -ENODEV;
+	}
 	for (int i = 0; i < IDX_NBUF; i++) {
 		ours |= (buf != NULL && buf == idx_buf[i]);
 	}
@@ -130,6 +143,9 @@ int vga_out_present_indexed(uint8_t *buf, const uint32_t *pal_rgb888)
 
 int vga_out_show_indexed(const uint8_t *src, int w, int h, const uint32_t *pal_rgb888)
 {
+	if (!vga_ok) {
+		return -ENODEV;
+	}
 	uint8_t *buf = vga_out_indexed_buffer(w, h);
 
 	if (buf == NULL) {
@@ -148,6 +164,9 @@ static void vga_flush_thread(void *a, void *b, void *c)
 	ARG_UNUSED(b);
 	ARG_UNUSED(c);
 
+	if (!vga_ok) {          /* static threads start after vga_out_init */
+		return;
+	}
 	for (;;) {
 		k_msleep(16);
 		if (atomic_set(&fb_pending, 0) && !idx_active) {
@@ -161,6 +180,12 @@ K_THREAD_DEFINE(vga_flush_tid, 2048, vga_flush_thread, NULL, NULL, NULL,
 
 static int vga_out_init(void)
 {
+	if (!vga_detect()) {
+		LOG_WRN("VGA: no controller at 0xF011_0000 (bitstream without "
+			"klaussCPU's VGA) - VGA output off");
+		return 0;
+	}
+	vga_ok = true;
 	vga_set_border(0x000);
 	vga_clear_underflows();
 	vga_cache_flush();

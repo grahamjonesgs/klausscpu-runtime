@@ -62,6 +62,15 @@ each frame, so `I_FinishUpdate` renders straight into it. AMP builds copy
 instead, because core 2 reads the buffer at a fixed address. VNC and VGA
 show the same game.
 
+**The VGA port needs a klaussCPU bitstream built from its `vga-output`
+branch** (not yet merged into klaussCPU master). On a bitstream without
+the VGA controller, its registers at `0xF011_xxxx` read 0 and ignore
+writes. `vga_out` detects that at boot, logs `VGA: no controller at
+0xF011_0000 ... - VGA output off` and then does nothing, so the same build
+runs unchanged over VNC: no cache flushes, no VGA buffers, and the
+renderer keeps doomgeneric's own buffer. The `vga.conf` build has no
+display at all on such a board.
+
 For the fastest Doom, build the VGA-only variant: no networking, no VNC and
 no RGB565 conversion.
 
