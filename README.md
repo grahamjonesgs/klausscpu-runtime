@@ -94,6 +94,17 @@ the board at -O1), so it is off by default (`benchmarks/RESULTS.md`).
 generator: the Makefile passes it to `ld.lld` as `-mllvm
 -enable-machine-outliner`, since the bitcode does not record it.
 
+### Boot ROM image (netboot)
+The resident network loader in the FPGA's boot ROM is `programs/netboot.c`.
+Its image lives in the hardware repo (klaussCPU
+`KlaussCPU.srcs/sources_1/new/netboot.mem`), not here, and adopting a new one
+needs a bitstream rebuild.  To regenerate it:
+```sh
+cd baremetal
+make netboot                     # netboot.elf
+klausscc --mem-out netboot.elf   # writes netboot.mem next to it ($readmemh format)
+```
+
 ### FreeRTOS
 ```sh
 cd freertos
