@@ -13,9 +13,15 @@
 //      left->right, blue falls top->bottom.
 //  V3  5 s of palette cycling, one step per vsync — smooth diagonal motion.
 //  The program ends leaving V2's static grid on screen.
+//
+// Needs a bitstream with the VGA controller (klaussCPU's vga-output work).
+// Without one it prints "SKIP" and exits 0 at once (vga_detect(): the
+// unmapped registers read 0) instead of failing T1-T5 and then spinning
+// forever in T5 on a vblank that never comes.
 #include <stdint.h>
 #include <stdio.h>
 #include "../../mmio.h"
+#include "../../vga.h"
 
 static int pass, fail;
 static void check(const char *name, int ok) {
@@ -61,6 +67,10 @@ static void load_grid_palette(uint32_t shift) {
 
 int main(void) {
     printf("\ntest_vga: VGA Phase 1 board test\n");
+    if (!vga_detect()) {
+        printf("test_vga: SKIP (no VGA controller at 0xF011_0000 in this bitstream)\n");
+        return 0;
+    }
     REG_INT_MASK = 0;
     REG_INT_VEC(INT_SRC_VGA) = 0;
 

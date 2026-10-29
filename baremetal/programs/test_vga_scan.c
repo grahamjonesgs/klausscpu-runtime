@@ -15,10 +15,16 @@
 //      idle, then under memcpy stress.
 //  M   memcpy throughput with scanout off / 320x240 / 640x480x16.
 // The program ends showing S1.
+//
+// Needs a bitstream with the VGA controller (klaussCPU's vga-output work).
+// Without one it prints "SKIP" and exits 0 at once (vga_detect(): the
+// unmapped registers read 0) instead of spinning forever on a vsync that
+// never comes.
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "../../mmio.h"
+#include "../../vga.h"
 
 #define FB_A    0x02000000u     // 320x240x2 = 150 KB
 #define FB_B    0x02040000u
@@ -130,6 +136,10 @@ static uint32_t memcpy_rate(void) {
 
 int main(void) {
     printf("\ntest_vga_scan: VGA Phase 2 (DDR scanout) board test\n");
+    if (!vga_detect()) {
+        printf("test_vga_scan: SKIP (no VGA controller at 0xF011_0000 in this bitstream)\n");
+        return 0;
+    }
     REG_INT_MASK = 0;
     REG_VGA_BORDER = 0x000;
 

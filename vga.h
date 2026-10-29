@@ -11,6 +11,10 @@
  *   vga_cache_flush();                                   // CPU writes -> DDR
  *   vga_present(fb);  vga_wait_vsync();                  // tear-free flip
  *
+ * vga_detect() says whether the bitstream has the VGA controller at all
+ * (klaussCPU master without its vga-output work does not: the registers
+ * then read 0 and ignore writes).
+ *
  * Rules (enforced by hardware, not checked here):
  *   - fb and stride are 32-byte aligned; width is 320 (doubled) or 640 px;
  *   - CTRL scanout bits / FB_BASE / STRIDE / HEIGHT / VSTART take effect at
@@ -39,11 +43,31 @@ static inline void vga_cache_flush(void)
     while (REG_CACHE_STATUS & CACHE_STATUS_MNT_BUSY) {}
 }
 
-/* Busy-wait for the next start of vblank (raster line 480). */
-static inline void vga_wait_vsync(void)
+/* Is there a VGA controller?  Only bitstreams built from klaussCPU's VGA
+ * work (its vga-output branch) have one; on the others the 0xF011_xxxx
+ * block is unmapped MMIO, which ignores writes and reads 0 (no trap, no
+ * hang).  BORDER reads back what was written on real hardware.  Leaves the
+ * border black. */
+static inline int vga_detect(void)
 {
+    REG_VGA_BORDER = 0xA5Cu;
+    int found = (REG_VGA_BORDER & 0xFFFu) == 0xA5Cu;
+    REG_VGA_BORDER = 0;
+    return found;
+}
+
+/* Busy-wait for the next start of vblank (raster line 480).  Returns 0, or
+ * -1 after 100 ms (6 frames) without one — no VGA controller, so a caller
+ * never spins forever on a bitstream without it. */
+static inline int vga_wait_vsync(void)
+{
+    uint64_t t0 = REG_CLOCK_MS;
+
     REG_VGA_STATUS = VGA_STATUS_VSYNC;
-    while (!(REG_VGA_STATUS & VGA_STATUS_VSYNC)) {}
+    while (!(REG_VGA_STATUS & VGA_STATUS_VSYNC)) {
+        if (REG_CLOCK_MS - t0 > 100u) return -1;
+    }
+    return 0;
 }
 
 /* Scan out `height` lines of a framebuffer at `fb`, `stride` bytes apart.

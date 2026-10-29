@@ -424,6 +424,12 @@ test_irq_ext.o: programs/test_irq_ext.c
 test_irq_ext.elf: test_irq_ext.o $(ETH_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,$(ETH_OBJS) test_irq_ext.o)
 
+# test_vga, test_vga_scan: board tests for the VGA controller, which only
+# klaussCPU bitstreams built with its VGA work (the vga-output branch) have.
+# Deliberately not in PROGRAMS, so neither the emulator corpus (make all) nor
+# the board suite runs them; on a board or emulator without VGA they print
+# SKIP and exit 0.  Build with `make test_vga test_vga_scan`.
+#
 # test_vga: VGA registers, palette, vsync IRQ (source 3), FB_BASE latch (VGA_PLAN P1)
 test_vga.o: programs/test_vga.c
 	$(CC) $(CFLAGS) -c -o $@ $<
