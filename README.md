@@ -186,7 +186,11 @@ this checkout.
   supported: rebuild everything (picolibc too, `./build-picolibc.sh`) with
   the current toolchain and run it on the current core.
   `baremetal/programs/test_divshadow.c` is the board test (the emulator has
-  no pipeline and always passes it).
+  no pipeline and always passes it). To check which core a board runs, send
+  klausscc's `tests/fixtures/hw_div_fbr.kla` with `klausscc -i
+  hw_div_fbr.kla -s -T`: an older core prints `0000008E` where 9ad6614
+  prints `00000021` (`hw_div_smc.kla` checks its SMC-squash fix the same
+  way).
 - **The C ABI changed (klausscpu-llvm `llvm/lib/Target/KlaussCPU/ABI.md`,
   version 2):** `int`/`unsigned` arguments and results are sign-extended to
   64 bits, structs of up to 16 bytes are passed in registers, and only
