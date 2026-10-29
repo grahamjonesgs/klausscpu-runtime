@@ -7,7 +7,7 @@ crypto_selftest	nohalt	25440
 crypto_test	nohalt	15008
 dhrystone	156583275	14984
 eth_test	nohalt	14736
-expr	211445	12448
+expr	211438	12448
 fs_demo	3112727	29616
 hello	65789	10464
 http_server	nohalt	90080
@@ -25,7 +25,7 @@ test_asm	77361	11336
 test_atomic	1673887	25568
 test_big	9833564	34160
 test_cache	2094880	12776
-test_divshadow	94619	17592
+test_divshadow	95201	18968
 test_eth	54520	14056
 test_fatfs_printf	43578	10160
 test_flags	527419	42560

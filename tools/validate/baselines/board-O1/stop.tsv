@@ -19,6 +19,6 @@ test_printf	Halt
 test_rtos	none
 test_switch	Halt
 test_sync	none
+test_task_exit	Halt
 test_unaligned	Halt
 test_varargs	Halt
-test_task_exit	Halt

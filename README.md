@@ -175,23 +175,18 @@ this checkout.
   address of a packed member, reads and writes the wrong word.
   `baremetal/programs/test_unaligned.c` checks the compiler's unaligned
   loads at every offset, across doublewords and cache lines, on the board.
-- **A divide right after a taken fused branch (FBR) returns a stale result
-  on the board.** This is an RTL bug: the squashed divide keeps the divider
-  busy, and the next real divide completes with its result. The emulator
-  has no pipeline and never shows it. klausscpu-llvm now never fuses a
-  branch whose next instruction is a divide, but code built by an older
-  toolchain must be rebuilt, picolibc above all (its `qsort` has the
-  pattern; `./build-picolibc.sh`). Don't hand-write `fbr`/`fbri` directly
-  followed by `divr`/`divur`/`modr`/`modur`/`divv`/`modv`.
-  `baremetal/programs/test_divshadow.c` is the board test.
-- **An LCD write right after a taken fused branch reaches the LCD on the
-  board.** Same RTL hole: the LCD data strobe fires from EX in the cycle
-  the FBR squashes it. klausscpu-llvm never fuses a branch whose next
-  instruction is `lcdcmdv`/`lcddatav`/`lcddatar` (these only come from
-  inline asm, which already blocks the fusion); don't hand-write `fbr`/
-  `fbri` directly followed by one either. `lcd` (LCD reset) is safe. The
-  assembler (klausscpu-llvm 8cb63bbc9ad3 and later) warns about either
-  pattern in hand-written or inline assembly.
+- **The hardware must be klaussCPU 9ad6614 or later.** klausscpu-llvm
+  assumes its squash fixes: a taken fused branch (FBR) may be followed
+  directly by a divide or an LCD write (`divr`/`divur`/`modr`/`modur`/
+  `divv`/`modv`, `lcdcmdv`/`lcddatav`/`lcddatar`), compiled or hand-written.
+  On an older bitstream the squashed divide kept the divider running and
+  the next divide returned its result, and the squashed LCD write still
+  reached the LCD; the compiler used to avoid the shape and the assembler
+  warned about it, and neither does now. Older bitstreams are not
+  supported: rebuild everything (picolibc too, `./build-picolibc.sh`) with
+  the current toolchain and run it on the current core.
+  `baremetal/programs/test_divshadow.c` is the board test (the emulator has
+  no pipeline and always passes it).
 - **The C ABI changed (klausscpu-llvm `llvm/lib/Target/KlaussCPU/ABI.md`,
   version 2):** `int`/`unsigned` arguments and results are sign-extended to
   64 bits, structs of up to 16 bytes are passed in registers, and only

@@ -14,7 +14,7 @@
 #   make test_printf    — varargs / printf test
 #   make test_atomic    — C atomics (src/atomic.c) incl. a timer-ISR stress test
 #   make test_flags     — the flags each instruction writes vs the compiler's model
-#   make test_divshadow — a divide behind a taken fused branch (board only)
+#   make test_divshadow — a divide right behind a fused branch (board only)
 #   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
 #   make test_setjmp    — setjmp / longjmp (SP, callee-saved registers, stack args after longjmp)
 #   make test_task_exit — RTOS tasks that return or call rtos_task_exit
