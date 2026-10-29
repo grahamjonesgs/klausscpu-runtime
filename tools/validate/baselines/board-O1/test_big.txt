@@ -44,18 +44,18 @@ Load Complete OK
   root dir:
     .Spotlight-V100 0 B
     KLCPU.TXT    27 B
-    hello_rs.llext 10092 B
+    hello_rs.llext 10044 B
     test_fp.llext 12272 B
     test1        0 B
     .Trashes     0 B
-    ext_hello.llext 15908 B
+    ext_hello.llext 15852 B
     test_atomic.llext 25176 B
-    ext_atomics.llext 21776 B
+    ext_atomics.llext 21744 B
     abi_mismatch.llext 1416 B
     adventure.llext 5300 B
     bst.llext    5992 B
     crypto.llext 8024 B
-    expr.llext   5244 B
+    expr.llext   5236 B
     hello.llext  1416 B
     queens.llext 3288 B
     test_64bit.llext 7112 B
@@ -81,7 +81,7 @@ Load Complete OK
   PASS f_lseek
   PASS f_unlink
   PASS unlink-gone
-  free: 30505328 KB
+  free: 30505312 KB
   PASS f_getfree
 
 === Results: 13 pass, 1 fail ===

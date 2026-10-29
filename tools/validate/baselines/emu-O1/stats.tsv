@@ -25,7 +25,7 @@ test_asm	77361	11336
 test_atomic	1673887	25568
 test_big	9833564	34160
 test_cache	2094880	12776
-test_divshadow	95201	18968
+test_divshadow	95160	18968
 test_eth	54520	14056
 test_fatfs_printf	43578	10160
 test_flags	527419	42560
