@@ -203,7 +203,6 @@ CRYPTO_HW_OBJ := $(OBJ)/crypto_hw.o
 CRT_CONV_OBJS := \
     $(OBJ)/crt-extendsfdf2.o \
     $(OBJ)/crt-truncdfsf2.o \
-    $(OBJ)/fp_mode_stub.o \
     $(OBJ)/crt-udivti3.o \
     $(OBJ)/crt-umodti3.o \
     $(OBJ)/crt-udivmodti4.o \
@@ -307,11 +306,8 @@ $(OBJ)/eth.o: $(RUNTIME)/src/eth.c | $(OBJ)
 $(OBJ)/crypto_hw.o: $(RUNTIME)/src/crypto_hw.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# compiler-rt builtins + fp_mode stub (console_demo soft-FP/i128 support)
+# compiler-rt builtins (console_demo soft-FP/i128 support)
 $(OBJ)/crt-%.o: $(BUILTINS)/%.c | $(OBJ)
-	$(CC) $(CRT_FLAGS) -c -o $@ $<
-
-$(OBJ)/fp_mode_stub.o: $(RUNTIME)/src/fp_mode_stub.c | $(OBJ)
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
 # SSH / wolfSSL objects (compiled with SSH_CFLAGS = NET_CFLAGS + wolfSSL includes)
@@ -403,7 +399,7 @@ clean:
 	# Sweep any stale shared-source objects a PRE-obj/ build left at the repo
 	# root / ../src / ../fatfs / ../lwip_port (harmless if already absent).
 	rm -f $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o $(RUNTIME)/stdio_handles.o \
-	      $(RUNTIME)/crt-*.o $(RUNTIME)/fp_mode_stub.o \
+	      $(RUNTIME)/crt-*.o \
 	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/src/setjmp.o $(RUNTIME)/src/mdio.o \
 	      $(RUNTIME)/src/eth.o $(RUNTIME)/src/sd.o $(RUNTIME)/src/diskio.o \
 	      $(RUNTIME)/src/crypto_hw.o $(RUNTIME)/src/*.d \

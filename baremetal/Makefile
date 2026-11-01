@@ -152,7 +152,7 @@ CRT_INT_NAMES = udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4 \
                 udivti3 umodti3 udivmodti4 multi3
 
 CRT_FP_NAMES = $(CRT_SF_NAMES) $(CRT_DF_NAMES) $(CRT_INT_NAMES)
-CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES)) fp_mode_stub.o
+CRT_FP_OBJS  = $(patsubst %, crt-%.o, $(CRT_FP_NAMES))
 
 LD_SCRIPT = $(ROOT)/klausscpu.ld
 
@@ -217,10 +217,6 @@ atomic.o:      $(ROOT)/src/atomic.c      ; $(CC) $(CFLAGS) -fno-lto -c -o $@ $<
 
 # compiler-rt builtins compiled from in-tree source
 crt-%.o: $(BUILTINS)/%.c
-	$(CC) $(CRT_FLAGS) -c -o $@ $<
-
-# fp_mode_stub.c lives in src/ but needs CRT_FLAGS (includes fp_mode.h from builtins)
-fp_mode_stub.o: $(ROOT)/src/fp_mode_stub.c
 	$(CC) $(CRT_FLAGS) -c -o $@ $<
 
 # FatFs core files — compiled with -I fatfs/ to find ffconf.h
@@ -557,10 +553,10 @@ EXT_DEMOS  = hello adventure expr bst crypto queens test_64bit test_switch perf_
 # test_fp uses single-precision soft-FP, whose builtins (conversions especially)
 # are not in the prebuilt libclang_rt.builtins.a.  Rather than bloat the kernel
 # ROM by exporting them, bundle them into the extension: partial-link (ld -r)
-# test_fp with the compiler-rt SF objects + the fp_mode stub, leaving only printf
+# test_fp with the compiler-rt SF objects, leaving only printf
 # to resolve against the kernel.
 EXT_FP_OBJS = crt-addsf3.o crt-subsf3.o crt-mulsf3.o crt-divsf3.o \
-              crt-comparesf2.o crt-fixsfdi.o fp_mode_stub.o
+              crt-comparesf2.o crt-fixsfdi.o
 
 test_fp_ext.o: programs/test_fp.c
 	$(CC) $(EXT_CFLAGS) -c -o $@ $<
@@ -685,7 +681,7 @@ clean:
 	      "crt-floatunsisf 2.o" "crt-moddi3 2.o" "crt-muldf3 2.o" "crt-mulsf3 2.o" \
 	      "crt-negdf2 2.o" "crt-negsf2 2.o" "crt-subdf3 2.o" "crt-subsf3 2.o" \
 	      "crt-truncdfsf2 2.o" "crt-udivdi3 2.o" "crt-udivmoddi4 2.o" \
-	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" "fp_mode_stub 2.o" \
+	      "crt-udivsi3 2.o" "crt-umoddi3 2.o" "crt0 2.o" \
 		  "eth_test 2.elf" "eth_test 2.o" \
 	      "io_stubs 2.o" "syscalls 2.o" "uart_stubs 2.o" 2>/dev/null; true
 	rm -rf bench-build

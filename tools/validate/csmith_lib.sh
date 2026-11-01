@@ -63,7 +63,6 @@ csmith_rt() {
       "$LLVM_BIN/clang" $CFLAGS -O1 -I"$RT" -c "$RT/src/$s.c" -o "$R/$s.o" || die "runtime object $s"
     done
     "$LLVM_BIN/clang" $CFLAGS -O1 -c "$RT/src/setjmp.S" -o "$R/setjmp.o" || die "setjmp.S"
-    "$LLVM_BIN/clang" $crtflags -c "$RT/src/fp_mode_stub.c" -o "$R/fp_mode_stub.o" || die "fp_mode_stub"
     for n in udivsi3 divsi3 udivdi3 divdi3 umoddi3 moddi3 udivmoddi4 udivti3 umodti3 udivmodti4 multi3 \
              addsf3 subsf3 mulsf3 divsf3 negsf2 comparesf2 floatsisf floatunsisf fixsfsi fixsfdi fixunssfsi \
              fixunssfdi adddf3 subdf3 muldf3 divdf3 negdf2 comparedf2 floatsidf floatunsidf fixdfsi fixdfdi \
@@ -72,7 +71,7 @@ csmith_rt() {
     done
     touch "$R/done"
   fi
-  RTOBJS="$R/fp_mode_stub.o $R/crt0.o $R/uart_stubs.o $R/syscalls.o $R/stdio_handles.o $R/setjmp.o $(echo "$R"/crt-*.o)"
+  RTOBJS="$R/crt0.o $R/uart_stubs.o $R/syscalls.o $R/stdio_handles.o $R/setjmp.o $(echo "$R"/crt-*.o)"
 }
 
 # csmith_gen <seed> -- in the current directory: generate t.c, build and run
