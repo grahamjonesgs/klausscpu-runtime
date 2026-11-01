@@ -12,6 +12,8 @@
 #include <zephyr/arch/common/ffs.h>
 #include <zephyr/arch/common/addr_types.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/timer/system_timer.h>
+#include <zephyr/arch/klausscpu/irq.h>
 #include <zephyr/irq.h>
 
 /* Minimum stack pointer alignment: 8 bytes (one GPR slot). */
@@ -30,7 +32,7 @@
 #define ARCH_THREAD_STACK_RESERVED  0
 
 /*
- * arch_esf — exception stack frame saved by the timer ISR.
+ * arch_esf — the context an interrupt stub saves on the interrupted stack.
  * Contains all 16 GPRs + the hardware IRET word.
  */
 struct arch_esf {
@@ -75,17 +77,18 @@ static ALWAYS_INLINE bool arch_irq_unlocked(unsigned int key)
     return key != 0u;
 }
 
-/* Hardware cycle counter at MMIO 0xF00F0038 (32-bit, runs at SYS_CLOCK_HW_CYCLES_PER_SEC). */
-#define _KLAUSSCPU_TIMER_CNT (*(volatile uint32_t *)0xF00F0038u)
-
+/* k_cycle_get_32/64(): the free-running PERF_CYCLES counter behind the timer
+ * driver (drivers/timer/klausscpu_timer.c), not the tick counter TIMER_COUNT
+ * (0xF00F_0038), which wraps every tick period (1 ms at 1 kHz): k_busy_wait()
+ * and every interval over a tick would be wrong. */
 static ALWAYS_INLINE uint32_t arch_k_cycle_get_32(void)
 {
-    return _KLAUSSCPU_TIMER_CNT;
+    return sys_clock_cycle_get_32();
 }
 
 static ALWAYS_INLINE uint64_t arch_k_cycle_get_64(void)
 {
-    return (uint64_t)_KLAUSSCPU_TIMER_CNT;
+    return sys_clock_cycle_get_64();
 }
 
 /* arch_switch is in swap.S; declared via arch_interface.h */

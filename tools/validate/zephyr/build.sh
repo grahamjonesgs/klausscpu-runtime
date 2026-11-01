@@ -5,7 +5,8 @@
 # KlaussCPU toolchain (the invocation in zephyr-ws/klausscpu-zephyr/CLAUDE.md).
 # <app> is one of the port's apps (zephyr-ws/klausscpu-zephyr/apps/<app>),
 # `hello` (samples/hello_world), `dbg_synchronization` (samples/synchronization
-# with debug info and thread names), or an absolute source path.
+# with debug info and thread names), `irq_dev_spurious` (apps/irq_dev with its
+# negative case, CONFIG_IRQ_DEV_SPURIOUS), or an absolute source path.
 #
 #   ZEPHYR_WS   west workspace holding zephyr/, modules/ and .venv/
 #               (default <runtime>/zephyr-ws).  The port itself
@@ -26,6 +27,7 @@ case $APP in
   dbg_synchronization) SRC=$ZEPHYR/samples/synchronization; MODS="$MOD"
     EXTRA=(-DCONFIG_DEBUG_INFO=y -DCONFIG_THREAD_MONITOR=y -DCONFIG_THREAD_NAME=y) ;;
   doom) SRC=$MOD/apps/doom; MODS="$MOD" ;;
+  irq_dev_spurious) SRC=$MOD/apps/irq_dev; MODS="$MOD"; EXTRA=(-DCONFIG_IRQ_DEV_SPURIOUS=y) ;;
   /*) SRC=$APP; MODS="$MOD" ;;
   *) SRC=$MOD/apps/$APP; MODS="$MOD;$WOLF" ;;
 esac

@@ -3,7 +3,7 @@
 
   perf.py extract board  <board_suite dir> <prefix>    Dhrystone, perf_baseline, perf_haz
   perf.py extract bench  <bench-results/<OPT> dir> <prefix>   CoreMark, Embench-IoT
-  perf.py extract zephyr <zephyr board dir> <prefix>   mandel, doom, irq_soak, gui_lvgl
+  perf.py extract zephyr <zephyr board dir> <prefix>   mandel, doom, irq_soak, tick_cost, irq_dev, gui_lvgl
   perf.py compare <baseline.tsv> <metrics.tsv> [--tol PCT]
   perf.py merge <baseline.tsv> <metrics.tsv> <toolchain>   update the baseline in place
 
@@ -123,6 +123,17 @@ def zephyr_metrics(d):
             b = want[0] if want else beats[-1]
             out.append((f'irq_soak.loops_{b[0]}s', int(b[1]), 'higher', 1))
             out.append(('irq_soak.viol_lost', sum(int(x[2]) + int(x[3]) for x in beats), 'lower', 0))
+    t = read(os.path.join(d, 'tick_cost.out'))
+    if t:
+        m = re.search(r'TICKCOST min=\d+ p10=\d+ median=(\d+)', t)
+        if m:
+            out.append(('tick_cost.median_cycles', int(m.group(1)), 'lower', 5))
+    t = read(os.path.join(d, 'irq_dev.out'))
+    if t:
+        m = re.search(r'IRQDEV C2: .* blit_isr=(\d+)', t)
+        if m:
+            # 5 s of back-to-back blit + interrupt + wake-up + sem round trips
+            out.append(('irq_dev.blit_irqs_5s', int(m.group(1)), 'higher', 2))
     t = read(os.path.join(d, 'gui_lvgl.out'))
     if t:
         for m in re.finditer(r'LVGL bench (\w+)\s*: total=(\d+)', t):

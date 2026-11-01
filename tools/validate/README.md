@@ -134,18 +134,26 @@ pass.  `perf.py` turns the captures into numbers (`perf.tsv` in the output)
 and compares them with `baselines/perf.tsv`.
 
 **zephyr** — `zephyr/suite.sh` builds the Zephyr apps pristine (hello,
-synchronization with debug info, irq_soak, llext_demo, mandel, gui_demo,
-gui_lvgl, doom, ssh_shell), runs each on the emulator for 200M instructions
+synchronization with debug info, irq_soak, irq_dev, irq_dev_spurious,
+tick_cost, llext_demo, mandel, gui_demo, gui_lvgl, doom, ssh_shell), runs each on the emulator for 200M instructions
 and on the board: the GUI apps with a VNC grab (`<app>.png`), ssh_shell with
 an SSH session (`kernel version`, `kernel uptime`).  The expected lines are
 in `zephyr/expect-emu.txt` and `zephyr/expect-board.txt`; the mandel, doom,
-irq_soak and gui_lvgl figures go through `perf.py` like the board's.
+irq_soak, tick_cost, irq_dev (blit interrupts in phase C2) and gui_lvgl figures
+go through `perf.py` like the board's.  `irq_dev` takes real device interrupts
+on the board (VGA vsync connected with `IRQ_CONNECT`, the blitter with
+`irq_connect_dynamic`, counted against the VGA frame counter and the number of
+blits, under load, plus the ISR stack's high-water mark); `irq_dev_spurious`
+is the same app with an enabled source nobody connected, which must stop with
+"spurious interrupt"; `tick_cost` measures what a timer tick costs the
+interrupted thread (pinned to 6xx cycles).  The emulator models only the
+timer, so these three run there only as far as their first line.
 `ZEPHYR_APPS` picks a subset, and `ZEPHYR_CMAKE_ARGS` adds `-D` options to
 every build (`-DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y` builds at -Oz,
 `-DCONFIG_LTO=y` with LTO; the expectations are the same).  The build step
 also runs two builds that must fail (`build-neg`; `ZEPHYR_NEG_CHECKS=0`
-skips them, a few seconds): hello with `CONFIG_DYNAMIC_INTERRUPTS=y` must stop
-at the port's `#error`, and `zephyr/build_assert_probe/` (a `BUILD_ASSERT(0)`)
+skips them, a few seconds): irq_dev with `CONFIG_IRQ_DEV_BAD_CONNECT=y`
+(`IRQ_CONNECT` of the tick's IRQ 0) must stop at the port's static assertion, and `zephyr/build_assert_probe/` (a `BUILD_ASSERT(0)`)
 must stop at the static assertion, which shows the port's C11 keeps Zephyr's
 build-time checks live.
 

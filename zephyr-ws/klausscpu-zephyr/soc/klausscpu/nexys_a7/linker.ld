@@ -81,6 +81,17 @@ SECTIONS
         *(.srodata*)
     } GROUP_LINK_IN(ROM)
 
+    /* The static interrupt connections IRQ_CONNECT() emits
+     * (include/zephyr/arch/klausscpu/irq.h); klausscpu_irq_init() copies them
+     * into the ISR table at boot. */
+    SECTION_PROLOGUE(klausscpu_irq_conn,,)
+    {
+        . = ALIGN(8);
+        __klausscpu_irq_conn_start = .;
+        KEEP(*(.klausscpu_irq_conn))
+        __klausscpu_irq_conn_end = .;
+    } GROUP_LINK_IN(ROM)
+
     _image_rom_end = .;
 
     GROUP_END(ROM)

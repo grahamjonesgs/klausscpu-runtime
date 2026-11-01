@@ -20,9 +20,9 @@
 #include "blitter.h"
 #endif
 
-/* Free-running 100 MHz CPU cycle counter (perf block 0xF00D_0008) — reliable
- * and non-destructive (unlike k_cycle_get_32 on this core); used to time the
- * flush copy at sub-ms precision now the blitter can make it near-free. */
+/* Free-running 100 MHz CPU cycle counter (perf block 0xF00D_0008), the one
+ * k_cycle_get_64() reads; used to time the flush copy at sub-ms precision now
+ * the blitter can make it near-free. */
 #define VNCD_PERF_CYCLES (*(volatile uint64_t *)(unsigned long)0xF00D0008u)
 
 /* Accumulated CPU cycles spent moving flushed pixels into the framebuffer.

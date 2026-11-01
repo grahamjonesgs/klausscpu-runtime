@@ -3,6 +3,8 @@
 hello	Hello World! nexys_a7
 dbg_synchronization	thread_b: Hello World from cpu 0 on nexys_a7
 irq_soak	IRQSOAK START
+irq_dev	IRQDEV START
+irq_dev_spurious	IRQDEV spurious test
 llext_demo	llext_unload: 0
 llext_demo	=== LLEXT demo done ===
 mandel	KlaussCPU Mandelbrot

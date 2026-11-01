@@ -1,0 +1,16 @@
+# irq_dev app Kconfig.  An application Kconfig must source the rest of Zephyr's.
+
+# Application options (the Kconfig the app project loads).
+config IRQ_DEV_SPURIOUS
+	bool "Negative test: enable a device IRQ nobody connected"
+	help
+	  Instead of the test, start a blit with IRQ_EN and enable IRQ 1
+	  (blitter DONE) without connecting a handler.  The port must stop with
+	  "spurious interrupt, IRQ 1 has no handler" (K_ERR_SPURIOUS_IRQ).
+
+config IRQ_DEV_BAD_CONNECT
+	bool "Negative test: IRQ_CONNECT of the timer's IRQ 0 (must not build)"
+	help
+	  Build-time check: ARCH_IRQ_CONNECT() only accepts device sources 1..3.
+
+source "Kconfig.zephyr"

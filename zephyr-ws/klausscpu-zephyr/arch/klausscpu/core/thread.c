@@ -10,7 +10,7 @@
  *   [SP+104] R2   = p2
  *   [SP+112] R1   = p1
  *   [SP+120] R0   = entry
- *   [SP+128] IRET frame: INT_MASK[0]=1 | PC=z_thread_entry
+ *   [SP+128] IRET frame: INT_MASK=0xF | PC=z_thread_entry
  *   [SP+136] 0: z_thread_entry's return address (the top of the stack)
  *
  * On first dispatch arch_switch() restores R0-R15 then IRETs into
@@ -26,7 +26,8 @@
  *
  * KlaussCPU IRET frame (64-bit):
  *   bits[63:43] = 0
- *   bits[42:39] = INT_MASK (bit 39 = timer source 0)
+ *   bit 43      = interrupts disabled (DI); 0 = enabled
+ *   bits[42:39] = INT_MASK (the port keeps it at 0xF: irq.c)
  *   bits[38:32] = processor flags
  *   bits[31: 0] = PC
  */
@@ -52,11 +53,12 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
     *--fp = 0ULL;
 
     /*
-     * IRET frame: timer enabled (INT_MASK[0]=1) so the new thread runs
+     * IRET frame: interrupts enabled (bit 43 = 0) and INT_MASK = 0xF (the
+     * constant value the port keeps it at, irq.c), so the new thread runs
      * with interrupts on from the very first instruction.
      * PC = z_thread_entry — the trampoline that calls entry(p1,p2,p3).
      */
-    *--fp = ((uint64_t)1u << 39)
+    *--fp = ((uint64_t)0xFu << 39)
           | (uint64_t)(uint32_t)(uintptr_t)z_thread_entry;
 
     /*
@@ -96,8 +98,8 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
  * between EI and WAIT still runs its handler and WAIT then sleeps until the
  * next tick, so the window is bounded by one tick (the same as with the old
  * INT_MASK sequence).  Doing WAIT with interrupts disabled and then EI would
- * close it; left for board validation.  INT_MASK is not
- * touched: arch_irq_enable() keeps it at the enabled sources.
+ * close it; left for board validation.  INT_MASK is not touched (it stays at
+ * 0xF; a source is enabled by its INT_VEC, irq.c).
  */
 void arch_cpu_idle(void)
 {

@@ -7,8 +7,8 @@
 #        ZEPHYR_CMAKE_ARGS adds -D options to every build (e.g.
 #        -DCONFIG_SIZE_OPTIMIZATIONS_AGGRESSIVE=y for -Oz, -DCONFIG_LTO=y);
 #        then two builds that must fail (skip with ZEPHYR_NEG_CHECKS=0):
-#        hello with CONFIG_DYNAMIC_INTERRUPTS=y (the port's #error), and
-#        build_assert_probe/ (a BUILD_ASSERT(0): the checks are live)
+#        irq_dev with CONFIG_IRQ_DEV_BAD_CONNECT=y (IRQ_CONNECT of the tick's
+#        IRQ 0), and build_assert_probe/ (a BUILD_ASSERT(0): the checks are live)
 # emu    run each ELF on the emulator for 200M instructions (<outdir>/emu/)
 #        and check expect-emu.txt: the expected lines, and a stop at the
 #        instruction cap (a trap or fault fails)
@@ -24,7 +24,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ $# -ge 1 ] || die "usage: zephyr/suite.sh <outdir> [build] [emu] [board]"
 OUT=$(realpath -m "$1"); shift
 STEPS=${*:-build emu board}
-APPS=${ZEPHYR_APPS:-"hello dbg_synchronization irq_soak llext_demo mandel gui_demo gui_lvgl doom ssh_shell"}
+APPS=${ZEPHYR_APPS:-"hello dbg_synchronization irq_soak irq_dev irq_dev_spurious tick_cost llext_demo mandel gui_demo gui_lvgl doom ssh_shell"}
 IP=${KLAUSSCPU_BOARD_IP:-192.168.68.59}
 mkdir -p "$OUT/elf" "$OUT/logs"
 fail=0
@@ -64,7 +64,7 @@ for step in $STEPS; do
         else echo "FAIL build-neg $l: failed without '$re' (see $log)"; fail=1; fi
         rm -rf "$OUT/build/neg-$l"
       }
-      neg dynamic_interrupts 'CONFIG_DYNAMIC_INTERRUPTS is not supported' hello -DCONFIG_DYNAMIC_INTERRUPTS=y
+      neg bad_irq_connect 'IRQ_CONNECT needs a device source' irq_dev -DCONFIG_IRQ_DEV_BAD_CONNECT=y
       neg build_assert 'static assertion failed: KLAUSSCPU_BUILD_ASSERT_PROBE' "$HERE/build_assert_probe"
     fi
     echo "toolchain $(toolchain_id)" >"$OUT/toolchain.txt"
@@ -91,6 +91,7 @@ for step in $STEPS; do
     timeout_of() {
       case $1 in
         hello) echo 40 ;; dbg_synchronization|llext_demo) echo 45 ;; irq_soak) echo 80 ;;
+        irq_dev) echo 60 ;; irq_dev_spurious) echo 30 ;; tick_cost) echo 30 ;;
         mandel) echo 100 ;; gui_demo) echo 75 ;; gui_lvgl) echo 110 ;; doom) echo 130 ;; ssh_shell) echo 150 ;;
         *) echo 60 ;;
       esac

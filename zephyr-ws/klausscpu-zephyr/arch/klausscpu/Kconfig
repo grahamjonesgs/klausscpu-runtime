@@ -53,3 +53,9 @@ config KERNEL_VM_SUPPORT
 
 config MMU
 	default n
+
+# Interrupt handlers run on z_interrupt_stacks (arch/klausscpu/core/swap.S).
+# The port's earlier private ISR stack was 4 KiB, so keep that headroom: a tick
+# runs every expiring k_timer callback, and a device handler may printk.
+config ISR_STACK_SIZE
+	default 4096

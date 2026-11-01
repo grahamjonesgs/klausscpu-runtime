@@ -10,11 +10,14 @@
  * (same trick as FreeRTOS vPortYield), stores SP → *switched_from, loads
  * SP from switch_to, restores R0-R15, IRETs into the new thread.
  *
- * z_klausscpu_timer_isr
- * ─────────────────────
- * Installed as INT_VEC0.  Hardware auto-clears INT_MASK[0] on entry.
- * Saves context, switches to kernel stack, calls sys_clock_isr(),
- * restores context (possibly a different thread), IRETs.
+ * z_klausscpu_timer_isr, z_klausscpu_isr1..3
+ * ──────────────────────────────────────────
+ * INT_VEC0 (timer) and INT_VEC1..3 (blitter, Ethernet, VGA vsync) while the
+ * source is enabled (irq.c).  Hardware clears the dispatched source's INT_MASK
+ * bit on entry.  Each stub saves context, executes DI, switches to the ISR
+ * stack (z_interrupt_stacks), calls sys_clock_isr() (timer) or
+ * z_klausscpu_irq_dispatch(n) (the others), restores context (possibly a
+ * different thread), IRETs.
  *
  * Per-task stack frame layout (low → high address after portSAVE_CONTEXT):
  *
@@ -30,6 +33,11 @@
 
 #define INT_MASK_ADDR   0xF00F0000
 
+/* The IRET frame's upper word holds the 4-bit INT_MASK at bits [10:7] (bits
+   [42:39] of the 64-bit frame).  The port keeps INT_MASK at 0xF (irq.c), so
+   every frame it builds carries 0xF. */
+#define FRAME_MASK_ALL  0x780
+
     .text
     /* Call frame information goes to .debug_frame (not loaded), like the C
        code's, so debuggers can unwind through the entry points below. */
@@ -37,13 +45,13 @@
 
 /* ── Unwind annotations ─────────────────────────────────────────────────── */
 /*
- * arch_switch and z_klausscpu_timer_isr are entered with one 64-bit word
+ * arch_switch and the interrupt stubs are entered with one 64-bit word
  * pushed (the CALL slot / the IRET frame), so the default rule CFA = SP+8,
  * PC = low 32 bits of [CFA-8] holds at their first instruction.  The 16
- * register pushes put Rn at CFA-16-8n.  The timer ISR copies the task's
+ * register pushes put Rn at CFA-16-8n.  The interrupt stubs copy the task's
  * saved SP into callee-saved R4 (its own value is already on the task
- * stack) before switching to the kernel stack, so CFA = R4+136 while
- * sys_clock_isr() runs.  Whenever SP is moved to a saved task frame the
+ * stack) before switching to the ISR stack, so CFA = R4+136 while
+ * the handler runs.  Whenever SP is moved to a saved task frame the
  * whole frame is described again (cfi_task_frame).
  */
 .macro push_cfi reg, n
@@ -129,14 +137,14 @@
 /*
  * Called as a normal C function (CALL pre-decrements SP by 8 and writes the
  * return address).  We convert that CALL slot into a valid IRET frame by
- * patching [SP+132] = 0x80 (sets INT_MASK[0]=1 in the upper 32-bit word).
+ * patching [SP+132] = FRAME_MASK_ALL (INT_MASK = 0xF in the upper 32-bit word).
  *
  * After pushing R0-R15 (128 bytes), stack looks like:
  *   [SP+  0] R15 slot     ← new SP stored to *switched_from
  *   ...
  *   [SP+120] R0  slot
  *   [SP+128] return PC  (lower 32 bits — already written by CALL)
- *   [SP+132] 0x80       ← we patch this: INT_MASK[0]=1, flags=0
+ *   [SP+132] 0x780      ← we patch this: INT_MASK=0xF, flags=0, interrupts enabled
  */
 /*
  * __start — Zephyr kernel entry point.
@@ -155,10 +163,12 @@ __start:
        (arch_irq_lock() returns 0 until the first thread starts).  On a soft
        reset (FPGA reprogrammed without a full power cycle) INT_MASK may
        already be 1 from the previous run.  If a timer IRQ fires before
-       _klausscpu_kernel_sp is initialized the ISR does setsp(0) → crash.
+       the ISR stack is set up the ISR does setsp(0) → crash.
        DI blocks every source; INT_MASK = 0 as well drops the previous run's
-       sources.  The first IRET (arch_switch into the main thread) enables
-       interrupts again (frame bit 43 = 0) and restores INT_MASK[0] = 1. */
+       sources.  klausscpu_irq_init() (PRE_KERNEL_1) clears every INT_VEC and
+       sets INT_MASK = 0xF; a source is enabled by writing its INT_VEC.  The
+       first IRET (arch_switch into the main thread) enables interrupts again
+       (frame bit 43 = 0) and restores INT_MASK from its frame (0xF). */
     di      r0
     setr    r0, INT_MASK_ADDR
     setr    r1, 0
@@ -260,9 +270,9 @@ arch_switch:
     /*
      * ISR-context fast path.
      *
-     * When called from within the timer ISR (on the kernel stack),
-     * z_klausscpu_timer_isr already saved the task stack SP to
-     * current->switch_handle.  Saving the kernel stack SP there would
+     * When called from within an ISR (on the ISR stack), the stub
+     * (z_klausscpu_timer_isr, z_klausscpu_isrN) already saved the task stack SP to
+     * current->switch_handle.  Saving the ISR-stack SP there would
      * corrupt that value and cause the next ISR to use SP≈0.
      *
      * Detect this case via _klausscpu_in_isr.  If set: clear the flag,
@@ -294,9 +304,9 @@ arch_switch:
 
     /* Patch the CALL return-address slot into an IRET frame.
        [SP+128..131] = return PC (already correct — do not touch).
-       [SP+132..135] = 0x80  →  bit7 of upper-32 = bit39 of 64-bit = INT_MASK[0]=1. */
+       [SP+132..135] = FRAME_MASK_ALL  →  upper-32 bits [10:7] = INT_MASK = 0xF. */
     getsp   r2
-    setr    r3, 0x80
+    setr    r3, FRAME_MASK_ALL
     stidx32 r3, r2, 132
 
     /* Retrieve the arch_switch arguments from the original R0/R1 slots on
@@ -317,9 +327,9 @@ arch_switch:
 
     /* ── ISR-context switch ───────────────────────────────────────── */
     /*
-     * The timer ISR already saved the preempted task's complete context
+     * The ISR stub already saved the preempted task's complete context
      * (R0-R15 + IRET frame) on the task stack and stored that task SP in
-     * current->switch_handle.  We must NOT overwrite it with the kernel SP.
+     * current->switch_handle.  We must NOT overwrite it with the ISR-stack SP.
      *
      * Stack layout here (only R0 and R1 pushed so far):
      *   [SP+0]  R1  (= switched_from, not needed — ISR save is authoritative)
@@ -345,31 +355,36 @@ arch_switch:
     .size arch_switch, . - arch_switch
 
 
-/* ── z_klausscpu_timer_isr ──────────────────────────────────────────────── */
+/* ── Interrupt stubs ───────────────────────────────────────────────────── */
 /*
- * CONFIG_USE_SWITCH=y timer ISR.
+ * CONFIG_USE_SWITCH=y interrupt entry, one stub per source.
  *
  * Hardware has already: decremented SP by 8, written the 8-byte IRET frame
- * (PC + INT_MASK/flags), cleared INT_MASK[0].
+ * (PC + INT_MASK/flags), cleared the source's INT_MASK bit.
  *
- * Design: call sys_clock_isr() on the kernel stack.  If sys_clock_announce()
- * decides a higher-priority thread is ready it calls z_reschedule() which
- * calls arch_switch() — the ISR fast path in arch_switch restores the new
- * thread and IRETs directly, never returning here.
+ * The stub saves R0-R15 on the interrupted stack, then DI.  Between the
+ * entry and the DI retiring another source may be taken: it nests as a
+ * complete interrupt (its own frame and register save below ours, its handler
+ * on the ISR stack, IRET back into this stub's first instructions), which is
+ * safe because the stub has not touched any shared state yet.  After the DI
+ * nothing can interrupt it, so the stubs share _klausscpu_in_isr and
+ * _klausscpu_isr_handle without nesting.  It then records "in ISR", stores the
+ * interrupted SP in current->switch_handle and _klausscpu_isr_handle, and
+ * switches to the ISR stack, _kernel.cpus[0].irq_stack (Zephyr's
+ * z_interrupt_stacks).
  *
- * If sys_clock_isr() returns normally (no reschedule, or the interrupted
- * thread is still highest priority), we simply restore the interrupted
- * thread.  We do NOT call z_get_next_switch_handle() — that function reads
- * _kernel.ready_q.cache which is NULL during early-boot PRE_KERNEL_2
- * (threads not yet created), causing it to dereference address 0 and return
- * garbage as the switch handle → instant crash.
+ * The handler (sys_clock_isr() for the timer, z_klausscpu_irq_dispatch(n) for
+ * the others) ends with z_klausscpu_isr_exit(): if a higher-priority thread
+ * is ready it calls arch_switch(), whose ISR fast path restores the new thread
+ * and IRETs directly, never returning here.  If the handler returns, the
+ * interrupted thread is restored.  (The early-boot guard against a NULL ready
+ * queue is in z_klausscpu_isr_exit().)
  */
-    .globl  z_klausscpu_timer_isr
-    .type   z_klausscpu_timer_isr, @function
-z_klausscpu_timer_isr:
-    .cfi_startproc
-    .cfi_signal_frame
+.macro isr_enter
     portSAVE_CONTEXT
+    /* Interrupts off for the rest of the handler.  R0 is saved, so DI can
+       use it for the old enable bit. */
+    di      r0
 
     /* Record "in ISR" so arch_is_in_isr() and arch_switch ISR fast path work. */
     setr    r0, _klausscpu_in_isr
@@ -381,23 +396,18 @@ z_klausscpu_timer_isr:
     copy    r4, r0             /* task's saved SP, kept for the unwinder */
     .cfi_def_cfa r4, 136
     setr    r1, _kernel
-    ldidx64 r1, r1, ___cpu_t_current_OFFSET
-    stidx64 r0, r1, ___thread_t_switch_handle_OFFSET
+    ldidx64 r2, r1, ___cpu_t_current_OFFSET
+    stidx64 r0, r2, ___thread_t_switch_handle_OFFSET
+    ldidx64 r3, r1, ___cpu_t_irq_stack_OFFSET
     setr    r1, _klausscpu_isr_handle
     stidx64 r0, r1, 0          /* _klausscpu_isr_handle = saved task SP */
 
-    /* Switch to dedicated kernel stack. */
-    setr    r0, _klausscpu_kernel_sp
-    ldidx32 r0, r0, 0
-    setsp   r0
+    /* Switch to the ISR stack. */
+    setsp   r3
+.endm
 
-    /* Announce the tick.  If a context switch is needed, sys_clock_announce()
-       eventually calls arch_switch() which uses the ISR fast path — it clears
-       _klausscpu_in_isr, loads the new thread's SP, and IRETs directly.
-       In that case the call below never returns. */
-    call    sys_clock_isr
-
-    /* sys_clock_isr() returned: no switch was triggered.
+.macro isr_leave
+    /* The handler returned: no switch was triggered.
        Clear _klausscpu_in_isr and restore the interrupted thread. */
     setr    r0, _klausscpu_in_isr
     setr    r1, 0
@@ -409,5 +419,34 @@ z_klausscpu_timer_isr:
 
     portRESTORE_CONTEXT
     iret
+.endm
+
+    .globl  z_klausscpu_timer_isr
+    .type   z_klausscpu_timer_isr, @function
+z_klausscpu_timer_isr:
+    .cfi_startproc
+    .cfi_signal_frame
+    isr_enter
+    /* Announce the tick (and reschedule: z_klausscpu_isr_exit()). */
+    call    sys_clock_isr
+    isr_leave
     .cfi_endproc
     .size z_klausscpu_timer_isr, . - z_klausscpu_timer_isr
+
+.macro device_isr n
+    .globl  z_klausscpu_isr\n
+    .type   z_klausscpu_isr\n, @function
+z_klausscpu_isr\n:
+    .cfi_startproc
+    .cfi_signal_frame
+    isr_enter
+    setr    r0, \n
+    call    z_klausscpu_irq_dispatch
+    isr_leave
+    .cfi_endproc
+    .size z_klausscpu_isr\n, . - z_klausscpu_isr\n
+.endm
+
+    device_isr 1
+    device_isr 2
+    device_isr 3

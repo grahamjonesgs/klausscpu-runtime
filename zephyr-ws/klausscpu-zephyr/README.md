@@ -18,16 +18,19 @@ Boots the kernel, runs the timer ISR, dispatches the main thread, and emits
 
 | Path | Purpose |
 |---|---|
-| `arch/klausscpu/core/swap.S` | `__start`, `arch_switch`, timer ISR (`z_klausscpu_timer_isr`) |
+| `arch/klausscpu/core/swap.S` | `__start`, `arch_switch`, the interrupt entry stubs (`z_klausscpu_timer_isr`, `z_klausscpu_isr1..3`) |
 | `arch/klausscpu/core/thread.c` | `arch_new_thread` (initial stack frame) |
-| `arch/klausscpu/core/irq.c` | IRQ enable/disable (the timer only; no dynamic connection), kernel stack pointer, `arch_printk_char_out` + stdout hook |
+| `arch/klausscpu/core/irq.c` | interrupt table and `IRQ_CONNECT` / dynamic connection, `arch_irq_enable`/`disable`, spurious-IRQ handling, `arch_printk_char_out` + stdout hook |
 | `arch/klausscpu/core/elf.c` | LLEXT: the ELF header check (machine, C ABI version) and the relocations |
 | `drivers/timer/klausscpu_timer.c` | Zephyr sys_clock driver (MMIO timer at `0xF00F_0000`) |
 | `drivers/serial/uart_klausscpu.c` | Polled UART driver using the `txcharmemr` builtin |
-| `soc/klausscpu/nexys_a7/linker.ld` | Memory layout — ROM at `0x20`, RAM at `0x00100000`, stack at top |
+| `soc/klausscpu/nexys_a7/linker.ld` | Memory layout — ROM at `0x20`, RAM at `0x00100000`, stack at top; the `klausscpu_irq_conn` section |
 | `boards/klausscpu/nexys_a7/nexys_a7.dts` | DTS: console UART, system timer |
 | `boards/klausscpu/nexys_a7/nexys_a7_defconfig` | Per-board Kconfig defaults (XIP=n, minimal libc, UART_CONSOLE, …) |
 | `include/zephyr/arch/klausscpu/arch.h` | Inline `arch_irq_lock`/`unlock` (`DI`/`EI`), cycle counter access |
+| `include/zephyr/arch/klausscpu/irq.h` | The four IRQ numbers, `ARCH_IRQ_CONNECT` (static connection record) |
+| `apps/irq_dev` | Device interrupts on the board: VGA vsync (static) and blitter DONE (dynamic) counted against the VGA frame counter and the blit count, under load; the ISR stack's high-water mark |
+| `apps/irq_soak`, `apps/tick_cost` | The `irq_lock` dispatch-race soak; the cost of a timer tick for the interrupted thread |
 
 ## Fresh clone — what's tracked vs. fetched
 
@@ -172,14 +175,32 @@ origin to match.
   plus a `SYS_INIT` installs the same function as the libc stdout hook. The
   upstream `drivers/console/uart_console.c` isn't compiled in this build, so
   without these overrides `printk` and `printf` would silently discard output.
-- **Interrupts: the timer only.** `z_klausscpu_timer_isr` is the one
-  handler; there is no `IRQ_CONNECT`, and `CONFIG_DYNAMIC_INTERRUPTS` is a
-  build error (`arch_irq_connect_dynamic()` refuses with `-ENOTSUP`).  A
-  vector gets one pushed IRET word and nothing saved, and only the dispatched
-  source's `INT_MASK` bit is cleared, so another handler would need a full
-  wrapper that also copes with the timer ISR nesting inside it; and
-  `arch_switch()`/`arch_new_thread()` resume threads with only the timer
-  enabled.  The blitter and Ethernet drivers poll.  (`irq.c` has the details.)
+- **Interrupts: four sources, no priorities.** The SoC's controller
+  (`0xF00F_0000`) has four sources, which are the Zephyr IRQ numbers: 0 timer
+  (the kernel tick, owned by the timer driver), 1 blitter DONE, 2 Ethernet,
+  3 VGA vsync (`arch/klausscpu/irq.h`).  `IRQ_CONNECT()` (sources 1..3, checked
+  at build time) puts a record in the `.klausscpu_irq_conn` section; `irq.c`
+  copies them into `_sw_isr_table` at PRE_KERNEL_1.  `CONFIG_DYNAMIC_INTERRUPTS`
+  works (`irq_connect_dynamic()`/`irq_disconnect_dynamic()`, the source must be
+  disabled; sources 1..3 only).  The port does not use `gen_isr_tables`: there
+  is one handler per source and no vector table.  Each source has an entry
+  stub in `swap.S` (`z_klausscpu_timer_isr`, `z_klausscpu_isr1..3`) that saves
+  all registers on the interrupted stack, executes **DI**, runs the handler on
+  `z_interrupt_stacks` (`CONFIG_ISR_STACK_SIZE`, 4096 here) and resumes the
+  highest-priority ready thread at exit, as the tick always did.  So a handler
+  runs to completion with interrupts disabled: nothing preempts it, there is
+  no nesting, and the `priority` and `flags` arguments are accepted and
+  ignored.  When several sources are pending the hardware picks timer >
+  blitter > Ethernet > VGA.  The sources are level-triggered: the handler must
+  acknowledge the device (blitter `BLIT_STATUS = 2`, VGA `VGA_STATUS = 2`) or it
+  is dispatched again at once.  Enabling a source is writing its `INT_VEC`
+  (disabling: 0); `INT_MASK` stays at 0xF, because the hardware saves the mask in
+  every interrupt frame and IRET restores it, so a mask that changed after a
+  thread's frame was written would be undone when it resumed.  A source that is
+  enabled with no connection ends in a fatal `K_ERR_SPURIOUS_IRQ`
+  ("spurious interrupt, IRQ n has no handler").  The Ethernet driver still
+  polls.  `apps/irq_dev` proves it on the board with real device interrupts
+  (see Layout); `irq.c` has the details.
 - **VGA output needs a VGA bitstream.** `CONFIG_KLAUSSCPU_VGA` (`vnc/vga_out.c`,
   on in the doom, gui_demo, gui_lvgl and mandel `prj.conf`) also shows the
   framebuffer on the board's VGA port.  The VGA controller (`0xF011_xxxx`,
@@ -199,7 +220,7 @@ origin to match.
   kernel, arch and driver build-time check expanded to nothing.  The
   validation harness's Zephyr build step (`tools/validate/zephyr/suite.sh`)
   builds a `BUILD_ASSERT(0)` probe that must fail, and checks that
-  `CONFIG_DYNAMIC_INTERRUPTS=y` is refused.
+  `IRQ_CONNECT()` of the tick's IRQ 0 is refused.
 - **`OUTPUT_FORMAT("elf32-klausscpu")`** entry has been added to lld's
   `ScriptParser.cpp` `StringSwitch` table (in the LLVM tree, not here).
 
