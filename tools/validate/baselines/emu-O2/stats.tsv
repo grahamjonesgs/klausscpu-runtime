@@ -1,7 +1,7 @@
 adventure	nohalt	12608
 blit_capture	nohalt	10712
 blit_selftest	15019377	20288
-bst	103942	14648
+bst	103864	14648
 crypto	127228	15096
 crypto_selftest	nohalt	29320
 crypto_test	nohalt	16208
@@ -15,8 +15,8 @@ loader	543317	26912
 lwip_demo	nohalt	88032
 netboot	nohalt	88824
 net_client	nohalt	100864
-perf_baseline	28250841	15888
-perf_haz	28413498	16816
+perf_baseline	28226218	15888
+perf_haz	28388875	16816
 ping_demo	nohalt	83472
 queens	5323407	12912
 tcp_echo	nohalt	88592

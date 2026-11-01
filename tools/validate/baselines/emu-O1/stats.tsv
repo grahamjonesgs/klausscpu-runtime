@@ -1,7 +1,7 @@
 adventure	nohalt	12544
 blit_capture	nohalt	10136
 blit_selftest	16944238	13824
-bst	105616	13584
+bst	105538	13568
 crypto	134799	15664
 crypto_selftest	nohalt	25024
 crypto_test	nohalt	14624
@@ -15,14 +15,14 @@ loader	545457	26832
 lwip_demo	nohalt	86832
 netboot	nohalt	87608
 net_client	nohalt	98568
-perf_baseline	27039773	14624
-perf_haz	27202802	15552
+perf_baseline	26404151	14608
+perf_haz	26567180	15536
 ping_demo	nohalt	82176
 queens	5337368	10976
 tcp_echo	nohalt	87392
-test_64bit	220791	14048
+test_64bit	217563	14032
 test_asm	72078	10952
-test_atomic	1310102	24192
+test_atomic	1310107	24192
 test_big	8226674	33120
 test_cache	1988234	12392
 test_diei	788916	12128
@@ -41,6 +41,6 @@ test_setjmp	118477	11248
 test_switch	78865	11656
 test_sync	nohalt	12920
 test_task_exit	2966996	11808
-test_unaligned	13184475	16512
+test_unaligned	8725371	16464
 test_varargs	40472	10024
 vga_off	5033230	9552
