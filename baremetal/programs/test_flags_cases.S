@@ -2244,9 +2244,42 @@ fc_CMPRVW_I:
 	cmprv	r8, 0
 2:
 fc_CMPRVW_I_t:
-	cmprvw	r1, -3
+	cmprvw	r1, -100000
 9:
 fc_CMPRVW_I_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_CMPRVW_SH
+	.p2align	2
+fc_CMPRVW_SH:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_CMPRVW_SH_t:
+	cmprvw	r1, -3
+9:
+fc_CMPRVW_SH_e:
 	setfr	r12
 	jmpns	3f
 	ori	r12, r12, 1
@@ -3114,6 +3147,74 @@ fc_DIVV_e:
 	stidx64	r12, r0, 8
 	ret
 
+	.globl	fc_DI_I
+	.p2align	2
+fc_DI_I:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_DI_I_t:
+	di	r3
+	ei	r3
+9:
+fc_DI_I_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_EI_I
+	.p2align	2
+fc_EI_I:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_EI_I_t:
+	di	r9
+	ei	r9
+9:
+fc_EI_I_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
 	.globl	fc_ENTER_I
 	.p2align	2
 fc_ENTER_I:
@@ -3206,6 +3307,39 @@ fc_FBR_RR_t:
 	fbr	r1, r2, 0, 9f
 9:
 fc_FBR_RR_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_FBR_RV
+	.p2align	2
+fc_FBR_RV:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_FBR_RV_t:
+	fbrv	r1, 100000, 13, 9f
+9:
+fc_FBR_RV_e:
 	setfr	r12
 	jmpns	3f
 	ori	r12, r12, 1
@@ -6138,9 +6272,42 @@ fc_LEAPC:
 	cmprv	r8, 0
 2:
 fc_LEAPC_t:
-	leapc	r3, 64
+	leapc	r3, 100000
 9:
 fc_LEAPC_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_LEAPC_SH
+	.p2align	2
+fc_LEAPC_SH:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_LEAPC_SH_t:
+	leapc	r3, 64
+9:
+fc_LEAPC_SH_e:
 	setfr	r12
 	jmpns	3f
 	ori	r12, r12, 1
@@ -7054,6 +7221,72 @@ fc_MULUR_e:
 	stidx64	r12, r0, 8
 	ret
 
+	.globl	fc_MULUV
+	.p2align	2
+fc_MULUV:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_MULUV_t:
+	muluv	r3, r1, 100000
+9:
+fc_MULUV_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_MULUV_SH
+	.p2align	2
+fc_MULUV_SH:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_MULUV_SH_t:
+	muluv	r3, r1, 200
+9:
+fc_MULUV_SH_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
 	.globl	fc_MULV
 	.p2align	2
 fc_MULV:
@@ -7076,9 +7309,42 @@ fc_MULV:
 	cmprv	r8, 0
 2:
 fc_MULV_t:
-	mulv	r3, r1, -3
+	mulv	r3, r1, -100000
 9:
 fc_MULV_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_MULV_SH
+	.p2align	2
+fc_MULV_SH:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_MULV_SH_t:
+	mulv	r3, r1, -3
+9:
+fc_MULV_SH_e:
 	setfr	r12
 	jmpns	3f
 	ori	r12, r12, 1
@@ -9185,6 +9451,72 @@ fc_SUBW_t:
 	subw	r3, r1, r2
 9:
 fc_SUBW_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_TAILREL
+	.p2align	2
+fc_TAILREL:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_TAILREL_t:
+	8:	.4byte	0xA1000000, 9f - 8b
+9:
+fc_TAILREL_e:
+	setfr	r12
+	jmpns	3f
+	ori	r12, r12, 1
+3:
+	stidx64	r3, r0, 0
+	stidx64	r12, r0, 8
+	ret
+
+	.globl	fc_TAIL_SH
+	.p2align	2
+fc_TAIL_SH:
+	copy	r10, r1
+	copy	r1, r2
+	copy	r2, r3
+	setr	r3, 0x5A
+	cmprv	r10, 0
+	jmpe	1f
+	setr	r8, 0
+	cmprv	r8, 1
+	setr64	r8, 0, 0x40000000
+	setr	r9, 2
+	mulr	r9, r8, r9
+	setr	r8, 0
+	btst	r8, 0
+	jmp	2f
+1:
+	setr	r8, 1
+	cmprv	r8, 0
+2:
+fc_TAIL_SH_t:
+	jmprel	9f
+9:
+fc_TAIL_SH_e:
 	setfr	r12
 	jmpns	3f
 	ori	r12, r12, 1

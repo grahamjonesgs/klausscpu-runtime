@@ -176,18 +176,25 @@ this checkout.
   `.td` and its table of the RTL's flag masks disagree) and run it on the
   emulator and the board.
 - **Unaligned data:** only `MEMGET32` (a 32-bit load from `[r]`) reads an
-  unaligned address; every other 16/32-bit load or store and the A=1
-  64-bit forms use the aligned-down address, silently, and the A=0 ("raw")
-  64-bit forms pass the address on unmodified and must be given an aligned
-  one (CPU_ARCHITECTURE.md 8.3). klausscpu-llvm compiles packed-struct
+  unaligned address; every other 16-bit load or store at an odd address,
+  and 32-bit one not at a multiple of 4, stops the CPU (crash dump
+  `ERR=0A`; the emulator stops with `Misaligned`) since klaussCPU 3508f87,
+  where older cores used the aligned-down address silently. The A=1
+  64-bit forms use the aligned-down address, and the A=0 ("raw") 64-bit
+  forms pass the address on unmodified and must be given an aligned one
+  (CPU_ARCHITECTURE.md 8.3). klausscpu-llvm compiles packed-struct
   fields, `memcpy(&w, p, 4/8)` and bytes assembled into words to
   `MEMGET32` (two for 64 bits) and splits unaligned stores into bytes, but a
   plain `uint32_t *` (or `int *`) pointing at an unaligned address, e.g. the
-  address of a packed member, reads and writes the wrong word.
+  address of a packed member, traps.
   `baremetal/programs/test_unaligned.c` checks the compiler's unaligned
   loads at every offset, across doublewords and cache lines, on the board.
-- **The hardware must be klaussCPU 9ad6614 or later.** klausscpu-llvm
-  assumes its squash fixes: a taken fused branch (FBR) may be followed
+- **The hardware must be klaussCPU 3508f87 or later** (the hw-proposals
+  merge): code klausscpu-llvm builds uses its 1-word `CMPRVW`, `MULV` and
+  `LEAPC` forms, which older cores trap on; klausscc's
+  `tests/fixtures/hw_proposals.kla` (`klausscc -i hw_proposals.kla -s -T`)
+  runs every new instruction and stops at the first one on an older core.
+  klausscpu-llvm also assumes 9ad6614's squash fixes: a taken fused branch (FBR) may be followed
   directly by a divide or an LCD write (`divr`/`divur`/`modr`/`modur`/
   `divv`/`modv`, `lcdcmdv`/`lcddatav`/`lcddatar`), compiled or hand-written.
   On an older bitstream the squashed divide kept the divider running and

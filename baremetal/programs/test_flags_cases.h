@@ -71,6 +71,7 @@ void fc_CMPRRW_I(unsigned long *out, unsigned long state, unsigned long a, unsig
 void fc_CMPRR_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_CMPRVU_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_CMPRVW_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_CMPRVW_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_CMPRV_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_CMPRV_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_CMPUGER(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
@@ -97,9 +98,12 @@ void fc_DELAYV(unsigned long *out, unsigned long state, unsigned long a, unsigne
 void fc_DIVR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_DIVUR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_DIVV(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_DI_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_EI_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_ENTER_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_FBR_RI(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_FBR_RR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_FBR_RV(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_GETSP_R(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_INCR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_JMP(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
@@ -188,6 +192,7 @@ void fc_LDIDX8_SH(unsigned long *out, unsigned long state, unsigned long a, unsi
 void fc_LDIDX8_SR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_LDIDX8_S_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_LEAPC(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_LEAPC_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_LEAVERET_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_LEAVE_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_MAXR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
@@ -215,7 +220,10 @@ void fc_MULHR(unsigned long *out, unsigned long state, unsigned long a, unsigned
 void fc_MULHUR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_MULR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_MULUR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_MULUV(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_MULUV_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_MULV(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_MULV_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_MULW(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_NEGR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_NOP_I(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
@@ -279,6 +287,8 @@ void fc_STIDX8_SH(unsigned long *out, unsigned long state, unsigned long a, unsi
 void fc_SUBC(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_SUBR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_SUBW(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_TAILREL(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
+void fc_TAIL_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_XORI(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_XORI_SH(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
 void fc_XORR(unsigned long *out, unsigned long state, unsigned long a, unsigned long b);
@@ -357,6 +367,7 @@ static const struct fc_case fc_cases[] = {
     {"CMPRR_I", fc_CMPRR_I, 0xf, 0},
     {"CMPRVU_I", fc_CMPRVU_I, 0xf, 0},
     {"CMPRVW_I", fc_CMPRVW_I, 0xf, 0},
+    {"CMPRVW_SH", fc_CMPRVW_SH, 0xf, 0},
     {"CMPRV_I", fc_CMPRV_I, 0xf, 0},
     {"CMPRV_SH", fc_CMPRV_SH, 0xf, 0},
     {"CMPUGER", fc_CMPUGER, 0x0, 0},
@@ -383,9 +394,12 @@ static const struct fc_case fc_cases[] = {
     {"DIVR", fc_DIVR, 0x9, 0},
     {"DIVUR", fc_DIVUR, 0x9, 0},
     {"DIVV", fc_DIVV, 0x9, 0},
+    {"DI_I", fc_DI_I, 0x0, 0},
+    {"EI_I", fc_EI_I, 0x0, 0},
     {"ENTER_I", fc_ENTER_I, 0x0, 0},
     {"FBR_RI", fc_FBR_RI, 0x0, 0},
     {"FBR_RR", fc_FBR_RR, 0x0, 0},
+    {"FBR_RV", fc_FBR_RV, 0x0, 0},
     {"GETSP_R", fc_GETSP_R, 0x0, 0},
     {"INCR", fc_INCR, 0xf, 1},
     {"JMP", fc_JMP, 0x0, 0},
@@ -474,6 +488,7 @@ static const struct fc_case fc_cases[] = {
     {"LDIDX8_SR", fc_LDIDX8_SR, 0x0, 0},
     {"LDIDX8_S_SH", fc_LDIDX8_S_SH, 0x0, 0},
     {"LEAPC", fc_LEAPC, 0x0, 0},
+    {"LEAPC_SH", fc_LEAPC_SH, 0x0, 0},
     {"LEAVERET_I", fc_LEAVERET_I, 0x0, 0},
     {"LEAVE_I", fc_LEAVE_I, 0x0, 0},
     {"MAXR", fc_MAXR, 0x0, 0},
@@ -501,7 +516,10 @@ static const struct fc_case fc_cases[] = {
     {"MULHUR", fc_MULHUR, 0xd, 1},
     {"MULR", fc_MULR, 0xd, 1},
     {"MULUR", fc_MULUR, 0xd, 1},
+    {"MULUV", fc_MULUV, 0xd, 0},
+    {"MULUV_SH", fc_MULUV_SH, 0xd, 0},
     {"MULV", fc_MULV, 0xd, 1},
+    {"MULV_SH", fc_MULV_SH, 0xd, 0},
     {"MULW", fc_MULW, 0xd, 1},
     {"NEGR", fc_NEGR, 0x8, 1},
     {"NOP_I", fc_NOP_I, 0x0, 0},
@@ -565,6 +583,8 @@ static const struct fc_case fc_cases[] = {
     {"SUBC", fc_SUBC, 0xf, 0},
     {"SUBR", fc_SUBR, 0xf, 1},
     {"SUBW", fc_SUBW, 0xf, 1},
+    {"TAILREL", fc_TAILREL, 0x0, 0},
+    {"TAIL_SH", fc_TAIL_SH, 0x0, 0},
     {"XORI", fc_XORI, 0x0, 0},
     {"XORI_SH", fc_XORI_SH, 0x0, 0},
     {"XORR", fc_XORR, 0x0, 0},

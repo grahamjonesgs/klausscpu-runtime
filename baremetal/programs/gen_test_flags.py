@@ -72,14 +72,16 @@ t('SETR_SH', '', 'setr\tr3, -5')
 t('SETRU', '', 'setru\tr3, 4026597376')
 t('SETRU_SH', '', 'setru\tr3, 200')
 t('SETR64', '', 'setr64\tr3, 1, 2')
-t('LEAPC', '', 'leapc\tr3, 64')
+t('LEAPC', '', 'leapc\tr3, 100000')
+t('LEAPC_SH', '', 'leapc\tr3, 64')
 # Class 3: the flag-setting CMP writes all four; boolean compares none.
 t('CMPRR_I', 'ZSCV', 'cmprr\tr1, r2')
 t('CMPRRW_I', 'ZSCV', 'cmprrw\tr1, r2')
 t('CMPRV_I', 'ZSCV', 'cmprv\tr1, 100000')
 t('CMPRV_SH', 'ZSCV', 'cmprv\tr1, -5')
 t('CMPRVU_I', 'ZSCV', 'cmprvu\tr1, 4294967295')
-t('CMPRVW_I', 'ZSCV', 'cmprvw\tr1, -3')
+t('CMPRVW_I', 'ZSCV', 'cmprvw\tr1, -100000')
+t('CMPRVW_SH', 'ZSCV', 'cmprvw\tr1, -3')
 for p in 'eq ne lt ge le gt ult uge ule ugt'.split():
     c = 'CMP' + p.upper()
     t(c + 'R', '', 'cmp%sr\tr3, r1, r2' % p)
@@ -136,7 +138,10 @@ for mn in 'mulr mulur mulhr mulhur mulw'.split():
     t(mn.upper(), 'ZSV', RRR.format(mn=mn))
 for mn in 'divr divur modr modur'.split():
     t(mn.upper(), 'ZV', RRR.format(mn=mn))
-t('MULV', 'ZSV', 'mulv\tr3, r1, -3')
+t('MULV', 'ZSV', 'mulv\tr3, r1, -100000')
+t('MULV_SH', 'ZSV', 'mulv\tr3, r1, -3')
+t('MULUV', 'ZSV', 'muluv\tr3, r1, 100000')
+t('MULUV_SH', 'ZSV', 'muluv\tr3, r1, 200')
 t('DIVV', 'ZV', 'divv\tr3, r1, 7')
 t('MODV', 'ZV', 'modv\tr3, r1, 100000')
 # Classes 6/7: loads and stores write no flags.
@@ -182,6 +187,9 @@ READS = {'Z': 'Z', 'NZ': 'Z', 'E': 'Z', 'NE': 'Z', 'C': 'C', 'NC': 'C',
 t('JMP', '', '.4byte\t0xA0000000, 9f')
 t('JMPREL', '', '8:\t.4byte\t0xA1000000, 9f - 8b')
 t('JMP_SH', '', 'jmprel\t9f')
+# A tail call's jump: JMPREL's / JMP_SH's encoding.
+t('TAILREL', '', '8:\t.4byte\t0xA1000000, 9f - 8b')
+t('TAIL_SH', '', 'jmprel\t9f')
 t('JMPR_R', '', 'leapc\tr9, 9f\n\tjmpr\tr9')
 for c, cc in CONDS.items():
     t('JMP' + c, '', '.4byte\t0xA0%s0000, 9f' % cc, reads=READS[c])
@@ -202,6 +210,7 @@ t('RET_I', '', 'callrel\t7f\n\tjmprel\t9f\n7:\tret')
 t('LEAVERET_I', '', 'callrel\t7f\n\tjmprel\t9f\n7:\tenter\t0\n\tleaveret')
 t('FBR_RR', '', 'fbr\tr1, r2, 0, 9f')
 t('FBR_RI', '', 'fbri\tr1, 3, 3, 9f')
+t('FBR_RV', '', 'fbrv\tr1, 100000, 13, 9f')
 # Class 9 stack / SP.
 t('PUSH_R', '', 'push\tr1\n\tpop\tr3')
 t('POP_R', '', 'push\tr2\n\tpop\tr3')
@@ -214,6 +223,10 @@ t('ENTER_I', '', 'enter\t1\n\tleave')
 t('LEAVE_I', '', 'enter\t0\n\tleave')
 # Class B.
 t('NOP_I', '', 'nop')
+# DI / EI (klaussCPU 3508f87): the interrupt-enable bit, no flags; each test
+# leaves it as it found it.
+t('DI_I', '', 'di\tr3\n\tei\tr3')
+t('EI_I', '', 'di\tr9\n\tei\tr9')
 t('DELAYR', '', 'setr\tr9, 2\n\tdelayr\tr9')
 t('DELAYV', '', 'delayv\t2')
 

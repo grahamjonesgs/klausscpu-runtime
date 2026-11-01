@@ -3,8 +3,9 @@
 // MEMGET32 ([r], 32-bit, unsigned) is the CPU's only load that reads an
 // unaligned word: within a doubleword, across two doublewords of one 16-byte
 // cache line (the read lookahead) and across two lines (a second read).
-// Every other 16/32-bit load, and every 64-bit one, aligns its address down,
-// and every sub-word store does too (CPU_ARCHITECTURE.md 8.3).  So LLVM
+// Every other 16/32-bit load or store traps on an unaligned address (since
+// klaussCPU 3508f87; older cores aligned it down), and every 64-bit one
+// reaches the aligned doubleword (CPU_ARCHITECTURE.md 8.3).  So LLVM
 // compiles an under-aligned 32-bit load (packed struct field, memcpy(&w, p,
 // 4), bytes ORed into a word) to MEMGET32 of the computed address, and an
 // under-aligned 64-bit load to two of them; stores stay byte stores.
