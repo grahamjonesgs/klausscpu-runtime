@@ -65,7 +65,9 @@ several runs can go at once.  `make clean` in `baremetal/` is not needed.
 `compare.sh` compares the UART output with `baselines/emu-O1` and
 `baselines/emu-O2`, after filtering the lines that change legitimately with
 code generation (cycle and time figures, addresses, the loader's lines, the
-interrupt race count in test_atomic, Zephyr log timestamps: `uart_filter` in
+interrupt race count in test_atomic, test_big's SD-card root listing and
+free-space line (they follow the card's contents; its `PASS f_readdir` and
+`PASS f_getfree` verdicts stay), Zephyr log timestamps: `uart_filter` in
 `common.sh`; a line that starts with `PASS` or `FAIL` is always kept).
 How each run ended must match the baseline too (`baselines/*/stop.tsv`:
 `Halt`, `InstructionCap`, `Trap`, `InvalidOpcode`, ...): a program that used

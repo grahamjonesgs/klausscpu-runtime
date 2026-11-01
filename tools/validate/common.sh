@@ -88,10 +88,15 @@ emu() {
 # results, computed values) must not change.  A line that starts with PASS or
 # FAIL is a self-check result and is always kept, whatever else it mentions
 # (e.g. crypto_selftest's "PASS  SHA256 ... (55 bytes)").
+# test_big lists the SD card's root directory ("    NAME  SIZE B", one line
+# per file) and prints the card's free space ("  free: N KB"); both follow
+# whatever is on the card, so they are dropped (UART_DROP4).  Its PASS/FAIL
+# lines for f_readdir, f_getfree, f_mkdir, ... stay and check the card works.
 UART_DROP1='^[0-9]{2}:[0-9]{2}:[0-9]{2}|DMIPS|tick count|Sent |bytes|baud'
 UART_DROP2='time=|cycles|CPI|instr=|Calibrated|iterations|Dhrystones|DMIPS|us/run|ms/run|FASTPATH|^mix|^cyc:|^cache:|^branch:|^CSV|^HAZ,|^haz:|Microseconds|per Second|Emulator finished|Arr_2_Glob|^Cycles|^Instructions +:|/Dhrystone|time +:|CLOCK_MS|addr +=|INT_VEC|Runs +:|0x0000[0-9a-f]{4}$'
 UART_DROP3='Sending to board|Completed with|heap_start|^ +sample: |^ +(wbacks|stalls|rd|wr|hits|miss|evict|total)[a-z_]* *:|bigdir|entries|ISR increments; plain counter lost'
-export UART_DROP1 UART_DROP2 UART_DROP3
+UART_DROP4='^    [^ ].* [0-9]+ B$|^  free: [0-9]+ KB$'
+export UART_DROP1 UART_DROP2 UART_DROP3 UART_DROP4
 uart_filter() {
   local f=$1
   {
@@ -104,7 +109,7 @@ uart_filter() {
     fi
   } | tr -d '\r' | sed -E 's/\x1b\[[0-9;]*m//g; s/^\[[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3},[0-9]{3}\] //' \
     | LC_ALL=C awk '/^[ \t]*(PASS|FAIL)/ { print; next }
-        $0 !~ ENVIRON["UART_DROP1"] && $0 !~ ENVIRON["UART_DROP2"] && $0 !~ ENVIRON["UART_DROP3"]'
+        $0 !~ ENVIRON["UART_DROP1"] && $0 !~ ENVIRON["UART_DROP2"] && $0 !~ ENVIRON["UART_DROP3"] && $0 !~ ENVIRON["UART_DROP4"]'
 }
 
 # stop_of <capture> -- why the run ended: the emulator's stop reason (Halt,
