@@ -21,7 +21,7 @@
 
 #define EM_KLAUSSCPU          0x4B43u /* 'K' << 8 | 'C' */
 #define KLAUSSCPU_EF_ABI_MASK 0xFFu
-#define KLAUSSCPU_ABI_VERSION 2u
+#define KLAUSSCPU_ABI_VERSION 3u
 
 /**
  * @brief Check that an extension's ELF header is one this kernel can run.

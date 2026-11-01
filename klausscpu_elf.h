@@ -19,7 +19,7 @@
  * versions; a loader refuses a program built for another one, which would
  * pass and return its arguments differently from the code it calls. */
 #define KLAUSSCPU_EF_ABI_MASK   0xFFu
-#define KLAUSSCPU_ABI_VERSION   2u
+#define KLAUSSCPU_ABI_VERSION   3u
 
 /* Relocation types: S = symbol, A = addend, P = the relocated field. */
 #define R_KLAUSSCPU_NONE    0u

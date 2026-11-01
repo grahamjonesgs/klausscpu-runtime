@@ -61,7 +61,7 @@ MODE=${1:-}; shift || true
 if [ "$MODE" = deps ]; then
   RT=$(cd "$HERE/../.." && pwd)
   SRC=$(cd "${1:?usage: validate.sh deps <checkout>}" && pwd)
-  for p in picolibc-install picolibc-install-oldabi lwip freertos/FreeRTOS-Kernel \
+  for p in picolibc-install lwip freertos/FreeRTOS-Kernel \
            freertos/wolfssl/wolfssl-src freertos/wolfssl/wolfssh-src \
            zephyr-ws/zephyr zephyr-ws/modules zephyr-ws/.west zephyr-ws/.venv \
            zephyr-ws/klausscpu-zephyr/apps/doom/doomgeneric-src \

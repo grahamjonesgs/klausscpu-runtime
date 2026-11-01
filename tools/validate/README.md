@@ -158,7 +158,7 @@ its output with the program's bare-metal baseline (`llext` for a program
 whose extension build differs, such as test_atomic, else `board-O1`, else
 `emu-O1`), and `svc load`s each backend and queries its HTTP route.  The
 kernel refuses an extension built for another C ABI version (the low byte of
-`e_flags`): `run` prints "built for C ABI 0, this kernel is ABI 2 (e_flags
+`e_flags`): `run` prints "built for C ABI 0, this kernel is ABI 3 (e_flags
 0x0): rebuild it" instead of loading it.
 
 **csmith N [FIRST]** — `csmith_run.sh`: each program's checksum from host gcc
@@ -233,9 +233,9 @@ undefined, the host (whose own layout may happen to be aligned) cannot see
 it, and the sanitizer turns it into a `stop-Trap`, which the harness counts
 as a failure; each such trap must be checked in the emulator trace (the
 cloud campaign's 7 packed-struct seeds that trapped were all of this kind).
-The C library follows the toolchain's ABI (the low byte of `e_flags`): an
-ABI-0 toolchain (before klausscpu-llvm's ABI v2) links
-`picolibc-install-oldabi`, since lld refuses to mix ABI versions.
+The C library (`picolibc-install`) must be built with the current toolchain
+(`build-picolibc.sh`): lld refuses to mix ABI versions (the low byte of
+`e_flags`), so a stale one fails the link.
 
 **csmith-board N [FIRST]** — `csmith_board.sh`: one ELF per seed and level
 (-O1 -O2), run on the emulator and on the board, so the RTL is compared with

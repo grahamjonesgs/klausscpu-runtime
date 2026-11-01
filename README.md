@@ -218,7 +218,8 @@ this checkout.
   prints `00000021` (`hw_div_smc.kla` checks its SMC-squash fix the same
   way).
 - **The C ABI changed (klausscpu-llvm `llvm/lib/Target/KlaussCPU/ABI.md`,
-  version 2):** `int`/`unsigned` arguments and results are sign-extended to
+  version 3: `__int128` is 8-aligned, so struct layouts holding one differ
+  from version 2; version 2 is above):** `int`/`unsigned` arguments and results are sign-extended to
   64 bits, structs of up to 16 bytes are passed in registers, and only
   variadic calls reserve the argument home area.  Code built by an older
   toolchain does not mix with it: rebuild picolibc (`./build-picolibc.sh`),

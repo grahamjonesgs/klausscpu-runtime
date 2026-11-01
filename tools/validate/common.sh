@@ -181,10 +181,9 @@ abi_version() {
   rm -rf "$d"
 }
 
-# picolibc_for_toolchain -- the picolibc install that matches the toolchain's
-# ABI: picolibc-install, or picolibc-install-oldabi for an ABI-0 toolchain
-# (lld refuses to mix ABI versions).  $PICOLIBC overrides.
+# picolibc_for_toolchain -- the picolibc install, which must be built with the
+# current toolchain (lld refuses to mix ABI versions).  $PICOLIBC overrides.
 picolibc_for_toolchain() {
   if [ -n "${PICOLIBC:-}" ]; then echo "$PICOLIBC"; return; fi
-  if [ "$(abi_version)" = 0 ]; then echo "$RT/picolibc-install-oldabi"; else echo "$RT/picolibc-install"; fi
+  echo "$RT/picolibc-install"
 }
