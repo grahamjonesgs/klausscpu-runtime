@@ -312,8 +312,6 @@ test_atomic.elf: test_atomic.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 test_diei.elf: test_diei.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_diei.o)
 
-# test_misalign: CASE=0 (nothing traps) by default; the trapping cases are
-# built by tools/validate/misalign.sh with CASEFLAGS=-DCASE=<n>.
 test_hwcg.elf: test_hwcg.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_hwcg.o)
 
@@ -326,6 +324,8 @@ test_leapc_cases.o: programs/test_leapc_cases.S
 test_leapc.elf: test_leapc.o test_leapc_cases.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_leapc_cases.o test_leapc.o)
 
+# test_misalign: CASE=0 (nothing traps) by default; the trapping cases are
+# built by tools/validate/misalign.sh with CASEFLAGS=-DCASE=<n>.
 test_misalign.elf: test_misalign.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_misalign.o)
 
