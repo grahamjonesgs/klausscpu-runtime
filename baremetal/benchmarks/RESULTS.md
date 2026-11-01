@@ -5,6 +5,41 @@ How the benchmarks are built and run, and how they are scored, is in
 work under way will change them, and they will be measured again when it
 lands.
 
+## Progress since May 2026
+
+Board cycles at 100 MHz, the CPU and the compiler of each date.  The
+`perf_baseline` kernels and their tunables are unchanged since the first
+recorded run (-O1 build), so the columns compare directly.  Sources: 29 May,
+[PERF_BASELINE.md](../../PERF_BASELINE.md); 29 Sep, klaussCPU
+`ISA_V3_IMPL.md` (the "+B" column); today, `tools/validate/baselines/perf.tsv`.
+
+| kernel | 29 May | 29 Sep | 2026-11-01 | speed-up | fewer instructions | CPI then → now |
+|---|---:|---:|---:|---:|---:|---|
+| alu | 72.50M | 12.00M | 10.50M | 6.9× | 1.18× | 11.15 → 1.91 |
+| mem_stream | 31.55M | 7.14M | 6.26M | 5.0× | 1.25× | 16.04 → 3.98 |
+| ptr_chase | 38.38M | 8.79M | 8.18M | 4.7× | 2.00× | 15.99 → 6.82 |
+| branchy | 150.62M | 19.19M | 15.16M | 9.9× | 1.65× | 11.87 → 1.97 |
+| calls_fib | 210.84M | 36.66M | 25.94M | 8.1× | 1.86× | 12.81 → 2.93 |
+| muldiv | 15.15M | 1.31M | 1.26M | 12.0× | 1.36× | 20.20 → 2.29 |
+| **geomean** | | | | **7.4×** | **1.5×** | **4.8× lower** |
+
+In May the core was fetch-bound (70-80% of cycles in fetch/decode).  About
+4.8× of the gain is CPI (mostly the CPU work), about 1.5× is fewer
+instructions (the compiler).
+
+Dhrystone 2.1, full benchmark (`-fno-builtin`; the default build is not
+comparable because the current compiler folds most of it away):
+
+| date | cycles per run | DMIPS/MHz | source |
+|---|---:|---:|---|
+| 8 Jul | 3551 | 0.160 | klaussCPU `perf/32b_dhry.txt` |
+| 29 Sep | ~1573 | 0.36 | klaussCPU `ISA_V3_IMPL.md` (63,572 Dhrystones/s) |
+| 2026-11-01 | 1327 | 0.43 | milestone 8 below |
+
+CoreMark and Embench were ported on 27 Oct: since then CoreMark -O2 98.33 →
+106.36 (+8.2%), Embench speed -O2 0.509 → 0.588 (+15.5%), Embench size -O2
+2.563 → 2.240 (12.6% smaller).
+
 ## Milestone 8: toolchain phase 8, klaussCPU `3508f87` (2026-11-01)
 
 The first results on the new RTL (`0de5b21`, posted stores, no fetch-line
