@@ -197,7 +197,8 @@ origin to match.
   reason).  Such a nested entry can also make a level source run its handler
   twice for one event (the other source's thread switch restores
   `INT_MASK` 0xF), so a handler must tolerate a spurious extra call, which
-  acknowledging the device first does.  The `priority` and `flags` arguments are accepted and
+  acknowledging the device first does.  A late call after the source was
+  disabled or disconnected is dropped (the dispatcher checks `INT_VEC`).  The `priority` and `flags` arguments are accepted and
   ignored.  When several sources are pending the hardware picks timer >
   blitter > Ethernet > VGA.  The sources are level-triggered: the handler must
   acknowledge the device (blitter `BLIT_STATUS = 2`, VGA `VGA_STATUS = 2`) or it

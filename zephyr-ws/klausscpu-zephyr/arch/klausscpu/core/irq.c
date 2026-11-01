@@ -142,7 +142,11 @@ void z_klausscpu_irq_dispatch(unsigned int irq)
 {
     const struct _isr_table_entry *e = &_sw_isr_table[irq];
 
-    e->isr(e->arg);
+    /* A stub entered before another stub's DI retired can resume after its
+     * source was disabled or disconnected; that late call is dropped. */
+    if (_INT_VEC(irq) != 0u) {
+        e->isr(e->arg);
+    }
     z_klausscpu_isr_exit();
 }
 
