@@ -13,13 +13,13 @@ recorded run (-O1 build), so the columns compare directly.  Sources: 29 May,
 [PERF_BASELINE.md](../../PERF_BASELINE.md); 29 Sep, klaussCPU
 `ISA_V3_IMPL.md` (the "+B" column); today, `tools/validate/baselines/perf.tsv`.
 
-| kernel | 29 May | 29 Sep | 2026-11-01 | speed-up | fewer instructions | CPI then → now |
+| kernel | 29 May | 29 Sep | 2026-11-02 | speed-up | fewer instructions | CPI then → now |
 |---|---:|---:|---:|---:|---:|---|
 | alu | 72.50M | 12.00M | 10.50M | 6.9× | 1.18× | 11.15 → 1.91 |
 | mem_stream | 31.55M | 7.14M | 6.26M | 5.0× | 1.25× | 16.04 → 3.98 |
 | ptr_chase | 38.38M | 8.79M | 8.18M | 4.7× | 2.00× | 15.99 → 6.82 |
 | branchy | 150.62M | 19.19M | 15.16M | 9.9× | 1.65× | 11.87 → 1.97 |
-| calls_fib | 210.84M | 36.66M | 25.94M | 8.1× | 1.86× | 12.81 → 2.93 |
+| calls_fib | 210.84M | 36.66M | 25.18M | 8.4× | 2.0× | 12.81 → 3.06 |
 | muldiv | 15.15M | 1.31M | 1.26M | 12.0× | 1.36× | 20.20 → 2.29 |
 | **geomean** | | | | **7.4×** | **1.5×** | **4.8× lower** |
 
@@ -34,11 +34,46 @@ comparable because the current compiler folds most of it away):
 |---|---:|---:|---|
 | 8 Jul | 3551 | 0.160 | klaussCPU `perf/32b_dhry.txt` |
 | 29 Sep | ~1573 | 0.36 | klaussCPU `ISA_V3_IMPL.md` (63,572 Dhrystones/s) |
-| 2026-11-01 | 1327 | 0.43 | milestone 8 below |
+| 2026-11-02 | 1327 | 0.43 | milestone 9 below (unchanged since milestone 8) |
 
 CoreMark and Embench were ported on 27 Oct: since then CoreMark -O2 98.33 →
 106.36 (+8.2%), Embench speed -O2 0.509 → 0.588 (+15.5%), Embench size -O2
-2.563 → 2.240 (12.6% smaller).
+2.563 → 2.238 (12.7% smaller).
+
+## Milestone 9: toolchain phase 9, ABI version 3 (2026-11-02)
+
+Same bitstream as milestone 8 (klaussCPU `3508f87`, RTL `0de5b21`), with the
+phase 9 toolchain: `__int128` 8-aligned (C ABI version 3, so everything was
+rebuilt: picolibc, the builtins, wolfSSL/wolfSSH, the bare-metal corpus, all
+Zephyr apps, the SD extensions and the Rust toolchain), no alignment NOPs for
+run-once fall-through loops, and fused post-increment loop exits.
+`tools/validate/validate.sh board` after `vga_off`; the board suite ran twice
+(the runs agree), CoreMark and Embench once, and every CRC and verification
+passes.
+
+| | milestone 8 | milestone 9 |
+|---|---:|---:|
+| CoreMark -O2 | 106.36 | 106.36 |
+| CoreMark -Os | 93.57 | 93.57 |
+| Embench speed -O2 / -Os | 0.588 / 0.530 | 0.588 / 0.530 |
+| Embench size -O2 / -Os | 2.240 / 1.576 | 2.238 / 1.576 |
+| Dhrystone -O1 cycles per run | 211 | 211 |
+| Dhrystone -fno-builtin | 1327 | 1327 |
+| perf_baseline alu | 10.50M | 10.50M |
+| perf_baseline mem_stream | 6.26M | 6.26M |
+| perf_baseline ptr_chase | 8.18M | 8.20M (the committed baseline's own figure, 8,205,238; within 0.5% of milestone 8's) |
+| perf_baseline branchy | 15.16M | 15.16M |
+| perf_baseline calls_fib | 25.94M | **25.18M (-2.9%)** |
+| perf_baseline muldiv | 1.26M | 1.26M |
+
+The only change is `calls_fib` (the fused loop exits; 8.85M to 8.23M
+instructions).  No benchmark has an `__int128` in memory, so the ABI change
+costs nothing here; the gain is in code that has one (the `cas_i128` test lost
+its R7 save and realignment: `enter 7` became `enter 4`).  Zephyr apps
+(rebuilt pristine): mandel 2109 kiter/s (2122), irq_soak 22.28M loops (same),
+tick_cost 656 cycles (652), irq_dev 154752 blit interrupts in 5 s (152256),
+gui_lvgl fill 77, blend50 189, rounded 103, shadow 315, text 239, gradient 64
+ms/frame; all within their tolerances.
 
 ## Milestone 8: toolchain phase 8, klaussCPU `3508f87` (2026-11-01)
 
