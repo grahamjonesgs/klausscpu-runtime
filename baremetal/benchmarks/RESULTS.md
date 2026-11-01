@@ -5,6 +5,31 @@ How the benchmarks are built and run, and how they are scored, is in
 work under way will change them, and they will be measured again when it
 lands.
 
+## Milestone 8: toolchain phase 8, klaussCPU `3508f87` (2026-11-01)
+
+The first results on the new RTL (`0de5b21`, posted stores, no fetch-line
+bubble, the misaligned-access trap, DI/EI) with a compiler that uses it
+(FuseCmpBr on W and imm32 compares, the short CMPRVW/MULV/LEAPC forms, DI/EI
+critical sections, the posted-store schedule, the fetch-line layout), with
+picolibc, the builtins and everything else rebuilt.  `tools/validate/validate.sh
+board`, run twice (agreeing to a few cycles).  Columns: old compiler on the
+old bitstream (milestone 5 / phase 7), old compiler on `3508f87` (the
+hardware session's own run), new compiler on `3508f87`.
+
+| | milestone 5, old RTL | old compiler, `3508f87` | new compiler, `3508f87` |
+|---|---:|---:|---:|
+| CoreMark -O2 | 101.09 (1.011/MHz) | 105.0 | **106.36 (1.064/MHz)** |
+| CoreMark -Os | 89.07 (0.891) | | **93.57 (0.936)** |
+| Embench speed -O2 | 0.554 | 0.579 | **0.588** |
+| Embench speed -Os | 0.501 | | **0.530** |
+| Embench size -O2 / -Os | 2.259 / 1.597 | | 2.240 / 1.576 |
+| Dhrystone -O1 cycles per run | 220 | 211 | 211 |
+| Dhrystone -fno-builtin | 1470 | | 1327 |
+
+CoreMark -O2: 1880380496 cycles; -Os: 2137381403.  `perf_baseline` -O1:
+alu 10.50M, mem_stream 6.26M, ptr_chase 8.18M, branchy 15.16M (16.03M with
+the unplaced loops), calls_fib 25.94M (26.45M), muldiv 1.26M.
+
 ## Milestone 5: toolchain `759085ccb9c3` (2026-10-28)
 
 The default levels after klausscpu-llvm's phase 5 (under-aligned loads,

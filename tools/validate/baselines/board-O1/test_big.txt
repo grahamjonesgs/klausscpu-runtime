@@ -81,7 +81,7 @@ Load Complete OK
   PASS f_lseek
   PASS f_unlink
   PASS unlink-gone
-  free: 30505312 KB
+  free: 30505296 KB
   PASS f_getfree
 
 === Results: 13 pass, 1 fail ===
