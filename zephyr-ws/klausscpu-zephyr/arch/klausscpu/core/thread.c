@@ -91,9 +91,12 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
  * Enable interrupts (EI), then WAIT: the core suspends until an unmasked,
  * vectored interrupt (timer tick, etc.) becomes pending, the ISR is taken via
  * the normal dispatch path, and IRET resumes at the instruction after WAIT.
- * The WAIT wake is level-sensitive, and it wakes on a pending interrupt even
- * while interrupts are disabled (without entering the handler), so the
- * enable-then-WAIT sequence has no lost-wakeup race.  INT_MASK is not
+ * The WAIT wake is level-sensitive and also fires on a pending interrupt
+ * while interrupts are disabled (without entering the handler).  A tick taken
+ * between EI and WAIT still runs its handler and WAIT then sleeps until the
+ * next tick, so the window is bounded by one tick (the same as with the old
+ * INT_MASK sequence).  Doing WAIT with interrupts disabled and then EI would
+ * close it; left for board validation.  INT_MASK is not
  * touched: arch_irq_enable() keeps it at the enabled sources.
  */
 void arch_cpu_idle(void)
