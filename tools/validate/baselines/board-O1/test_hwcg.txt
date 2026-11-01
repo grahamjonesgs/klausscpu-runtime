@@ -1,0 +1,9 @@
+Load Complete OK
+fused branches: 342 + 20 functions, 0 wrong
+range cases: 24 functions, 0 wrong
+CMPRVW.S: 136 functions, 0 wrong
+MULV.S / MULUV.S: 22 constants, 0 wrong
+LEAPC.S: 0 wrong
+=== ALL PASS ===
+
+CPU halted.

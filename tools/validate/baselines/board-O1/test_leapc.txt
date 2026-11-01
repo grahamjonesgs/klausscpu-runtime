@@ -1,0 +1,4 @@
+Load Complete OK
+=== ALL PASS ===
+
+CPU halted.

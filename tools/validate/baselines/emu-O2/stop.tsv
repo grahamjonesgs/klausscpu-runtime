@@ -31,6 +31,9 @@ test_eth	Halt
 test_fatfs_printf	Halt
 test_flags	Halt
 test_fp	Halt
+test_hwcg	Halt
+test_leapc	Halt
+test_misalign	Halt
 test_printf	Halt
 test_rtos	InstructionCap
 test_sd	Halt
@@ -40,3 +43,4 @@ test_sync	InstructionCap
 test_task_exit	Halt
 test_unaligned	Halt
 test_varargs	Halt
+vga_off	Halt

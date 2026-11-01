@@ -12,9 +12,12 @@ test_asm	Halt
 test_atomic	Halt
 test_big	Halt
 test_cache	Halt
+test_diei	Halt
 test_divshadow	Halt
 test_flags	Halt
 test_fp	Halt
+test_hwcg	Halt
+test_leapc	Halt
 test_printf	Halt
 test_rtos	none
 test_switch	Halt

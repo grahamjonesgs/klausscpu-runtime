@@ -1,0 +1,23 @@
+Load Complete OK
+
+=== test_diei: DI / EI ===
+T0 timer interrupts arrive                   PASS
+T1 DI returned 1 (was enabled)               PASS
+T1 no interrupt while disabled               PASS
+T1 EI(1) takes interrupts again              PASS
+T2 inner DI returned 0                       PASS
+T2 EI(0) leaves interrupts off               PASS
+T2 outer EI(1) turns them on                 PASS
+T3 EI(2) keeps interrupts off                PASS
+T3 EI(3) turns them on                       PASS
+T4 WAIT woke, handler not entered            PASS
+T4 interrupt taken at EI                     PASS
+T5 handler ran                               PASS
+T5 DI in the handler returned 1              PASS
+T5 IRET re-enabled the interrupted code      PASS
+T6 counter unchanged inside the section      PASS
+T6 and moves outside it                      PASS
+Results: 16 pass, 0 fail
+test_diei PASSED
+
+CPU halted.

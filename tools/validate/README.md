@@ -89,6 +89,18 @@ differ, S stop differently, M missing`.  It also prints the emulator instruction
 that changed, the totals, and a WARN for any program that grew by more than
 `STATS_TOL` (2%).  Then 4 ABI conformance seeds and 30 Csmith seeds.
 
+**misalign** (part of `quick` on the emulator and of `board` on both) —
+`misalign.sh`: `programs/test_misalign.c` for CASE=0 (byte, MEMGET32 and
+64-bit accesses at every misalignment must not trap; the output must match
+between emulator and board) and for each trapping case (a 16-bit access at an
+odd address, a 32-bit one not 4-aligned: loads, stores, signed, indexed; built
+at -O1 and -O2, with the address hidden from the compiler, which would
+otherwise split an access it can see is misaligned).  A trapping program
+must stop the emulator with `Misaligned`, and on the board print a crash dump
+with `ERR=0A`, PC inside the faulting function, and the call chain in F1 and
+F3 (return addresses into the two callers), and never retire the access.
+The klaussCPU 3508f87 core traps these (older ones aligned the address down).
+
 **full** — quick, plus 300 Csmith seeds at -O0/-O1/-O2/-Os/-Oz (from
 `CSMITH_SEED`, default 1), 150 `--float` seeds, 30 ABI seeds, 100
 g-invariance seeds (see below), the KlaussCPU
@@ -100,7 +112,15 @@ and when the build has lldb and its tests (`LLDB_INCLUDE_TESTS=ON`) every
 oracle snapshot, diffed against `ORACLE_BASE` when that is set (a failed
 `oracle.sh` is a FAIL).
 
-**board** — `board_suite.sh` builds the self-checking programs at -O1, plus
+**board** — first `vga_off` (programs/vga_off.c, also before `zephyr`): the
+VGA controller keeps scanning DRAM out after a GUI program, and with it on
+the CPU's cache-miss penalty doubles (klaussCPU 3508f87: 29 -> 56 cycles,
+`mem_stream` +31%, `ptr_chase` +50%), so a board run after a Zephyr GUI app
+would fail the perf comparison; then `misalign.sh` on the board, then `board_suite.sh` builds the
+self-checking programs at -O1 (among them `test_hwcg`, the compiler's code for
+the 3508f87 instructions: FBR W / imm32 at every predicate and at the range
+limit, CMPRVW.S, MULV.S; `test_leapc`: LEAPC.S around +-32 KiB; `test_diei`;
+`test_flags`), plus
 Dhrystone with `-fno-builtin` (`dhrystone_nobuiltin`, the like-for-like
 figure: since strcpy/strcmp became built-ins the default build folds
 Dhrystone's string work), and runs each twice on the board.  It checks that

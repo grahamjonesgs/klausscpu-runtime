@@ -1,0 +1,4 @@
+--- Captured UART output ---
+vga_off: CTRL was 0x0
+vga_off: CTRL now 0x0
+--- end UART ---

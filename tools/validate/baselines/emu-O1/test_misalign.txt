@@ -1,0 +1,4 @@
+--- Captured UART output ---
+hash 685d99cab8636e65
+=== ALL PASS ===
+--- end UART ---

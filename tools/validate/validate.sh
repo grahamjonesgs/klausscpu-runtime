@@ -4,13 +4,14 @@
 # Modes (see README.md for what each one checks and how long it takes):
 #   quick                 emulator corpus at -O1 and -O2 against the committed
 #                         UART baselines, instruction counts and .text sizes,
-#                         4 ABI conformance seeds, 30 Csmith seeds
+#                         the misaligned-access trap on the emulator, 4 ABI
+#                         conformance seeds, 30 Csmith seeds
 #   full                  quick, plus 300 Csmith seeds (-O0 -O1 -O2 -Os -Oz), 150
 #                         --float seeds, 30 ABI seeds, 100 g-invariance seeds,
 #                         the KlaussCPU lit tests and unit tests, lldb end to
 #                         end on the emulator, and an oracle snapshot (diffed
 #                         against ORACLE_BASE when set)
-#   board                 the board suite at -O1 (each program twice), CoreMark
+#   board                 the misaligned-access trap, the board suite at -O1 (each program twice), CoreMark
 #                         and Embench-IoT at -O2 and -Os (BENCH=0 skips them),
 #                         compared with baselines/perf.tsv
 #   zephyr                Zephyr apps: build, emulator, board (VNC, SSH),
@@ -189,6 +190,7 @@ perf_check() {   # perf_check <metrics.tsv> <key-prefix-regex> <label>
 case $MODE in
 quick)
   emu_corpus
+  run "misalign trap (emulator)" "$OUT/misalign-emu.log" "$HERE/misalign.sh" "$OUT/misalign-emu" emu
   abi 4
   csmith csmith "${CSMITH_SEED:-1}" 30 ""
   ;;
@@ -203,6 +205,8 @@ full)
   oracle "${ORACLE_BASE:-}"
   ;;
 board)
+  run "board idle state (VGA off)" "$OUT/idle.log" board_idle_state "$OUT"
+  run "misalign trap (board)" "$OUT/misalign-board.log" "$HERE/misalign.sh" "$OUT/misalign-board" board
   "$HERE/board_suite.sh" "$OUT/board-O1" -O1
   if "$HERE/compare.sh" "$BASE/board-O1" "$OUT/board-O1" >"$OUT/board-O1.cmp" 2>&1; then
     result PASS "board suite -O1 (UART)" "$(grep '^uart:' "$OUT/board-O1.cmp")"
@@ -230,6 +234,7 @@ board)
   perf_check "$OUT/perf.tsv" "board\.|bench\." board
   ;;
 zephyr)
+  run "board idle state (VGA off)" "$OUT/idle.log" board_idle_state "$OUT"
   "$HERE/zephyr/suite.sh" "$OUT" build emu board >"$OUT/zephyr.log" 2>&1
   grep -E '^(PASS|FAIL)' "$OUT/zephyr.log" | while read -r st rest; do result "$st" "zephyr" "$rest"; done
   perf_check "$OUT/perf.tsv" "zephyr\." zephyr

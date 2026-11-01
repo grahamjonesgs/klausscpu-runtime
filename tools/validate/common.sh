@@ -61,6 +61,21 @@ board() {
   flock "$BOARD_LOCK" timeout "$1" "$KLAUSSCC" -i "$2" -s -m </dev/null >"$3" 2>&1
 }
 
+# board_idle_state <outdir> -- put the board's peripherals back to their reset
+# state before a measurement: the VGA controller keeps scanning DRAM out after
+# a GUI program (programs/vga_off.c), which doubles the CPU's cache-miss
+# penalty.  Builds vga_off in a staged copy and runs it under the board lock.
+board_idle_state() {
+  local d=$1/idle
+  rm -rf "$d"; mkdir -p "$d"
+  stage_baremetal "$d"
+  make -C "$STAGED_BM" vga_off.elf OPT=-O1 >"$d/build.log" 2>&1 || { note "vga_off did not build (see $d/build.log)"; return 1; }
+  board 30 "$STAGED_BM/vga_off.elf" "$d/out.txt"
+  grep -aq 'CTRL now 0x8' "$d/out.txt" || { note "vga_off did not reset the VGA controller (see $d/out.txt)"; return 1; }
+  rm -rf "$d/tree"
+  echo "board idle state: VGA scan-out off ($(grep -a 'CTRL was' "$d/out.txt" | tr -d '\r'))"
+}
+
 # emu <max-instructions> <elf> <out-file> [timeout]
 emu() {
   timeout "${4:-600}" "$KLAUSSCC" -i "$2" --emulate --max-instructions "$1" </dev/null >"$3" 2>&1

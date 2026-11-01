@@ -1,0 +1,3 @@
+--- Captured UART output ---
+=== ALL PASS ===
+--- end UART ---
