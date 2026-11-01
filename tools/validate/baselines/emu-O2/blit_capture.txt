@@ -46,4 +46,13 @@ pass 41: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
 pass 42: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
 pass 43: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
 pass 44: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 45: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 46: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 47: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 48: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 49: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 50: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 51: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 52: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
+pass 53: FAIL 47/48 wrong  first(1,0) got=0000 want=0001
 --- end UART ---

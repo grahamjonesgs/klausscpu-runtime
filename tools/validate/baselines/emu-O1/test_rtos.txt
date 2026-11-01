@@ -17,12 +17,12 @@ Starting RTOS...
 [C] 4 (preempt)
 [A] 2 (yield)
 [B] 5 (sleep 3 ticks)
-[B] 6 (sleep 3 ticks)
 [C] 5 (preempt)
-[B] 7 (sleep 3 ticks)
+[B] 6 (sleep 3 ticks)
 [C] 6 (preempt)
-[A] 3 (yield)
+[B] 7 (sleep 3 ticks)
 [C] 7 (preempt)
+[A] 3 (yield)
 [A] 4 (yield)
 [A] 5 (yield)
 [A] 6 (yield)
@@ -31,10 +31,10 @@ Starting RTOS...
 === all tasks done ===
 scheduling modes: A=yield  B=sleep(3 ticks)  C=preempt
 context switches:
-  [A yield  ] 43
-  [B sleep  ] 35
-  [C preempt] 43
-  [reporter ] 43
+  [A yield  ] 41
+  [B sleep  ] 33
+  [C preempt] 41
+  [reporter ] 41
 switches: PASS  sleep timing: PASS
 Result: PASS
 --- end UART ---
