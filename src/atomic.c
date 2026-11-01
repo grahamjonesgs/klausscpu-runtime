@@ -11,12 +11,17 @@
 //  - larger or misaligned atomics are generic __atomic_* libcalls, which
 //    this runtime does not provide (the link fails).
 //
-// Each function is a critical section: save INT_MASK, write 0, do the plain
-// operation, restore the saved mask.  A store of 0 to INT_MASK is a precise
-// interrupt disable: an interrupt that was about to be taken is re-checked
-// once the pipe has drained and abandoned (CPU_ARCHITECTURE.md §13.1).  An
-// interrupt between the read and the write of INT_MASK is harmless, since
-// IRET restores the mask its handler found.
+// Each function is a critical section: DI (disable interrupts, returning the
+// old enable bit), the plain operation, EI with that bit.  DI/EI are the
+// core's interrupt-enable bit (ISA_ENCODING_V2_MAP.md §8.2), separate from
+// INT_MASK, which stays what it is for: the per-source mask.  An IRQ is never
+// taken between a retired DI and its EI (one that was about to be taken is
+// re-checked once the pipe has drained and abandoned), and WAIT still wakes
+// without entering a handler.  The old bit is what EI restores, so a section
+// nests inside another one (or inside an interrupt handler, where IRET
+// restores the enable bit it saved in the frame's bit 43) and leaves interrupts
+// as it found them.  DI;EI is about 3 cycles; the INT_MASK save / zero /
+// restore it replaces was about 16.5.
 //
 // ATOMIC WITHIN ONE CORE ONLY.  This excludes the core's own interrupt
 // handlers and (through them) RTOS preemption.  It does nothing against the
@@ -38,18 +43,15 @@
 // (-ffunction-sections + --gc-sections keep only the ones used).
 
 #include <stdint.h>
-#include "../mmio.h"
 
+// The builtins are compiler barriers for memory (llvm.klausscpu.di / .ei read
+// and write memory), so the accesses between them stay between them.
 static inline uint32_t irq_save(void) {
-    uint32_t mask = REG_INT_MASK;
-    REG_INT_MASK = 0;
-    __asm__ volatile("" ::: "memory");
-    return mask;
+    return __builtin_klausscpu_di();
 }
 
-static inline void irq_restore(uint32_t mask) {
-    __asm__ volatile("" ::: "memory");
-    REG_INT_MASK = mask;
+static inline void irq_restore(uint32_t key) {
+    __builtin_klausscpu_ei(key);
 }
 
 // T: the unsigned type of the object; S: its signed twin (for min/max).
@@ -60,10 +62,10 @@ static inline void irq_restore(uint32_t mask) {
     uint64_t sync_fetch_and_##OP##_##N(volatile void *ptr, uint64_t arg) {   \
         volatile T *p = (volatile T *)ptr;                                   \
         T val = (T)arg;                                                      \
-        uint32_t mask = irq_save();                                          \
+        uint32_t key = irq_save();                                           \
         T old = *p;                                                          \
         *p = (T)(NEW);                                                       \
-        irq_restore(mask);                                                   \
+        irq_restore(key);                                                    \
         return (uint64_t)old;                                                \
     }
 
@@ -84,10 +86,10 @@ static inline void irq_restore(uint32_t mask) {
         __asm__("__sync_lock_test_and_set_" #N);                             \
     uint64_t sync_lock_test_and_set_##N(volatile void *ptr, uint64_t arg) {  \
         volatile T *p = (volatile T *)ptr;                                   \
-        uint32_t mask = irq_save();                                          \
+        uint32_t key = irq_save();                                           \
         T old = *p;                                                          \
         *p = (T)arg;                                                         \
-        irq_restore(mask);                                                   \
+        irq_restore(key);                                                    \
         return (uint64_t)old;                                                \
     }                                                                        \
                                                                              \
@@ -100,11 +102,11 @@ static inline void irq_restore(uint32_t mask) {
                                            uint64_t expected,                \
                                            uint64_t desired) {               \
         volatile T *p = (volatile T *)ptr;                                   \
-        uint32_t mask = irq_save();                                          \
+        uint32_t key = irq_save();                                           \
         T old = *p;                                                          \
         if (old == (T)expected)                                              \
             *p = (T)desired;                                                 \
-        irq_restore(mask);                                                   \
+        irq_restore(key);                                                    \
         return (uint64_t)old;                                                \
     }
 

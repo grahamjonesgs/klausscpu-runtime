@@ -49,23 +49,25 @@ static ALWAYS_INLINE void arch_nop(void)
     __asm__ volatile("nop");
 }
 
-/* MMIO interrupt-controller base. */
-#define _KLAUSSCPU_INT_MASK (*(volatile uint32_t *)0xF00F0000u)
-
 /*
- * arch_irq_lock / arch_irq_unlock — disable/enable all interrupts.
- * Atomically reads the current mask, writes 0, returns old mask.
+ * arch_irq_lock / arch_irq_unlock — disable/restore all interrupts with the
+ * core's interrupt-enable bit (DI / EI, ISA_ENCODING_V2_MAP.md §8.2), not
+ * INT_MASK (which keeps selecting the sources, arch_irq_enable()).  The key
+ * is the old enable bit: DI returns it and disables, EI puts it back, so
+ * locks nest and leave interrupts as they found them.  About 3 cycles per
+ * lock/unlock pair, against about 16.5 for the INT_MASK read/zero/restore it
+ * replaces.  An IRQ is never taken between a retired DI and its EI, and WAIT
+ * still wakes while disabled.  Boot runs locked (__start executes DI).  Not
+ * atomic against core 2.  Both builtins are compiler barriers for memory.
  */
 static ALWAYS_INLINE unsigned int arch_irq_lock(void)
 {
-    unsigned int key = _KLAUSSCPU_INT_MASK;
-    _KLAUSSCPU_INT_MASK = 0u;
-    return key;
+    return __builtin_klausscpu_di();
 }
 
 static ALWAYS_INLINE void arch_irq_unlock(unsigned int key)
 {
-    _KLAUSSCPU_INT_MASK = key;
+    __builtin_klausscpu_ei(key);
 }
 
 static ALWAYS_INLINE bool arch_irq_unlocked(unsigned int key)

@@ -27,7 +27,7 @@ Boots the kernel, runs the timer ISR, dispatches the main thread, and emits
 | `soc/klausscpu/nexys_a7/linker.ld` | Memory layout — ROM at `0x20`, RAM at `0x00100000`, stack at top |
 | `boards/klausscpu/nexys_a7/nexys_a7.dts` | DTS: console UART, system timer |
 | `boards/klausscpu/nexys_a7/nexys_a7_defconfig` | Per-board Kconfig defaults (XIP=n, minimal libc, UART_CONSOLE, …) |
-| `include/zephyr/arch/klausscpu/arch.h` | Inline `arch_irq_lock`/`unlock`, cycle counter access |
+| `include/zephyr/arch/klausscpu/arch.h` | Inline `arch_irq_lock`/`unlock` (`DI`/`EI`), cycle counter access |
 
 ## Fresh clone — what's tracked vs. fetched
 

@@ -4,11 +4,16 @@
  * Hardware background (pipeline_core.sv, fixed 2026-09-25): the core decides
  * to take an interrupt at a dispatch boundary, then drains the pipeline
  * before pushing the frame. Pre-fix, an OLDER in-flight INT_MASK store
- * (exactly arch_irq_lock's `_KLAUSSCPU_INT_MASK = 0`) landed during that
+ * (then arch_irq_lock's `_KLAUSSCPU_INT_MASK = 0`) landed during that
  * drain and the frame was pushed anyway — the ISR ran inside the critical
  * section, together with one or more section-body instructions that had
  * already dispatched behind the in-flight store. The fix re-checks
  * irq_ready at the drain boundary and abandons the entry.
+ *
+ * arch_irq_lock is now DI (the core's interrupt-enable bit, hw-proposals 7a)
+ * rather than that INT_MASK store; the same drain-time re-check abandons an
+ * entry when a DI committed during the drain. The oracles below only use
+ * irq_lock()/irq_unlock(), so they test whichever the port does.
  *
  * Two independent oracles, both zero-false-positive by in-order retirement:
  *

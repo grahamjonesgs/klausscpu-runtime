@@ -149,13 +149,14 @@ BaseType_t xPortStartScheduler(void) {
 }
 
 void vPortEndScheduler(void) {
+    (void)klauss_irq_disable();
     REG_INT_MASK = 0;
 }
 
 /* ── Critical section ──────────────────────────────────────────────────── */
 
 void vPortEnterCritical(void) {
-    REG_INT_MASK = 0;
+    (void)klauss_irq_disable();
     uxPortCriticalNesting++;
 }
 
@@ -163,7 +164,7 @@ void vPortExitCritical(void) {
     if (uxPortCriticalNesting > 0) {
         uxPortCriticalNesting--;
         if (uxPortCriticalNesting == 0)
-            REG_INT_MASK = 1;
+            klauss_irq_restore(1u);
     }
 }
 

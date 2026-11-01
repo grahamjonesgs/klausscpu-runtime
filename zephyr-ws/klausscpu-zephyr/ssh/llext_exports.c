@@ -90,8 +90,8 @@ EXPORT_SYMBOL(snprintk);
  * read-modify-write, exchange and compare-and-swap of 1, 2, 4 and 8 bytes
  * (forced-atomics model; the ISA has no atomic RMW).  The kernel compiles them
  * from klausscpu-runtime's src/atomic.c (arch/klausscpu/core/CMakeLists.txt),
- * so the kernel and every extension share one set, masking interrupts through
- * INT_MASK as arch_irq_lock() does.  Atomic loads, stores and fences are
+ * so the kernel and every extension share one set, disabling interrupts with
+ * DI/EI as arch_irq_lock() does.  Atomic loads, stores and fences are
  * inline and need nothing.  The C names would clash with clang's __sync
  * builtins (whose address cannot be taken), so each function is declared under
  * another C name bound to its symbol, as atomic.c does, and exported under the

@@ -241,9 +241,8 @@ vPortYield:
        frame. */
     push_cfi r0, 0
     push_cfi r1, 1
-    setr    r0, INT_MASK_ADDR
-    setr    r1, 0
-    memset32 r1, r0                 /* disable timer (REG_INT_MASK = 0) */
+    di      r0                      /* interrupts off (the old enable bit is
+                                       not needed: the frame resumes enabled) */
 
     /* Save remaining registers. */
     push_cfi r2, 2

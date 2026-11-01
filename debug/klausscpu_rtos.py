@@ -14,7 +14,7 @@ port saved when they were switched out.  Both the FreeRTOS port
 frame at the task's saved stack pointer:
 
     [+0]   R15 ... [+120] R0    (16 x 64-bit)
-    [+128] IRET word: [31:0] PC, [38] Z, [36] C, [35] V, [34] S, [42:39] INT_MASK
+    [+128] IRET word: [31:0] PC, [38] Z, [36] C, [35] V, [34] S, [42:39] INT_MASK, [43] interrupts disabled (DI; 0 in a saved frame)
     SP after the IRET = saved SP + 136
 
 Requirements: FreeRTOS works as built.  Zephyr needs CONFIG_THREAD_MONITOR=y

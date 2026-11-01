@@ -156,8 +156,10 @@ this checkout.
   atomic within one core only.** The ISA has no atomic instructions; the
   compiler makes aligned atomic loads/stores of up to 8 bytes plain accesses,
   fences compiler barriers, and every read-modify-write / compare-and-swap a
-  call into `src/atomic.c`, which does the plain operation with `INT_MASK`
-  saved, zeroed and restored. That is atomic against this core's interrupt
+  call into `src/atomic.c`, which does the plain operation between a `DI`
+  (disable interrupts, returning the old enable bit) and an `EI` that puts the
+  bit back (about 3 cycles; `INT_MASK`, the per-source mask, is not touched).
+  That is atomic against this core's interrupt
   handlers and RTOS preemption, not against core 2 (AMP): use the mailbox
   and a D-cache flush for that. Atomics wider than 8 bytes or misaligned
   become `__atomic_*` calls, which nothing provides (link error). The

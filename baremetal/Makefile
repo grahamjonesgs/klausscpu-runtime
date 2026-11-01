@@ -13,6 +13,7 @@
 #   make test_asm       — inline assembly test
 #   make test_printf    — varargs / printf test
 #   make test_atomic    — C atomics (src/atomic.c) incl. a timer-ISR stress test
+#   make test_diei      — DI / EI (the interrupt-enable bit) against a timer interrupt
 #   make test_flags     — the flags each instruction writes vs the compiler's model
 #   make test_divshadow — a divide right behind a fused branch (board only)
 #   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
@@ -174,7 +175,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf test_varargs test_atomic test_flags test_divshadow perf_baseline perf_haz fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs test_atomic test_diei test_flags test_divshadow perf_baseline perf_haz fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
@@ -303,6 +304,9 @@ test_unaligned.elf: test_unaligned.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_atomic.elf: test_atomic.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_atomic.o)
+
+test_diei.elf: test_diei.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_diei.o)
 
 # test_flags: one generated assembly function per instruction
 # (programs/gen_test_flags.py writes test_flags_cases.S / .h).
@@ -576,6 +580,7 @@ test_printf:       test_printf.elf
 test_varargs:      test_varargs.elf
 test_unaligned:    test_unaligned.elf
 test_atomic:       test_atomic.elf
+test_diei:         test_diei.elf
 test_divshadow:    test_divshadow.elf
 perf_baseline:     perf_baseline.elf
 dhrystone:         dhrystone.elf

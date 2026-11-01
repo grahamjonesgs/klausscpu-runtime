@@ -26,8 +26,8 @@ make demo.elf demo.bin
 
 | FreeRTOS concept | KlaussCPU hardware |
 |---|---|
-| `portDISABLE_INTERRUPTS()` | `REG_INT_MASK = 0` |
-| `portENABLE_INTERRUPTS()` | `REG_INT_MASK = 1` |
+| `portDISABLE_INTERRUPTS()` | `DI` (the core's interrupt-enable bit, `klauss_irq_disable()` in `mmio.h`) |
+| `portENABLE_INTERRUPTS()` | `EI` with 1 |
 | Tick interrupt | Timer source 0; period = `CPU_CLK / TICK_RATE_HZ` |
 | `portYIELD()` | `vPortYield()` — CALL-slot patching, no extra hardware |
 
@@ -65,7 +65,7 @@ emulator test (`klausscc --emulate -i task_return.elf`, exit status 0).
 
 **No new hardware required.** Every FreeRTOS primitive maps to existing
 KlaussCPU mechanisms:
-- Critical sections = MMIO mask write (single cycle)
+- Critical sections = `DI` / `EI` (about 3 cycles for the pair; nests through the key `DI` returns, which `portSET_INTERRUPT_MASK_FROM_ISR` uses)
 - Tick = timer interrupt source 0 (already present)
 - Context switch = PUSH/POP R0–R15 + IRET (same as the custom RTOS)
 - Yield = CALL-slot patching trick from `context_switch.S`
@@ -73,7 +73,7 @@ KlaussCPU mechanisms:
 **`portYIELD()` from task context** patches the CALL return-address slot
 into a valid IRET frame (sets INT_MASK[0]=1 in the upper 32 bits at
 `[SP+132]`), allowing the IRET at the end of `vPortYield` to re-enable the
-timer and return to the caller transparently.
+timer (and, with frame bit 43 = 0, interrupts) and return to the caller transparently.
 
 **Kernel stack** (`g_freertos_kernel_sp`): a 256-word (2 KB) static buffer
 in port.c.  The timer ISR switches to this before calling

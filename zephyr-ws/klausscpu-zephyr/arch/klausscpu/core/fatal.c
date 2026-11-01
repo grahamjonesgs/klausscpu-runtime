@@ -25,13 +25,8 @@ void z_klausscpu_fatal_error(unsigned int reason, const z_arch_esf_t *esf)
  */
 FUNC_NORETURN void arch_system_halt(unsigned int reason)
 {
-    /* Disable all interrupts (INT_MASK = 0), then stop. */
-    __asm__ volatile(
-        "setr   r0, 0xF00F0000\n\t"
-        "setr   r1, 0\n\t"
-        "memset32 r1, r0\n\t"
-        : : : "r0", "r1", "memory"
-    );
+    /* Disable all interrupts (DI), then stop. */
+    __asm__ volatile("di r0" : : : "r0", "memory");
     register long r12 __asm__("r12") = (long)reason;
     for (;;) {
         __asm__ volatile("trap" : : "r"(r12));

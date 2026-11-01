@@ -3,11 +3,13 @@
  *
  * KlaussCPU data model: int=32-bit, long/void*=64-bit, addresses 32-bit.
  *
- * Interrupt model: single interrupt source (timer, source 0) controlled by
- * REG_INT_MASK (MMIO 0xF00F_0000).  Write 0 = disable, write 1 = enable.
- * Hardware auto-clears INT_MASK[0] on dispatch; IRET restores it from the
- * saved frame.  This gives free critical-section semantics: disabling the
- * timer is sufficient for mutual exclusion on a single-core CPU.
+ * Interrupt model: single interrupt source (timer, source 0), selected by
+ * REG_INT_MASK (MMIO 0xF00F_0000; the port sets it to 1 when it starts the
+ * first task).  Hardware auto-clears INT_MASK[0] on dispatch; IRET restores
+ * it, and the core's interrupt-enable bit, from the saved frame.  Critical
+ * sections use that enable bit through DI / EI (ISA_ENCODING_V2_MAP.md §8.2),
+ * not the mask: disabling interrupts is sufficient mutual exclusion on a
+ * single-core CPU (not against core 2), and DI;EI is about 3 cycles.
  *
  * Stack: 8-byte slots, grows downward.  StackType_t = uint64_t matches the
  * hardware push/pop unit (PUSH/POP are always 8-byte operations).
@@ -17,7 +19,7 @@
 #define PORTMACRO_H
 
 #include <stdint.h>
-#include "mmio.h"   /* REG_INT_MASK */
+#include "mmio.h"   /* REG_INT_MASK, klauss_irq_disable, klauss_irq_restore */
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,8 +53,8 @@ typedef uint32_t                TickType_t;
  */
 extern uint32_t uxPortCriticalNesting;
 
-#define portDISABLE_INTERRUPTS()    do { REG_INT_MASK = 0; } while (0)
-#define portENABLE_INTERRUPTS()     do { REG_INT_MASK = 1; } while (0)
+#define portDISABLE_INTERRUPTS()    do { (void)klauss_irq_disable(); } while (0)
+#define portENABLE_INTERRUPTS()     do { klauss_irq_restore(1u); } while (0)
 
 void vPortEnterCritical(void);
 void vPortExitCritical(void);
@@ -61,13 +63,12 @@ void vPortExitCritical(void);
 
 /*
  * ISR-safe critical section (used by queue/semaphore routines called from
- * ISRs).  Our timer ISR auto-disables the timer on entry, so nesting is
- * not possible.  Return/restore the previous INT_MASK value.
+ * ISRs).  Returns the previous interrupt-enable bit and restores it, so it
+ * nests.
  */
-#define portSET_INTERRUPT_MASK_FROM_ISR()   \
-    ({ uint32_t _m = REG_INT_MASK; REG_INT_MASK = 0; (UBaseType_t)_m; })
+#define portSET_INTERRUPT_MASK_FROM_ISR()   ((UBaseType_t)klauss_irq_disable())
 #define portCLEAR_INTERRUPT_MASK_FROM_ISR(x) \
-    do { REG_INT_MASK = (uint32_t)(x); } while (0)
+    do { klauss_irq_restore((unsigned int)(x)); } while (0)
 
 /* ── Yield ──────────────────────────────────────────────────────────────── */
 

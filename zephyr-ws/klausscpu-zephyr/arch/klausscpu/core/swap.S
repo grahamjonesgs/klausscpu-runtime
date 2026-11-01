@@ -151,10 +151,15 @@
     .globl  __start
     .type   __start, @function
 __start:
-    /* Disable all interrupts immediately.  On a soft reset (FPGA reprogrammed
-       without a full power cycle) INT_MASK may already be 1 from the previous
-       run.  If a timer IRQ fires before _klausscpu_kernel_sp is initialized
-       the ISR does setsp(0) → crash.  Write 0 here unconditionally. */
+    /* Disable all interrupts immediately: Zephyr's boot code runs locked
+       (arch_irq_lock() returns 0 until the first thread starts).  On a soft
+       reset (FPGA reprogrammed without a full power cycle) INT_MASK may
+       already be 1 from the previous run.  If a timer IRQ fires before
+       _klausscpu_kernel_sp is initialized the ISR does setsp(0) → crash.
+       DI blocks every source; INT_MASK = 0 as well drops the previous run's
+       sources.  The first IRET (arch_switch into the main thread) enables
+       interrupts again (frame bit 43 = 0) and restores INT_MASK[0] = 1. */
+    di      r0
     setr    r0, INT_MASK_ADDR
     setr    r1, 0
     memset32 r1, r0
@@ -246,11 +251,11 @@ arch_switch:
     /* Save R0/R1 first so we can disable the timer safely. */
     push_cfi r0, 0
     push_cfi r1, 1
-    /* Disable timer before completing the register save so a timer IRQ
-       cannot corrupt the half-built frame. */
-    setr    r0, INT_MASK_ADDR
-    setr    r1, 0
-    memset32 r1, r0
+    /* Disable interrupts before completing the register save so a timer
+       IRQ cannot corrupt the half-built frame.  DI, not INT_MASK = 0: the
+       mask keeps selecting the sources, and the thread resumes (IRET) with
+       the enable bit from its frame, which is 0 = enabled. */
+    di      r0
 
     /*
      * ISR-context fast path.

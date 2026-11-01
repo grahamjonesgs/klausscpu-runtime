@@ -63,8 +63,11 @@ typedef struct {
 
 #include "mmio.h"
 
-static inline void rtos_mutex_lock(void)   { REG_INT_MASK = 0; }
-static inline void rtos_mutex_unlock(void) { REG_INT_MASK = 1; }
+// DI / EI, not INT_MASK: the mask stays what selects the interrupt sources.
+// Not nestable (unlock always enables); a nesting section takes the key
+// klauss_irq_disable() returns (mmio.h) and gives it to klauss_irq_restore().
+static inline void rtos_mutex_lock(void)   { (void)klauss_irq_disable(); }
+static inline void rtos_mutex_unlock(void) { klauss_irq_restore(1u); }
 
 // ── API ────────────────────────────────────────────────────────────────────
 

@@ -25,6 +25,7 @@ test_asm	Halt
 test_atomic	Halt
 test_big	Halt
 test_cache	Halt
+test_diei	Halt
 test_divshadow	Halt
 test_eth	Halt
 test_fatfs_printf	Halt

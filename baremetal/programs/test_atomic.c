@@ -7,7 +7,8 @@
 //      that the libcall's zero-extended result compares right.
 //  T2  the __sync_* builtins (val/bool CAS, lock_test_and_set/release).
 //  T3  C11 <stdatomic.h>: _Atomic objects, atomic_flag, fences.
-//  T4  a libcall leaves INT_MASK as it found it.
+//  T4  a libcall leaves INT_MASK and the interrupt-enable bit (DI/EI) as it
+//      found them: interrupts that were off stay off, those on stay on.
 //  T5  stress: a timer ISR and main both increment counters of every width
 //      (fetch_add, and a CAS loop at 8 bytes); the totals must be exact.
 //      A plain counter, read before those atomic ops and written back after
@@ -182,7 +183,26 @@ static void test_c11(void) {
                                         atomic_is_lock_free(&c11_long));
 }
 
-// ── T4: INT_MASK is restored ─────────────────────────────────────────────
+// ── T4: INT_MASK and the interrupt-enable bit are restored ───────────────
+// A libcall runs DI ... EI(old bit): inside another critical section it must
+// leave interrupts off, outside one on.  DI returns the bit it found, so
+// probing the state is a DI (which leaves them off; EI puts the state back).
+static void test_enable(void) {
+    static uint32_t v;
+    unsigned outer = __builtin_klausscpu_di();       // off from here
+    __atomic_fetch_add(&v, 1, SC);
+    __atomic_exchange_n(&v, 0, SC);
+    unsigned off = __builtin_klausscpu_di();         // 0: they were still off
+    __builtin_klausscpu_ei(1);                       // on
+    __atomic_fetch_add(&v, 1, SC);
+    __atomic_exchange_n(&v, 0, SC);
+    unsigned on = __builtin_klausscpu_di();          // 1: they were still on
+    __builtin_klausscpu_ei(outer);
+    check("atomics keep interrupts off", off == 0);
+    check("atomics keep interrupts on", on == 1);
+}
+
+
 #ifdef KLAUSS_LLEXT
 static void test_mask(void) {
     static uint32_t v;
@@ -298,7 +318,8 @@ int main(void) {
     printf("T1/T2 per-width ops: %d pass, %d fail\n", pass, fail);
     test_c11();
     test_mask();
-    printf("T3/T4 C11 + INT_MASK: %d pass, %d fail\n", pass, fail);
+    test_enable();
+    printf("T3/T4 C11 + interrupt state: %d pass, %d fail\n", pass, fail);
 #ifndef KLAUSS_LLEXT
     test_stress();
 #endif

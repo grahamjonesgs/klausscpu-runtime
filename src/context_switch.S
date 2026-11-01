@@ -177,12 +177,11 @@ rtos_first_task:
     .globl  rtos_yield
     .type   rtos_yield, @function
 rtos_yield:
-    // ① Save R0 and R1 first so we can use them as scratch to disable timer.
+    // ① Save R0 and R1 first so we can use R0 as scratch to disable interrupts.
     push    r0
     push    r1
-    setr    r0, 0xF00F0000           // REG_INT_MASK address
-    setr    r1, 0
-    memset32 r1, r0                  // disable timer (prevent re-entry)
+    di      r0                       // interrupts off (prevent re-entry); the
+                                     // frame resumes enabled, so the old bit is not needed
 
     // ② Save remaining registers.
     push    r2

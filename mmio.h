@@ -196,10 +196,19 @@ static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_
 #define INT_SRC_ETH     2u   /* LiteEth RX/TX combined (level; ISR W1Cs RX_/TX_EV_PENDING) */
 #define INT_SRC_VGA     3u   /* VGA vsync, start of vblank (level; ISR W1Cs VGA_STATUS bit 1) */
 
-/* INT_MASK value the lwIP port restores after a critical section. The
- * network stacks still poll the MAC, so only the timer is enabled; a
- * program that takes the ETH interrupt ORs in (1u << INT_SRC_ETH).        */
-#define INTMASK_ALL     1u
+/* Interrupt enable (DI / EI, ISA_ENCODING_V2_MAP.md §8.2): the core's own
+ * enable bit, separate from the per-source INT_MASK.  klauss_irq_disable()
+ * returns the old bit and klauss_irq_restore() puts it back, so critical
+ * sections nest and leave interrupts as they found them; both are compiler
+ * barriers for memory.  Not atomic against the second (AMP) core.         */
+static inline unsigned int klauss_irq_disable(void)
+{
+    return __builtin_klausscpu_di();
+}
+static inline void klauss_irq_restore(unsigned int key)
+{
+    __builtin_klausscpu_ei(key);
+}
 
 /* ── VGA output — 0xF011_xxxx (KlaussCPU VGA_PLAN.md) ───────────────────── */
 /* 640x480@60 (59.5 Hz). All registers 64-bit, 8 B apart. CTRL scanout   */
