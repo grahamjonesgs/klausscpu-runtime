@@ -188,8 +188,16 @@ origin to match.
   all registers on the interrupted stack, executes **DI**, runs the handler on
   `z_interrupt_stacks` (`CONFIG_ISR_STACK_SIZE`, 4096 here) and resumes the
   highest-priority ready thread at exit, as the tick always did.  So a handler
-  runs to completion with interrupts disabled: nothing preempts it, there is
-  no nesting, and the `priority` and `flags` arguments are accepted and
+  runs to completion with interrupts disabled once the stub's DI has retired,
+  so handlers never nest.  The hardware does not set DI on entry, though, so
+  a second source can be taken between the entry and the DI: its frame and
+  register save (136 bytes each) then sit on the interrupted thread's own
+  stack twice.  Every thread stack must have about 280 bytes of headroom for
+  this beyond its own use (`CONFIG_IDLE_STACK_SIZE` is 1024 here for that
+  reason).  Such a nested entry can also make a level source run its handler
+  twice for one event (the other source's thread switch restores
+  `INT_MASK` 0xF), so a handler must tolerate a spurious extra call, which
+  acknowledging the device first does.  The `priority` and `flags` arguments are accepted and
   ignored.  When several sources are pending the hardware picks timer >
   blitter > Ethernet > VGA.  The sources are level-triggered: the handler must
   acknowledge the device (blitter `BLIT_STATUS = 2`, VGA `VGA_STATUS = 2`) or it
@@ -199,7 +207,8 @@ origin to match.
   thread's frame was written would be undone when it resumed.  A source that is
   enabled with no connection ends in a fatal `K_ERR_SPURIOUS_IRQ`
   ("spurious interrupt, IRQ n has no handler").  The Ethernet driver still
-  polls.  `apps/irq_dev` proves it on the board with real device interrupts
+  polls, so source 2 (stub, table entry, dispatch) is **untested on the
+  board**.  `apps/irq_dev` proves it on the board with real device interrupts
   (see Layout); `irq.c` has the details.
 - **VGA output needs a VGA bitstream.** `CONFIG_KLAUSSCPU_VGA` (`vnc/vga_out.c`,
   on in the doom, gui_demo, gui_lvgl and mandel `prj.conf`) also shows the

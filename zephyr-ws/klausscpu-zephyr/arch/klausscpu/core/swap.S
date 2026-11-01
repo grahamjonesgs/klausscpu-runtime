@@ -366,7 +366,10 @@ arch_switch:
  * entry and the DI retiring another source may be taken: it nests as a
  * complete interrupt (its own frame and register save below ours, its handler
  * on the ISR stack, IRET back into this stub's first instructions), which is
- * safe because the stub has not touched any shared state yet.  After the DI
+ * safe for kernel state because the stub has not touched any yet.  It costs
+ * a second 136 bytes of the interrupted thread's stack (see
+ * CONFIG_IDLE_STACK_SIZE in Kconfig), and a level source can then run its
+ * handler twice (the other source's thread switch restores INT_MASK 0xF).  After the DI
  * nothing can interrupt it, so the stubs share _klausscpu_in_isr and
  * _klausscpu_isr_handle without nesting.  It then records "in ISR", stores the
  * interrupted SP in current->switch_handle and _klausscpu_isr_handle, and

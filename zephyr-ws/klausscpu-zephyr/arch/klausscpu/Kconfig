@@ -59,3 +59,11 @@ config MMU
 # runs every expiring k_timer callback, and a device handler may printk.
 config ISR_STACK_SIZE
 	default 4096
+
+# The hardware does not set DI on interrupt entry, so a second source can be
+# taken before a stub's DI retires and its frame (8 bytes) plus register save
+# (128 bytes) lands on the interrupted thread's own stack, a second time.  Every
+# thread stack must hold two such frames (about 280 bytes) beyond its own use.
+# The idle thread's default (256) does not.
+config IDLE_STACK_SIZE
+	default 1024

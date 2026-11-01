@@ -217,5 +217,5 @@ zephyr.gui_lvgl.gradient.ms_frame	64	lower	5
 # 2026-11-01: 10 zephyr values from toolchain 5eada47c6210
 # 2026-11-01: tick_cost and irq_dev (Zephyr device interrupts) added, toolchain ee4225372285
 zephyr.tick_cost.median_cycles	652	lower	5
-zephyr.irq_dev.blit_irqs_5s	156544	higher	2
+zephyr.irq_dev.blit_irqs_5s	152256	higher	2
 # 2026-11-01: 12 zephyr values (gui_lvgl text 260 -> 238, gradient 58 -> 64 with the interrupt rework; irq_soak 22283264 measured alone, 22199296 inside the suite)

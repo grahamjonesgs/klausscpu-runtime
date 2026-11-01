@@ -52,6 +52,7 @@
 #include <zephyr/irq.h>
 #include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
+#include <string.h>
 #include <zephyr/debug/thread_analyzer.h>
 #include <errno.h>
 
@@ -225,6 +226,18 @@ K_THREAD_DEFINE(blit_tid, 2048, blit_main, NULL, NULL, NULL, 3, 0, 0);
 
 /* irq_soak's critical-section oracles, in a low-priority thread so that the
  * interrupts' wake-ups preempt it at ISR exit. */
+/* The hardware does not set DI on entry, so a second source can nest a second
+ * stub frame (136 bytes) on a thread's own stack before the first stub's DI.
+ * Every thread, the idle thread above all, keeps room for two. */
+static unsigned int g_idle_unused = ~0u;
+
+static void stack_cb(struct thread_analyzer_info *info)
+{
+	if (info->name != NULL && strcmp(info->name, "idle") == 0) {
+		g_idle_unused = info->stack_size - info->stack_used;
+	}
+}
+
 static void soak_main(void *a, void *b, void *c)
 {
 	ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
@@ -388,6 +401,10 @@ int main(void)
 
 	/* ── E: ISR stack high-water mark ─────────────────────────────────── */
 		thread_analyzer_print();
+	thread_analyzer_run(stack_cb);
+	printk("IRQDEV idle stack unused: %u\n", g_idle_unused);
+	check("idle stack keeps room for two nested stub frames (>= 280 bytes)",
+	      g_idle_unused >= 280);
 
 	/* The controller as we found it. */
 	VGA_CTRL = VGA_CTRL_TEST_PATTERN;
