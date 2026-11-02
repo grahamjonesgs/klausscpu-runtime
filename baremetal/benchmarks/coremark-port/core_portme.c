@@ -25,6 +25,7 @@
 #include "coremark.h"
 #include "core_portme.h"
 #include "../../../mmio.h"
+#include "../perf_stalls.h"
 
 #ifndef ITERATIONS
 #define ITERATIONS 0
@@ -54,6 +55,7 @@ static CORE_TICKS start_time_val, stop_time_val;
 static uint64_t   start_instr_val, stop_instr_val;
 
 void start_time(void) {
+    PERF_STALLS_START();
     start_instr_val = REG_PERF_INSTR;
     start_time_val  = REG_PERF_CYCLES;
 }
@@ -61,6 +63,7 @@ void start_time(void) {
 void stop_time(void) {
     stop_time_val  = REG_PERF_CYCLES;
     stop_instr_val = REG_PERF_INSTR;
+    PERF_STALLS_STOP();
 }
 
 CORE_TICKS get_time(void) {
@@ -123,6 +126,7 @@ void portable_fini(core_portable *p) {
     printf("CSV,coremark,%lu,%lu,%lu,%lu,%lu,%s\n",
            (unsigned long)it, (unsigned long)cyc, (unsigned long)instr,
            (unsigned long)cm_milli, (unsigned long)cm_mhz_milli, status);
+    PERF_STALLS_PRINT(cyc);
     fflush(stdout);
     if (r->err)
         exit(1);

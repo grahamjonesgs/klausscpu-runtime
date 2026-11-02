@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "../../../mmio.h"
+#include "../perf_stalls.h"
 
 #ifndef EMBENCH_NAME
 #define EMBENCH_NAME "unknown"
@@ -41,6 +42,7 @@ void __attribute__ ((noinline))
 start_trigger (void)
 {
 #ifndef EMBENCH_SIZE_BUILD
+  PERF_STALLS_START ();
   start_instr = REG_PERF_INSTR;
   start_cyc = REG_PERF_CYCLES;
 #endif
@@ -54,6 +56,7 @@ stop_trigger (void)
 #ifndef EMBENCH_SIZE_BUILD
   stop_cyc = REG_PERF_CYCLES;
   stop_instr = REG_PERF_INSTR;
+  PERF_STALLS_STOP ();
 #endif
 }
 
@@ -82,6 +85,7 @@ main (void)
           verify_result, status);
   printf ("CSV,embench,%s,%lu,%lu,%d,%s\n", EMBENCH_NAME,
           (unsigned long) cyc, (unsigned long) instr, verify_result, status);
+  PERF_STALLS_PRINT (cyc);
   fflush (stdout);
   return verify_result == 1 ? 0 : rc ? rc : 1;
 }
