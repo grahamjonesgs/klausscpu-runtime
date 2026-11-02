@@ -6,6 +6,10 @@ bare-metal C runtime + test programs, a **FreeRTOS** port (with lwIP, wolfSSL,
 wolfSSH, FatFs), and a **Zephyr** port (`zephyr-ws/klausscpu-zephyr`, including an
 SSH shell app with loadable LLEXT extensions).
 
+The AMP "core 2" experiment (a second core serving VNC) was removed in
+klaussCPU `EN_CORE2=0` (2026-11-02); the CPU is single-core and core 1 always
+owns LiteEth.
+
 It was split out of the `klausscpu-llvm` fork so the ~8 MB of software isn't
 dragged around by the 3.6 GB compiler history. **It is not self-contained: it
 needs a *built* `klausscpu-llvm` toolchain.**
@@ -160,8 +164,7 @@ this checkout.
   (disable interrupts, returning the old enable bit) and an `EI` that puts the
   bit back (about 3 cycles; `INT_MASK`, the per-source mask, is not touched).
   That is atomic against this core's interrupt
-  handlers and RTOS preemption, not against core 2 (AMP): use the mailbox
-  and a D-cache flush for that. Atomics wider than 8 bytes or misaligned
+  handlers and RTOS preemption (the CPU is single-core). Atomics wider than 8 bytes or misaligned
   become `__atomic_*` calls, which nothing provides (link error). The
   bare-metal, FreeRTOS and Zephyr builds all link it (Zephyr's own `atomic_t`
   API is `ATOMIC_OPERATIONS_C` and does not use it), and the Zephyr kernel

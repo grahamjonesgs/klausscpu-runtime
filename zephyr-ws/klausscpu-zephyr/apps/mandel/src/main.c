@@ -1,20 +1,15 @@
 /*
- * main.c — Mandelbrot zoom over VNC: a two-core showcase.
+ * main.c — Mandelbrot zoom over VNC.
  *
- * Core 1 computes a zoom into Seahorse Valley, 320x200, as 8-bit palette
+ * The core computes a zoom into Seahorse Valley, 320x200, as 8-bit palette
  * indices (64-bit fixed point, 28 fraction bits, cardioid/bulb skip).  Images
  * are double-buffered: while the next one computes, the finished one is
  * re-posted every POST_MS, scaled up toward the next image's zoom and with
  * the palette rotated one step, so the display zooms smoothly at ~25 fps
  * however long an image takes (see "continuous zoom" below).
  *
- *  - Two-core build (amp.conf): core 2 owns the network and serves VNC from
- *    the 8-bit indexed source (colour-map clients get the indices as-is; the
- *    RGB565 framebuffer is filled only while a true-colour client needs it).
- *    Core 1 does nothing but compute and post.
- *  - Single-core build (prj.conf only): core 1 also runs Zephyr's TCP/IP
- *    stack and the VNC server, and converts every post to RGB565 — the
- *    comparison.
+ * The single core also runs Zephyr's TCP/IP stack and the VNC server, and
+ * converts every post to RGB565.
  *
  * Console, every 5 s: images and posts completed, and compute throughput in
  * millions of iterations per second (the number to compare between builds).
@@ -33,9 +28,6 @@
 #include "framebuffer.h"
 #ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 #include "vnc_server.h"
-#endif
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-#include "amp_host.h"
 #endif
 #ifdef CONFIG_KLAUSSCPU_VGA
 #include "vga_out.h"
@@ -167,7 +159,7 @@ static void convert_to_fb(const uint8_t *src)
  * ZOOM_DEN/ZOOM_NUM over the time the previous image took to compute: when
  * the next exact image is ready the display has already reached its zoom,
  * and swapping it in just sharpens the detail (nearest-neighbour, as XaoS
- * does).  Two display buffers so core 2 never streams one being written. */
+ * does).  Two display buffers so the VNC server never streams one being written. */
 #define ZOOM_NUM 15              /* each image: step *= 15/16 */
 #define ZOOM_DEN 16
 
@@ -226,17 +218,8 @@ static void post(void)
 	 * so it does not depend on the RGB565 framebuffer being filled. */
 	(void)vga_out_show_indexed(d, W, H, pal);
 #endif
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-	(void)amp_set_indexed(d, W);
-	amp_set_palette(pal);
-	if (amp_want_rgb565()) {
-		convert_to_fb(d);
-	}
-	amp_post_frame(0, 0, W, H);
-#else
 	convert_to_fb(d);
 	fb_mark_dirty(0, 0, W, H);
-#endif
 	n_posts++;
 }
 
@@ -343,7 +326,7 @@ static void mandel_entry(void *a, void *b, void *c)
 	}
 }
 
-/* ── network (single-core build only) ────────────────────────────────────── */
+/* ── network ───────────────────────────────────────────────────────── */
 #ifdef CONFIG_NETWORKING
 static struct net_mgmt_event_callback dhcp_cb;
 static struct k_sem dhcp_sem;
@@ -381,19 +364,12 @@ static int wait_for_dhcp(void)
 
 int main(void)
 {
-	printk("\nKlaussCPU Mandelbrot (%s)\n",
-	       IS_ENABLED(CONFIG_KLAUSSCPU_AMP_VNC) ? "two cores" : "single core");
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-	if (amp_host_init() != 0) {
-		LOG_ERR("AMP core 2 failed to start — no display");
-	}
-#else
+	printk("\nKlaussCPU Mandelbrot\n");
 	if (wait_for_dhcp() != 0) {
 		LOG_WRN("no network — VNC will be unreachable");
 	}
 	vnc_server_start();
 	LOG_INF("VNC server ready on port 5900");
-#endif
 
 	k_thread_create(&mandel_thread, mandel_stack, K_THREAD_STACK_SIZEOF(mandel_stack),
 			mandel_entry, NULL, NULL, NULL, MANDEL_PRIO, 0, K_NO_WAIT);

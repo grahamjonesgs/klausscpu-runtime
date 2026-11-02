@@ -59,8 +59,7 @@ static ALWAYS_INLINE void arch_nop(void)
  * locks nest and leave interrupts as they found them.  About 3 cycles per
  * lock/unlock pair, against about 16.5 for the INT_MASK read/zero/restore it
  * replaces.  An IRQ is never taken between a retired DI and its EI, and WAIT
- * still wakes while disabled.  Boot runs locked (__start executes DI).  Not
- * atomic against core 2.  Both builtins are compiler barriers for memory.
+ * still wakes while disabled.  Boot runs locked (__start executes DI).  Both builtins are compiler barriers for memory.
  */
 static ALWAYS_INLINE unsigned int arch_irq_lock(void)
 {

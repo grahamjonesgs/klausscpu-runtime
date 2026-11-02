@@ -28,9 +28,6 @@
 #ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 #include "vnc_server.h"
 #endif
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-#include "amp_host.h"        /* VNC served by AMP core 2 (P4b) */
-#endif
 #ifdef CONFIG_KLAUSSCPU_VGA
 #include "vga_out.h"         /* KlaussCPU VGA port: 8-bit frames + palette */
 #endif
@@ -89,44 +86,25 @@ void DG_DrawFrame(void)
 	/* The RGB565 framebuffer only feeds VNC.  VGA takes Doom's 8-bit frame
 	 * directly (zero-copy, below), so a VGA-only build skips the
 	 * per-pixel conversion entirely. */
-#if defined(CONFIG_KLAUSSCPU_VNC_SERVER) || defined(CONFIG_KLAUSSCPU_AMP_VNC)
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 	bool convert = true;
 #else
 	bool convert = false;
 #endif
-#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
+#ifdef CONFIG_KLAUSSCPU_VGA
 	uint32_t rgb[256];
 	bool rgb_new = false;
-#endif
-
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-	/* AMP: also publish Doom's 8-bit frame + palette, so core 2 can serve
-	 * colour-map VNC clients directly (needs the framebuffer's geometry).
-	 * Fill the RGB565 framebuffer only while a client needs it. */
-	static bool idx_published;
-	const bool same_geometry = FB_XOFF == 0 && FB_YOFF == 0 &&
-				   FB_WIDTH == DOOMGENERIC_RESX && FB_HEIGHT == DOOMGENERIC_RESY;
-
-	if (same_geometry) {
-		if (!idx_published) {
-			idx_published = (amp_set_indexed(src, DOOMGENERIC_RESX) == 0);
-		}
-		convert = !idx_published || amp_want_rgb565();
-	}
 #endif
 
 	if (palette_changed) {
 		for (int i = 0; i < 256; i++) {
 			pal565[i] = fb_rgb(colors[i].r, colors[i].g, colors[i].b);
-#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
+#ifdef CONFIG_KLAUSSCPU_VGA
 			rgb[i] = ((uint32_t)colors[i].r << 16) | ((uint32_t)colors[i].g << 8) | colors[i].b;
 #endif
 		}
-#if defined(CONFIG_KLAUSSCPU_AMP_VNC) || defined(CONFIG_KLAUSSCPU_VGA)
+#ifdef CONFIG_KLAUSSCPU_VGA
 		rgb_new = true;
-#endif
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-		amp_set_palette(rgb);
 #endif
 		palette_changed = false;
 	}
@@ -161,11 +139,6 @@ void DG_DrawFrame(void)
 #ifdef CONFIG_KLAUSSCPU_VGA
 	{
 		const uint32_t *pal = rgb_new ? rgb : NULL;
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-		/* AMP: core 2 reads Doom's buffer at the address published once
-		 * (amp_set_indexed), so DG_ScreenBuffer must not move — copy. */
-		vga_out_show_indexed(src, DOOMGENERIC_RESX, DOOMGENERIC_RESY, pal);
-#else
 		/* Zero-copy: I_FinishUpdate rewrites the whole of DG_ScreenBuffer
 		 * every frame, so point it at a free VGA buffer and present that
 		 * buffer as-is (triple-buffered: never one on screen).  The first
@@ -178,7 +151,6 @@ void DG_DrawFrame(void)
 		if (next != NULL) {
 			DG_ScreenBuffer = (pixel_t *)next;
 		}
-#endif
 	}
 #endif
 #else
@@ -201,12 +173,7 @@ void DG_DrawFrame(void)
 #endif
 	fb_unlock();
 
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-	/* AMP: the frame is served by core 2 — publish it (cache FLUSH + seq++). */
-	amp_post_frame(FB_XOFF, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
-#else
 	fb_mark_dirty(FB_XOFF, FB_YOFF, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
-#endif
 }
 
 void DG_SleepMs(uint32_t ms)
@@ -296,7 +263,7 @@ static void on_key(bool pressed, uint32_t keysym)
 	key_queue[wr] = (unsigned short)(((unsigned int)pressed << 8) | k);
 	key_wr = (wr + 1u) % KEYQUEUE_SIZE;
 }
-#endif /* CONFIG_KLAUSSCPU_VNC_SERVER — AMP builds: no key input path yet */
+#endif /* CONFIG_KLAUSSCPU_VNC_SERVER */
 
 int DG_GetKey(int *pressed, unsigned char *key)
 {
@@ -460,12 +427,7 @@ int main(void)
 	if (mount_sd() != 0) {
 		LOG_ERR("no SD card — cannot load WAD");
 	}
-#ifdef CONFIG_KLAUSSCPU_AMP_VNC
-	/* P4b: core 2 owns the network and serves VNC; this core only renders. */
-	if (amp_host_init() != 0) {
-		LOG_ERR("AMP core 2 failed to start — no display");
-	}
-#elif defined(CONFIG_KLAUSSCPU_VNC_SERVER)
+#ifdef CONFIG_KLAUSSCPU_VNC_SERVER
 	if (wait_for_dhcp() != 0) {
 		LOG_WRN("no network — VNC will be unreachable");
 	}

@@ -58,8 +58,7 @@ Every build also drives the board's **VGA port** (`CONFIG_KLAUSSCPU_VGA=y` in
 VGA's palette mode, letterboxed 320×200 → 640×400 in the 640×480 picture.
 They are triple-buffered and flipped at vblank, so there is no tearing, and
 they are **zero-copy**: `DG_ScreenBuffer` is pointed at a free VGA buffer
-each frame, so `I_FinishUpdate` renders straight into it. AMP builds copy
-instead, because core 2 reads the buffer at a fixed address. VNC and VGA
+each frame, so `I_FinishUpdate` renders straight into it. VNC and VGA
 show the same game.
 
 **The VGA port needs a klaussCPU bitstream built from its `vga-output`
@@ -84,8 +83,6 @@ Measured on the board, averaged over the same 27 attract-mode demo windows:
 | Build | Gameplay fps |
 |---|---|
 | `vga.conf` (zero-copy) | **24.7** |
-| AMP + VNC, no VGA | 23.7 |
-| AMP + VNC + VGA (copy) | 20.8 |
 
 The VGA hand-off costs under 1 ms per frame (one cache flush), with 0
 display underflows; the profile line prints `vga_underflows`. The title

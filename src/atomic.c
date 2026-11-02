@@ -23,10 +23,8 @@
 // as it found them.  DI;EI is about 3 cycles; the INT_MASK save / zero /
 // restore it replaces was about 16.5.
 //
-// ATOMIC WITHIN ONE CORE ONLY.  This excludes the core's own interrupt
-// handlers and (through them) RTOS preemption.  It does nothing against the
-// second (AMP) core, whose view of DDR also bypasses core 1's write-back
-// D-cache: talk to core 2 through the mailbox, with an explicit cache flush.
+// This excludes the core's own interrupt handlers and (through them) RTOS
+// preemption.  The CPU is single-core; DMA masters are not covered.
 //
 // The functions use volatile plain accesses only, so this file never turns
 // into atomic instructions (or calls to itself).

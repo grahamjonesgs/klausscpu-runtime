@@ -9,7 +9,7 @@
  * it, and the core's interrupt-enable bit, from the saved frame.  Critical
  * sections use that enable bit through DI / EI (ISA_ENCODING_V2_MAP.md §8.2),
  * not the mask: disabling interrupts is sufficient mutual exclusion on a
- * single-core CPU (not against core 2), and DI;EI is about 3 cycles.
+ * single-core CPU, and DI;EI is about 3 cycles.
  *
  * Stack: 8-byte slots, grows downward.  StackType_t = uint64_t matches the
  * hardware push/pop unit (PUSH/POP are always 8-byte operations).

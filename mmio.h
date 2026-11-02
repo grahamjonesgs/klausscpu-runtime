@@ -130,7 +130,7 @@ static inline uint32_t rgb12(uint8_t r, uint8_t g, uint8_t b) {
 
 /* Make code written as data visible to instruction fetch. CPU stores are
  * snooped per I-cache line already; call this after code arrives by DMA
- * (blitter, Ethernet), from core 2, or as the loader's final fence before
+ * (blitter, Ethernet), or as the loader's final fence before
  * jumping to freshly written code. */
 static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_INV; }
 
@@ -200,7 +200,7 @@ static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_
  * enable bit, separate from the per-source INT_MASK.  klauss_irq_disable()
  * returns the old bit and klauss_irq_restore() puts it back, so critical
  * sections nest and leave interrupts as they found them; both are compiler
- * barriers for memory.  Not atomic against the second (AMP) core.         */
+ * barriers for memory.                                                    */
 static inline unsigned int klauss_irq_disable(void)
 {
     return __builtin_klausscpu_di();
@@ -469,29 +469,5 @@ static inline void delay_ms(uint32_t ms) {
 #define CACHE_CTRL_FLUSH      2u   /* write-back every dirty line          */
 #define CACHE_CTRL_INVALIDATE 4u   /* flush, then clear valid on all lines */
 #define CACHE_STATUS_MNT_BUSY 1u   /* REG_CACHE_STATUS[0] */
-
-/* ── AMP core 2 mailbox — 0xF010_xxxx ──────────────────────────────────────
- * Core 1's control window over the second pipeline_core (effective 50 MHz).
- * See AMP_CORE2_PLAN.md + core2_subsys.sv in the FPGA repo, MMIO_MAP.md.   */
-#define C2_BASE               (MMIO_BASE + 0x00100000u)
-#define REG_C2_CTRL           (*(volatile uint64_t *)(C2_BASE + 0x0000u))  /* [0]=RUN; rd: [1]=parked [4:2]=kind */
-#define REG_C2_START_PC       (*(volatile uint64_t *)(C2_BASE + 0x0008u))
-#define REG_C2_WIN_ADDR       (*(volatile uint64_t *)(C2_BASE + 0x0010u))  /* local-BRAM load window */
-#define REG_C2_WIN_DATA       (*(volatile uint64_t *)(C2_BASE + 0x0018u))  /* wr: ram[addr]<=d, addr+=8 */
-#define REG_C2_LOG            (*(volatile uint64_t *)(C2_BASE + 0x0020u))  /* rd: [8]=valid [7:0]=byte; wr: pop */
-#define REG_C2_LOG_CNT        (*(volatile uint64_t *)(C2_BASE + 0x0028u))
-#define REG_C2_PARK_PC        (*(volatile uint64_t *)(C2_BASE + 0x0030u))
-#define REG_C2_ETH_OWNER      (*(volatile uint64_t *)(C2_BASE + 0x0038u))  /* [0]=1: core 2 owns LiteEth */
-#define C2_PARK_HALT          0u
-#define C2_PARK_TRAP          1u
-#define C2_PARK_ILLEGAL       2u
-#define C2_PARK_WAIT          3u
-/* Core-2 memory map as seen by BOTH cores (DDR is shared at the same addresses):
- * core-2 text window (read-cached on core 2, immutable after load+flush). */
-#define C2_TEXT_BASE          0x07E00000u
-#define C2_TEXT_ENTRY         0x07E00020u
-#define C2_TEXT_SIZE          0x00100000u
-/* Core 2's local BRAM is private (0x0000_0000 in ITS address space). */
-#define C2_LRAM_SIZE          0x00020000u   /* 128 KB (P4) */
 
 #endif /* KLAUSS_MMIO_H */

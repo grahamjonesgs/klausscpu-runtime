@@ -21,13 +21,6 @@
 #include "../src/eth.h"   // g_eth_mac, sram helpers via eth.h declarations
 #include <string.h>
 
-// Profiling hooks: defined by core2/lwipopts.h (c2_prof.h) in the AMP core-2
-// build only; no-ops everywhere else (the bucket names are never evaluated).
-#ifndef PROF_PUSH
-#define PROF_PUSH(b) ((void)0)
-#define PROF_POP()   ((void)0)
-#endif
-
 // Always transmit from slot 0.  Slot 1 is reserved for a future DMA path.
 // TX_READY means "room in the 2-entry TX FIFO", not "wire idle", so we wait
 // for TX_LEVEL==0 (FIFO empty) before each send to prevent back-to-back
@@ -164,7 +157,6 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p) {
     rx_drain();
 #endif
 
-    PROF_PUSH(PROF_TX_WAIT);
 #ifdef ETH_TX_SAFE
     // Every frame goes through slot 0, so the previous frame must have left
     // it before we overwrite it: LiteEth's SRAM reader pops its command FIFO
@@ -175,11 +167,8 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p) {
 #else
     while (!REG_ETH_TX_READY) {}   // wait if TX FIFO full
 #endif
-    PROF_POP();
 
-    PROF_PUSH(PROF_TX_COPY);
     pbuf_to_sram(ETH_TX_SLOT_PTR(0), p);
-    PROF_POP();
     uint32_t tx_len = p->tot_len;
 #ifdef ETH_TX_SAFE
     // Pad runts to the 60-byte Ethernet minimum: this MAC doesn't, and the
@@ -223,9 +212,7 @@ static struct pbuf *low_level_input(struct netif *netif) {
         return NULL;
     }
 
-    PROF_PUSH(PROF_RX_COPY);
     sram_to_pbuf(p, ETH_RX_SLOT_PTR(slot));
-    PROF_POP();
     REG_ETH_RX_EV_PENDING = 1;   // W1C — release slot to MAC
 
     LINK_STATS_INC(link.recv);

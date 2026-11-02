@@ -39,7 +39,7 @@ LOG_MODULE_REGISTER(llext_loader, LOG_LEVEL_INF);
 /* fence.i before running freshly loaded code: CACHE_CTRL (0xF005_0000) bit 3
  * drops every fetch-side copy (I-cache, prefetch buffers). CPU stores are
  * snooped per line already; this is the explicit loader fence (and covers
- * code that arrived by DMA or from core 2). */
+ * code that arrived by DMA). */
 static inline void code_fence(void)
 {
 	*(volatile uint32_t *)0xF0050000u = 1u << 3;

@@ -12,9 +12,7 @@
 #endif
 
 /* ~600 KiB in SRAM (the board has ~128 MiB, so this is negligible). */
-/* 8-byte aligned: AMP core 2 reads the fb through its uncached DDR window
- * with 64-bit loads (vnc_c2.c fb_fetch) — one burst per 4 px instead of 4.
- * 32-byte aligned: the VGA scanout (CONFIG_KLAUSSCPU_VGA) reads whole 32 B
+/* 32-byte aligned: the VGA scanout (CONFIG_KLAUSSCPU_VGA) reads whole 32 B
  * DDR lines. */
 static uint16_t fb[FB_WIDTH * FB_HEIGHT] __attribute__((aligned(32)));
 

@@ -1,8 +1,8 @@
 /*
  * framebuffer.h — in-RAM RGB565 framebuffer for the VNC server.
  *
- * The framebuffer lives in normal RAM.  The VNC server (vnc_server.c) or AMP
- * core 2 reads it and ships pixels over the network; with CONFIG_KLAUSSCPU_VGA
+ * The framebuffer lives in normal RAM.  The VNC server (vnc_server.c)
+ * reads it and ships pixels over the network; with CONFIG_KLAUSSCPU_VGA
  * the board's VGA port also scans it straight out of DDR to a monitor
  * (vga_out.c — which needs it flushed from the CPU cache; fb_mark_dirty()
  * arranges that).
