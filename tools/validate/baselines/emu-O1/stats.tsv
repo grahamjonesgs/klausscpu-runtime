@@ -17,7 +17,7 @@ netboot	nohalt	87656
 net_client	nohalt	98632
 perf_baseline	26404151	14608
 perf_haz	26567180	15536
-perf_kern	291274979	42536
+perf_kern	291977305	43544
 ping_demo	nohalt	82224
 queens	5337368	10976
 tcp_echo	nohalt	87456

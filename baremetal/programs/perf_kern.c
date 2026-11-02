@@ -69,6 +69,8 @@ KERN(k_ld_alu_use, "ldidx64 r3, r12, 8\n addr r7, r5, r6\n addr r4, r3, r6")
 KERN(k_ld_alu2_use,
      "ldidx64 r3, r12, 8\n addr r7, r5, r6\n addr r8, r5, r6\n addr r4, r3, r6")
 KERN(k_ld_chain, "ldidx64 r12, r12, 0")
+KERN(k_ld_2addr, "ldidx64 r3, r12, 8\n ldidx64 r4, r12, 24")
+KERN(k_ld_2addr_alu, "ldidx64 r3, r12, 8\n addr r7, r5, r6\n ldidx64 r4, r12, 24")
 KERN(k_ld32, "ldidx32 r3, r12, 8")
 KERN(k_ld8, "ldidx8 r3, r12, 8")
 KERN(k_ld_long, "ldidx64 r3, r12, 2048")
@@ -83,6 +85,8 @@ KERN(k_st_alu2, "stidx64 r5, r12, 0\n addr r4, r5, r6\n addr r7, r5, r6")
 KERN(k_st_alu3,
      "stidx64 r5, r12, 0\n addr r4, r5, r6\n addr r7, r5, r6\n addr r8, r5, r6")
 KERN(k_st32, "stidx32 r5, r12, 0")
+KERN(k_st_2addr, "stidx64 r5, r12, 0\n stidx64 r6, r12, 16")
+KERN(k_st_2addr_alu, "stidx64 r5, r12, 0\n addr r4, r5, r6\n stidx64 r6, r12, 16")
 KERN(k_st_long, "stidx64 r5, r12, 2048")
 
 // Mixed memory pairs.
@@ -311,9 +315,9 @@ typedef struct { const char *name; void (*fn)(u64 *); } kern_t;
 static const kern_t KERNS[] = {
   K(k_alu), K(k_alu_dep), K(k_setr2), K(k_alu_setr), K(k_alu_stl), K(k_alu_ldl),
   K(k_ld), K(k_ld_alu), K(k_ld_alu2), K(k_ld_use), K(k_ld_alu_use),
-  K(k_ld_alu2_use), K(k_ld_chain), K(k_ld32), K(k_ld8), K(k_ld_long),
+  K(k_ld_alu2_use), K(k_ld_chain), K(k_ld_2addr), K(k_ld_2addr_alu), K(k_ld32), K(k_ld8), K(k_ld_long),
   K(k_ld_long_alu), K(k_memget), K(k_ldr),
-  K(k_st), K(k_st_alu), K(k_st_alu2), K(k_st_alu3), K(k_st32), K(k_st_long),
+  K(k_st), K(k_st_alu), K(k_st_alu2), K(k_st_alu3), K(k_st32), K(k_st_2addr), K(k_st_2addr_alu), K(k_st_long),
   K(k_st_ld), K(k_st_alu_ld), K(k_st_alu2_ld), K(k_ld_st), K(k_ld_alu_st),
   K(k_ld_st_dep), K(k_ld_alu_st_dep), K(k_ld_alu2_st_dep),
   K(k_cp_4l4s), K(k_cp_2l2s), K(k_cp_pipe), K(k_cp_ls), K(k_cp_4l4s_alu),

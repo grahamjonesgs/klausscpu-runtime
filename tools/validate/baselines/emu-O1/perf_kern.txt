@@ -13,6 +13,8 @@ KERN,ld_use,400
 KERN,ld_alu_use,600
 KERN,ld_alu2_use,800
 KERN,ld_chain,200
+KERN,ld_2addr,400
+KERN,ld_2addr_alu,600
 KERN,ld32,200
 KERN,ld8,200
 KERN,ld_long,200
@@ -24,6 +26,8 @@ KERN,st_alu,400
 KERN,st_alu2,600
 KERN,st_alu3,800
 KERN,st32,200
+KERN,st_2addr,400
+KERN,st_2addr_alu,600
 KERN,st_long,200
 KERN,st_ld,400
 KERN,st_alu_ld,600
