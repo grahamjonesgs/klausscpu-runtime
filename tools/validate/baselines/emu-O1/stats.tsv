@@ -5,7 +5,7 @@ bst	105536	13552
 crypto	134797	15648
 crypto_selftest	nohalt	25008
 crypto_test	nohalt	14608
-dhrystone	156576738	14552
+dhrystone	156576737	14552
 eth_test	nohalt	14192
 expr	204000	12016
 fs_demo	512863	29008
