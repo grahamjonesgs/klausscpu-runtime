@@ -5,8 +5,13 @@
  *
  *   tools/validate/bench.sh <outdir> "-O2 -DPERF_STALLS"
  *
- * The buckets overlap (load-use is a subset of data, and the core can wait on
- * several causes in one cycle), so they do not add up to the cycle count. */
+ * PERF_STALLS_START() sets PERF_CTRL[1], the exclusive mode (klaussCPU
+ * e0bdc66 and later; older cores ignore the write): each cycle goes to at most
+ * one bucket, by priority memwait > exbusy > data > flags > sp > ifmiss, so
+ * those buckets plus the instructions add up to about the cycle count.
+ * Load-use stays a subset of data; redirect and icmiss count events.  The bit
+ * persists until the next PERF_CTRL write or power-off.  On an older core the
+ * buckets overlap and do not add up. */
 #ifndef PERF_STALLS_H
 #define PERF_STALLS_H
 
@@ -45,7 +50,9 @@ static void perf_stall_print(uint64_t cycles)
     printf("\n");
 }
 
-#define PERF_STALLS_START() perf_stall_read(perf_stall_start)
+#define PERF_STALLS_START() \
+    (*(volatile uint32_t *)(unsigned long)0xF00D0000u = 2u, \
+     perf_stall_read(perf_stall_start))
 #define PERF_STALLS_STOP()  perf_stall_read(perf_stall_stop)
 #define PERF_STALLS_PRINT(cycles) perf_stall_print(cycles)
 #else

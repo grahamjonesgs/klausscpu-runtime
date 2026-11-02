@@ -14,7 +14,7 @@ http_server	nohalt	88976
 loader	107331	27184
 lwip_demo	nohalt	86880
 netboot	nohalt	87656
-net_client	nohalt	98632
+net_client	nohalt	98616
 perf_baseline	26404151	14608
 perf_haz	26567180	15536
 perf_kern	291977305	43544
@@ -24,7 +24,7 @@ tcp_echo	nohalt	87456
 test_64bit	217563	14032
 test_asm	72078	10952
 test_atomic	1310119	24192
-test_big	1759238	33488
+test_big	1759238	33472
 test_cache	1988234	12392
 test_diei	788916	12128
 test_divshadow	89378	18552
@@ -41,7 +41,7 @@ test_sd	2264223	34152
 test_setjmp	118477	11248
 test_switch	78610	11656
 test_sync	nohalt	12920
-test_task_exit	2966996	11808
-test_unaligned	8725371	16448
+test_task_exit	2966993	11808
+test_unaligned	8725371	16464
 test_varargs	40472	10024
 vga_off	5033230	9552
