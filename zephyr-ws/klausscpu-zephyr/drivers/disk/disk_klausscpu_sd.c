@@ -3,6 +3,8 @@
  *
  * Wraps the same SPI SD controller used by the FreeRTOS runtime (sd.c).
  * Provides the Zephyr disk_access API so FatFS can mount the SD card.
+ * SD v2 cards: SDHC/SDXC (OCR CCS=1) block-addressed, SDSC (CCS=0)
+ * byte-addressed with 512-byte blocks (CMD16).
  */
 #define DT_DRV_COMPAT klausscpu_sd
 
@@ -32,9 +34,13 @@ LOG_MODULE_REGISTER(disk_klausscpu_sd, CONFIG_DISK_KLAUSSCPU_SD_LOG_LEVEL);
 #define SD_CLK_INIT       249u
 #define SD_CLK_FAST       1u
 
+/* Power-up: >= 1 ms after the supply is up before the first clocks (SD spec). */
+#define SD_PWRUP_US       1000u
+
 /* ── Low-level SPI ───────────────────────────────────────────────────────── */
 
 static int s_ready;
+static int s_blockaddr;	/* OCR CCS: 1 = SDHC/SDXC (block address), 0 = SDSC (byte address) */
 
 static uint8_t spi_xfer(uint8_t tx)
 {
@@ -91,8 +97,7 @@ static int sd_hw_init(void)
 	s_ready = 0;
 	REG_SD_CTRL = SD_CTRL_CLKDIV(SD_CLK_INIT) | SD_CTRL_CS_HI | SD_CTRL_PWR_ON;
 
-	for (volatile int i = 0; i < 100000; i++) {
-	}
+	k_busy_wait(SD_PWRUP_US);
 
 	for (int i = 0; i < 10; i++) {
 		spi_xfer(0xFF);
@@ -124,16 +129,40 @@ static int sd_hw_init(void)
 	return -3;
 
 ready:
+	/* OCR (CMD58, R3): CCS (bit 30) says how CMD17/CMD24 address the card. */
+	if (sd_cmd(58, 0, 0xFD) != 0x00) {
+		cs_deassert();
+		return -4;
+	}
+	uint8_t ocr = spi_xfer(0xFF);	/* OCR[31:24] */
+
+	spi_xfer(0xFF);
+	spi_xfer(0xFF);
+	spi_xfer(0xFF);
+	s_blockaddr = (ocr & 0x40) != 0;
+
+	/* SDSC: byte addresses, 512-byte blocks. */
+	if (!s_blockaddr && sd_cmd(16, 512, 0xFF) != 0x00) {
+		cs_deassert();
+		return -5;
+	}
+
 	cs_deassert();
 	set_clk(SD_CLK_FAST);
 	s_ready = 1;
 	return 0;
 }
 
+/* CMD17/CMD24 argument for block lba. */
+static uint32_t blk_arg(uint32_t lba)
+{
+	return s_blockaddr ? lba : lba * 512u;
+}
+
 static int sd_read_block(uint32_t lba, uint8_t *buf)
 {
 	cs_assert();
-	if (sd_cmd(17, lba, 0xFF) != 0x00) {
+	if (sd_cmd(17, blk_arg(lba), 0xFF) != 0x00) {
 		cs_deassert();
 		return -1;
 	}
@@ -159,7 +188,7 @@ got_token:
 static int sd_write_block(uint32_t lba, const uint8_t *buf)
 {
 	cs_assert();
-	if (sd_cmd(24, lba, 0xFF) != 0x00) {
+	if (sd_cmd(24, blk_arg(lba), 0xFF) != 0x00) {
 		cs_deassert();
 		return -1;
 	}
@@ -311,14 +340,33 @@ static int disk_klausscpu_access_ioctl(struct disk_info *disk, uint8_t cmd,
 		if (rc != 0) {
 			return -EIO;
 		}
-		if (((csd[0] >> 6) & 0x3) != 1) {
+		switch ((csd[0] >> 6) & 0x3) {
+		case 0: {
+			/* CSD v1 (SDSC): (C_SIZE+1) << (C_SIZE_MULT+2) << READ_BL_LEN bytes */
+			uint32_t read_bl_len = csd[5] & 0x0Fu;
+			uint32_t c_size = ((uint32_t)(csd[6] & 0x03u) << 10) |
+					  ((uint32_t)csd[7] << 2) |
+					  ((uint32_t)csd[8] >> 6);
+			uint32_t c_size_mult = ((uint32_t)(csd[9] & 0x03u) << 1) |
+					       ((uint32_t)csd[10] >> 7);
+
+			*(uint32_t *)buf = (uint32_t)((uint64_t)(c_size + 1u)
+						      << (c_size_mult + 2u)
+						      << read_bl_len >> 9);
+			return 0;
+		}
+		case 1: {
+			/* CSD v2 (SDHC/SDXC): (C_SIZE+1) * 512 KiB */
+			uint32_t c_size = ((uint32_t)(csd[7] & 0x3Fu) << 16) |
+					  ((uint32_t)csd[8] << 8) |
+					  (uint32_t)csd[9];
+
+			*(uint32_t *)buf = (c_size + 1u) * 1024u;
+			return 0;
+		}
+		default:
 			return -ENOTSUP;
 		}
-		uint32_t c_size = ((uint32_t)(csd[7] & 0x3Fu) << 16) |
-				  ((uint32_t)csd[8] << 8) |
-				  (uint32_t)csd[9];
-		*(uint32_t *)buf = (c_size + 1u) * 1024u;
-		return 0;
 	}
 	case DISK_IOCTL_GET_ERASE_BLOCK_SZ:
 		*(uint32_t *)buf = 1;

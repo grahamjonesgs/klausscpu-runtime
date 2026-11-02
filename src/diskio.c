@@ -56,12 +56,28 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
     case GET_SECTOR_COUNT: {
         uint8_t csd[16];
         if (sd_read_csd(csd) != SD_OK) return RES_ERROR;
-        if (((csd[0] >> 6) & 0x3) != 1) return RES_ERROR;  /* must be CSD v2 */
-        uint32_t c_size = ((uint32_t)(csd[7] & 0x3Fu) << 16) |
-                          ((uint32_t)csd[8]            <<  8) |
-                           (uint32_t)csd[9];
-        *(LBA_t *)buff = (LBA_t)(c_size + 1u) * 1024u;
-        return RES_OK;
+        switch ((csd[0] >> 6) & 0x3) {
+        case 0: {   /* CSD v1 (SDSC): (C_SIZE+1) << (C_SIZE_MULT+2) << READ_BL_LEN bytes */
+            uint32_t read_bl_len = csd[5] & 0x0Fu;
+            uint32_t c_size = ((uint32_t)(csd[6] & 0x03u) << 10) |
+                              ((uint32_t)csd[7]            <<  2) |
+                              ((uint32_t)csd[8]            >>  6);
+            uint32_t c_size_mult = ((uint32_t)(csd[9] & 0x03u) << 1) |
+                                   ((uint32_t)csd[10]         >> 7);
+            *(LBA_t *)buff = (LBA_t)((uint64_t)(c_size + 1u) << (c_size_mult + 2u)
+                                     << read_bl_len >> 9);
+            return RES_OK;
+        }
+        case 1: {   /* CSD v2 (SDHC/SDXC): (C_SIZE+1) * 512 KiB */
+            uint32_t c_size = ((uint32_t)(csd[7] & 0x3Fu) << 16) |
+                              ((uint32_t)csd[8]            <<  8) |
+                               (uint32_t)csd[9];
+            *(LBA_t *)buff = (LBA_t)(c_size + 1u) * 1024u;
+            return RES_OK;
+        }
+        default:
+            return RES_ERROR;
+        }
     }
     default:
         return RES_PARERR;

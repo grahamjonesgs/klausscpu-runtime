@@ -10,6 +10,11 @@
 #include "../mmio.h"
 
 static int s_ready;
+static int s_blockaddr;   /* OCR CCS: 1 = SDHC/SDXC (block address), 0 = SDSC (byte address) */
+
+/* Power-up: >= 1 ms after the supply is up before the first clocks (SD spec).
+ * The ms clock may tick right after it is read, so wait one tick more. */
+#define SD_PWRUP_MS 2u
 
 /* ── Low-level SPI ───────────────────────────────────────────────────────── */
 
@@ -59,7 +64,8 @@ int sd_init(void) {
     REG_SD_CTRL = SD_CTRL_CLKDIV(SD_CLK_INIT) | SD_CTRL_CS_HI | SD_CTRL_PWR_ON;
 
     /* ≥1 ms power-up wait */
-    for (volatile int i = 0; i < 100000; i++) {}
+    uint64_t t0 = REG_CLOCK_MS;
+    while (REG_CLOCK_MS - t0 < SD_PWRUP_MS) {}
 
     /* ≥74 dummy clocks with CS high */
     for (int i = 0; i < 10; i++) spi_xfer(0xFF);
@@ -78,15 +84,29 @@ int sd_init(void) {
     return SD_ERR_TIMEOUT;
 
 ready:
+    /* OCR (CMD58, R3): CCS (bit 30) says how CMD17/CMD24 address the card. */
+    if (sd_cmd(58, 0, 0xFD) != 0x00) { cs_deassert(); return SD_ERR_OCR; }
+    uint8_t ocr = spi_xfer(0xFF);   /* OCR[31:24] */
+    spi_xfer(0xFF); spi_xfer(0xFF); spi_xfer(0xFF);
+    s_blockaddr = (ocr & 0x40) != 0;
+
+    /* SDSC: byte addresses, 512-byte blocks. */
+    if (!s_blockaddr && sd_cmd(16, 512, 0xFF) != 0x00) { cs_deassert(); return SD_ERR_OCR; }
+
     cs_deassert();
     set_clk(SD_CLK_FAST);
     s_ready = 1;
     return SD_OK;
 }
 
+/* CMD17/CMD24 argument for block lba. */
+static uint32_t blk_arg(uint32_t lba) {
+    return s_blockaddr ? lba : lba * 512u;
+}
+
 int sd_read_block(uint32_t lba, uint8_t *buf) {
     cs_assert();
-    if (sd_cmd(17, lba, 0xFF) != 0x00) { cs_deassert(); return SD_ERR_CMD; }
+    if (sd_cmd(17, blk_arg(lba), 0xFF) != 0x00) { cs_deassert(); return SD_ERR_CMD; }
 
     for (int tries = 0; tries < 200000; tries++) {
         if (spi_xfer(0xFF) == 0xFE) goto got_token;
@@ -106,7 +126,7 @@ got_token:
 
 int sd_write_block(uint32_t lba, const uint8_t *buf) {
     cs_assert();
-    if (sd_cmd(24, lba, 0xFF) != 0x00) { cs_deassert(); return SD_ERR_CMD; }
+    if (sd_cmd(24, blk_arg(lba), 0xFF) != 0x00) { cs_deassert(); return SD_ERR_CMD; }
 
     spi_xfer(0xFF);    /* gap */
     spi_xfer(0xFE);    /* data-start token */

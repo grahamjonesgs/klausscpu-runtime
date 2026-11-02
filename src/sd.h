@@ -2,7 +2,10 @@
  * sd.h — KlaussCPU SD card SPI driver
  *
  * Hardware: single-byte SPI controller via MMIO.
- * Protocol: SDHC/SDXC only (block-addressed, CMD8 + ACMD41 HCS=1).
+ * Protocol: SD v2 cards (CMD8 + ACMD41 HCS=1).  SDHC/SDXC (OCR CCS=1) are
+ *           block-addressed; SDSC (CCS=0) are byte-addressed, with the block
+ *           length set to 512 (CMD16).  The API takes 512-byte block numbers
+ *           for both.
  * Thread safety: none — single-threaded use only.
  *
  * Read/write take a caller-supplied 512-byte buffer.  Bytes are transferred
@@ -23,6 +26,7 @@
 #define SD_ERR_CMD     -4   /* unexpected R1 response to a command */
 #define SD_ERR_TOKEN   -5   /* no data-start token (CMD17/CMD18) */
 #define SD_ERR_WRITE   -6   /* card rejected the write data block */
+#define SD_ERR_OCR     -7   /* CMD58 (read OCR) or CMD16 (block length) failed */
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 
