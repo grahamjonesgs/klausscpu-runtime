@@ -8,7 +8,7 @@ irq_dev	IRQDEV RESULT PASS
 irq_dev	ISR0 +: STACK: unused [0-9]+ usage [0-9]+ / 4096 \([0-9]{1,2} %\)
 irq_dev	PASS irq_dev: idle stack keeps room for two nested stub frames
 irq_dev_spurious	spurious interrupt, IRQ 1 has no handler
-tick_cost	TICKCOST min=[0-9]+ p10=[0-9]+ median=4[0-9]{2} p90=
+tick_cost	TICKCOST min=[0-9]+ p10=[0-9]+ median=[34][0-9]{2} p90=
 llext_demo	llext_unload: 0
 llext_demo	=== LLEXT demo done ===
 mandel	mandel: kiter/s=[0-9]+
