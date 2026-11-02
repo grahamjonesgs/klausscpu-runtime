@@ -22,7 +22,7 @@ empty :=
 space := $(empty) $(empty)
 
 BENCH       := benchmarks
-BENCH_OPT   := $(subst $(space),_,$(subst -,,$(strip $(OPT))))
+BENCH_OPT   := $(subst =,_,$(subst $(space),_,$(subst -,,$(strip $(OPT)))))
 BENCH_OUT   := bench-build/$(BENCH_OPT)
 
 .PHONY: coremark coremark_validate embench embench-sizes bench-clean

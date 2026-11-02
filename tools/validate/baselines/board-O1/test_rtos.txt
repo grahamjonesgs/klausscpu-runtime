@@ -12,28 +12,28 @@ Starting RTOS...
 [A] 1 (yield)
 [B] 3 (sleep 3 ticks)
 [B] 4 (sleep 3 ticks)
-[B] 5 (sleep 3 ticks)
 [C] 2 (preempt)
+[B] 5 (sleep 3 ticks)
 [A] 2 (yield)
 [B] 6 (sleep 3 ticks)
-[B] 7 (sleep 3 ticks)
 [C] 3 (preempt)
+[B] 7 (sleep 3 ticks)
 [A] 3 (yield)
 [C] 4 (preempt)
-[A] 4 (yield)
-[A] 5 (yield)
 [C] 5 (preempt)
-[A] 6 (yield)
+[A] 4 (yield)
 [C] 6 (preempt)
-[A] 7 (yield)
+[A] 5 (yield)
 [C] 7 (preempt)
+[A] 6 (yield)
+[A] 7 (yield)
 
 === all tasks done ===
 scheduling modes: A=yield  B=sleep(3 ticks)  C=preempt
 context switches:
-  [A yield  ] 53
-  [B sleep  ] 45
-  [C preempt] 53
-  [reporter ] 53
+  [A yield  ] 51
+  [B sleep  ] 43
+  [C preempt] 51
+  [reporter ] 51
 switches: PASS  sleep timing: PASS
 Result: PASS

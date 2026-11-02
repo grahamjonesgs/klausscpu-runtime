@@ -17,6 +17,7 @@ netboot	InstructionCap
 net_client	InstructionCap
 perf_baseline	Halt
 perf_haz	Halt
+perf_kern	Halt
 ping_demo	InstructionCap
 queens	Halt
 tcp_echo	InstructionCap

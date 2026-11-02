@@ -179,7 +179,7 @@ FATFS_OBJS  = ff.o ffunicode.o ffsystem.o sd.o diskio.o
 # ── Default target ────────────────────────────────────────────────────────────
 
 PROGRAMS = hello adventure test_64bit expr bst crypto queens \
-           test_switch test_fp test_asm test_printf test_varargs test_atomic test_diei test_flags test_divshadow perf_baseline perf_haz fs_demo \
+           test_switch test_fp test_asm test_printf test_varargs test_atomic test_diei test_flags test_divshadow perf_baseline perf_haz perf_kern fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
@@ -346,6 +346,9 @@ perf_baseline.elf: perf_baseline.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 perf_haz.elf: perf_haz.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,perf_haz.o)
+
+perf_kern.elf: perf_kern.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,perf_kern.o)
 
 repro.elf: repro.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,repro.o)
