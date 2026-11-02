@@ -15,7 +15,7 @@ than its tolerance (or --tol, if given), IMPROVED when it got better by more,
 and exits 1 if anything regressed.  A judged (not 'info') baseline metric
 that the new run did not produce is MISSING and fails too, when the run
 measured anything else of its group (the first two parts of the key:
-board.O1, bench.O2, zephyr.mandel, ...): a Dhrystone or perf_baseline line
+board.O2, bench.O2, zephyr.mandel, ...): a Dhrystone or perf_baseline line
 that is no longer printed, or no longer parses, must not pass silently.  A
 whole group that is absent (BENCH=0, a ZEPHYR_APPS subset) is listed as not
 measured.  New metrics are listed.  'info' metrics are reported, never judged.

@@ -85,7 +85,7 @@ cd baremetal
 make hello          # uart hello-world
 make test_fp        # soft-FP test (links compiler-rt crt-*.o from the fork)
 make all            # every .elf
-make all OPT=-Oz    # another level (default -O1); -Oz also runs the MachineOutliner
+make all OPT=-Oz    # another level (default -O2); -Oz also runs the MachineOutliner
 make all LTO=1      # link-time optimisation (make clean when switching)
 ```
 Output is a `*.elf` with machine type `0x4b43` ("KC"). See the top of

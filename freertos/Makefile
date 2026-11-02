@@ -46,9 +46,12 @@ CRT_FLAGS := -target $(TARGET) -O1 -fPIC -nostdlibinc -ffreestanding -I$(BUILTIN
 # the flags).
 DBG ?=
 
+# Optimisation level: -O2, as baremetal/Makefile (`make OPT=-O1` for another).
+OPT ?= -O2
+
 BASE_CFLAGS := \
     -target $(TARGET) \
-    -O1 \
+    $(OPT) \
     -ffunction-sections \
     -fdata-sections \
     -fPIC \

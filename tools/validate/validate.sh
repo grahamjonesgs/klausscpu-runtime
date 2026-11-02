@@ -207,19 +207,19 @@ full)
 board)
   run "board idle state (VGA off)" "$OUT/idle.log" board_idle_state "$OUT"
   run "misalign trap (board)" "$OUT/misalign-board.log" "$HERE/misalign.sh" "$OUT/misalign-board" board
-  "$HERE/board_suite.sh" "$OUT/board-O1" -O1
-  if "$HERE/compare.sh" "$BASE/board-O1" "$OUT/board-O1" >"$OUT/board-O1.cmp" 2>&1; then
-    result PASS "board suite -O1 (UART)" "$(grep '^uart:' "$OUT/board-O1.cmp")"
+  "$HERE/board_suite.sh" "$OUT/board-O2" -O2
+  if "$HERE/compare.sh" "$BASE/board-O2" "$OUT/board-O2" >"$OUT/board-O2.cmp" 2>&1; then
+    result PASS "board suite -O2 (UART)" "$(grep '^uart:' "$OUT/board-O2.cmp")"
   else
-    result FAIL "board suite -O1 (UART)" "$(grep '^uart:' "$OUT/board-O1.cmp") -- see $OUT/board-O1.cmp"
+    result FAIL "board suite -O2 (UART)" "$(grep '^uart:' "$OUT/board-O2.cmp") -- see $OUT/board-O2.cmp"
   fi
-  grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF|VERDICT|ORDER)' "$OUT/board-O1.cmp" | sed 's/^/     /'
-  if [ -s "$OUT/board-O1/repeat.txt" ]; then result FAIL "board repeat run" "$(tr '\n' ' ' <"$OUT/board-O1/repeat.txt")"
+  grep -E '^(STOP|MISSING|NOT IN BASE|=== DIFF|VERDICT|ORDER)' "$OUT/board-O2.cmp" | sed 's/^/     /'
+  if [ -s "$OUT/board-O2/repeat.txt" ]; then result FAIL "board repeat run" "$(tr '\n' ' ' <"$OUT/board-O2/repeat.txt")"
   else result PASS "board repeat run" "the runs agree"; fi
-  if grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O1/summary.txt" | grep -q .; then
-    result FAIL "board halts" "$(grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O1/summary.txt" | tr '\n' ' ')"
+  if grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O2/summary.txt" | grep -q .; then
+    result FAIL "board halts" "$(grep -v -E 'halted=1|^test_(rtos|sync) rc=124' "$OUT/board-O2/summary.txt" | tr '\n' ' ')"
   else result PASS "board halts" "every program halted"; fi
-  python3 -I "$HERE/perf.py" extract board "$OUT/board-O1" board.O1 >"$OUT/perf.tsv" 2>"$OUT/perf-noise.txt"
+  python3 -I "$HERE/perf.py" extract board "$OUT/board-O2" board.O2 >"$OUT/perf.tsv" 2>"$OUT/perf-noise.txt"
   [ -s "$OUT/perf-noise.txt" ] && sed 's/^/     /' "$OUT/perf-noise.txt"
   if [ "${BENCH:-1}" != 0 ]; then
     if "$HERE/bench.sh" "$OUT/bench" -O2 -Os >"$OUT/bench.log" 2>&1; then
@@ -265,7 +265,7 @@ oracle) oracle "${1:-}" ;;
 baseline)
   [ $# -ge 1 ] || die "usage: validate.sh baseline <run-dir>..."
   for d in "$@"; do
-    for sub in emu-O1 emu-O2 board-O1; do
+    for sub in emu-O1 emu-O2 board-O2; do
       [ -d "$d/$sub" ] || continue
       rm -rf "${BASE:?}/$sub"; mkdir -p "$BASE/$sub"
       for f in "$d/$sub"/*.out; do

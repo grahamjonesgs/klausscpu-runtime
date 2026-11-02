@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# selftest.sh <outdir> <emu-O1 run> [<board-O1 run>]
+# selftest.sh <outdir> <emu-O1 run> [<board-O2 run>]
 #
 # Fault injection for the harness itself: checks that compare.sh, perf.py and the
 # Csmith scripts catch what they must.  <emu-O1 run> is an emu_suite.sh -O1
 # output dir that matches baselines/emu-O1 (e.g. <quick out>/emu-O1);
-# <board-O1 run> a board_suite.sh output dir (the board cases are skipped
+# <board-O2 run> a board_suite.sh output dir (the board cases are skipped
 # without it).  Nothing here touches the board.  Each case copies a run,
 # tampers with one capture and expects compare.sh to pass or fail:
 #   a halting program that hangs after part of its output, that traps or hits
@@ -30,7 +30,7 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/common.sh"
-[ $# -ge 2 ] || die "usage: selftest.sh <outdir> <emu-O1 run> [<board-O1 run>]"
+[ $# -ge 2 ] || die "usage: selftest.sh <outdir> <emu-O1 run> [<board-O2 run>]"
 T=$(realpath -m "$1"); E=$(realpath "$2"); BD=${3:+$(realpath "$3")}
 C=$HERE/compare.sh; BASE=$HERE/baselines/emu-O1; ok=0; bad=0
 rm -rf "$T"; mkdir -p "$T"
@@ -84,12 +84,12 @@ mk nfail "$E"; sed -i 's/^Result: PASS/&\nwatchdog: FAIL/' "$T/nfail/test_rtos.o
 check 1 "capped program prints a new FAIL verdict" "$C" "$BASE" "$T/nfail"
 if [ -n "$BD" ]; then
   check 0 "board run vs itself" "$C" "$BD" "$BD"
-  check 0 "board run vs baseline" "$C" "$HERE/baselines/board-O1" "$BD"
+  check 0 "board run vs baseline" "$C" "$HERE/baselines/board-O2" "$BD"
   mk bt "$BD"; sed -i 's/PASS  SHA256 two-block/FAIL  SHA256 two-block/' "$T/bt/crypto_selftest.out"
-  check 1 "board PASS line mentioning bytes turns FAIL" "$C" "$HERE/baselines/board-O1" "$T/bt"
+  check 1 "board PASS line mentioning bytes turns FAIL" "$C" "$HERE/baselines/board-O2" "$T/bt"
   mk bh "$BD"; sed -i '/CPU halted/d' "$T/bh/hello.out"
   check 1 "board program stops halting" "$C" "$BD" "$T/bh"
-  check 1 "board program stops halting vs baseline" "$C" "$HERE/baselines/board-O1" "$T/bh"
+  check 1 "board program stops halting vs baseline" "$C" "$HERE/baselines/board-O2" "$T/bh"
 fi
 
 # Csmith: a wrapper around klausscc that turns 'stop = Halt' into a trap for
@@ -157,7 +157,7 @@ check 0 "csmith-board: good program too big for the board (skip-big)" \
 # group that was not measured at all does not.
 P=$HERE/baselines/perf.tsv
 check 0 "perf: baseline vs itself" python3 -I "$HERE/perf.py" compare "$P" "$P"
-grep -v '^board\.O1\.dhrystone_nobuiltin\.' "$P" >"$T/perf-nodhry.tsv"
+grep -v '^board\.O2\.dhrystone_nobuiltin\.' "$P" >"$T/perf-nodhry.tsv"
 check 1 "perf: Dhrystone (-fno-builtin) no longer measured" python3 -I "$HERE/perf.py" compare "$P" "$T/perf-nodhry.tsv"
 grep -v '^bench\.O2\.embench\.huffbench\.' "$P" >"$T/perf-nohuff.tsv"
 check 1 "perf: one Embench benchmark no longer measured" python3 -I "$HERE/perf.py" compare "$P" "$T/perf-nohuff.tsv"

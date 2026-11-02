@@ -119,7 +119,7 @@ VGA controller keeps scanning DRAM out after a GUI program, and with it on
 the CPU's cache-miss penalty doubles (klaussCPU 3508f87: 29 -> 56 cycles,
 `mem_stream` +31%, `ptr_chase` +50%), so a board run after a Zephyr GUI app
 would fail the perf comparison; then `misalign.sh` on the board, then `board_suite.sh` builds the
-self-checking programs at -O1 (among them `test_hwcg`, the compiler's code for
+self-checking programs at -O2, the runtime's default level (among them `test_hwcg`, the compiler's code for
 the 3508f87 instructions: FBR W / imm32 at every predicate and at the range
 limit, CMPRVW.S, MULV.S; `test_leapc`: LEAPC.S around +-32 KiB; `test_diei`;
 `test_flags`), plus
@@ -127,7 +127,7 @@ Dhrystone with `-fno-builtin` (`dhrystone_nobuiltin`, the like-for-like
 figure: since strcpy/strcmp became built-ins the default build folds
 Dhrystone's string work), and runs each twice on the board.  It checks that
 every program halts (test_rtos and test_sync idle instead, and are stopped
-after 12 s), that the UART output matches `baselines/board-O1`, and that the
+after 12 s), that the UART output matches `baselines/board-O2`, and that the
 two runs agree.  Then `bench.sh` runs CoreMark and Embench-IoT at -O2 and -Os
 (`BENCH=0` skips them); every CoreMark CRC and Embench verification must
 pass.  `perf.py` turns the captures into numbers (`perf.tsv` in the output)
@@ -165,7 +165,7 @@ files on the card) — `zephyr/llext_sd.sh <outdir> [build] [backup] [upload]
 card to `<outdir>/backup/`, uploads the new ones (refusing to overwrite a
 file it has not backed up), then `run`s each program over SSH and compares
 its output with the program's bare-metal baseline (`llext` for a program
-whose extension build differs, such as test_atomic, else `board-O1`, else
+whose extension build differs, such as test_atomic, else `board-O2`, else
 `emu-O1`), and `svc load`s each backend and queries its HTTP route.  The
 kernel refuses an extension built for another C ABI version (the low byte of
 `e_flags`): `run` prints "built for C ABI 0, this kernel is ABI 3 (e_flags
@@ -368,7 +368,7 @@ is no longer measured.  Run it after changing any script here.
 
 **baseline DIR...** — after an intended change of output or performance,
 rewrite the baselines from the output directories of quick, board and/or
-zephyr runs: `baselines/emu-O1`, `emu-O2`, `board-O1` (filtered UART text and
+zephyr runs: `baselines/emu-O1`, `emu-O2`, `board-O2` (filtered UART text and
 `stats.tsv`) and the values in `baselines/perf.tsv` (direction and tolerance
 of each existing metric are kept).  Commit the result with the change.
 
@@ -378,7 +378,7 @@ of each existing metric are kept).  Commit the result with the change.
 every bare-metal program (also of those the cap stops, for their verdicts),
 `stats.tsv` (emulator instructions, `nohalt` for a
 program that ran into the cap, `.text` bytes) and `stop.tsv` (how each run
-ended).  `baselines/board-O1/`: the UART output and `stop.tsv` of the board
+ended).  `baselines/board-O2/`: the UART output and `stop.tsv` of the board
 suite (`Halt`, or `none` for test_rtos and test_sync, which idle until the
 timeout).  `baselines/llext/`: the expected output of an SD-card extension
 whose build differs from the bare-metal program's (`zephyr/llext_sd.sh`;
@@ -389,7 +389,7 @@ one board metric per line — key, value, the better direction (`lower`,
 `validate.sh board` and `zephyr` flag a metric that got worse by more than its
 tolerance as a REGRESSION (and fail).  A judged metric that the run did not
 produce while it measured others of its group (the first two parts of the
-key: `board.O1`, `bench.O2`, `zephyr.mandel`) is MISSING and fails too, so
+key: `board.O2`, `bench.O2`, `zephyr.mandel`) is MISSING and fails too, so
 a Dhrystone or perf_baseline line that stops being printed, or changes
 format, does not pass silently; a group that was not run at all (`BENCH=0`,
 a `ZEPHYR_APPS` subset) is only listed as not measured.  The board's cycle counts repeat to
@@ -430,7 +430,7 @@ change in any of it is a regression like any other.
 | `csmith_run.sh`, `csmith_board.sh`, `csmith_lib.sh` | Csmith on the emulator / on the board and the emulator |
 | `g_invariance.sh` | -g vs -g0 `.text` of Csmith programs |
 | `oracle.sh`, `oracle_diff.sh` | output-byte snapshot and diff |
-| `selftest.sh <out> <emu-O1 run> [<board-O1 run>]` | fault injection for compare.sh, perf.py and the Csmith scripts |
+| `selftest.sh <out> <emu-O1 run> [<board-O2 run>]` | fault injection for compare.sh, perf.py and the Csmith scripts |
 | `zephyr/suite.sh` | Zephyr build, emulator and board runs; `zephyr/build.sh <app> <dir>` builds one app; `zephyr/sshrun.sh` drives an SSH session; `zephyr/vncgrab.py` grabs a VNC frame |
 | `zephyr/llext_sd.sh <out> [steps]` | rebuild, back up, upload and run the SD card's LLEXT extensions; `zephyr/llext_sd.py` lists, downloads and uploads card files over HTTP and drives `run`/`svc` over SSH |
 

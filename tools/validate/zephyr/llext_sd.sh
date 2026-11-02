@@ -18,7 +18,7 @@
 # run     `run` each program over SSH (adventure with typed commands) and
 #         compare its output with the bare-metal baseline of the same program
 #         (baselines/llext/<prog>.txt for a program whose extension build
-#         differs, else board-O1/<prog>.txt, else emu-O1/<prog>.txt, after
+#         differs, else board-O2/<prog>.txt, else emu-O1/<prog>.txt, after
 #         uart_filter; adventure, which the emulator stops while it waits for
 #         input, on the baseline's lines); `svc load` each backend and query
 #         its HTTP route; `run` abi_mismatch.llext and abi2_mismatch.llext, which the kernel must
@@ -105,7 +105,7 @@ board_steps() {
         "$OUT/run/$name.llext.ssh" >"$OUT/run/$name.txt" 2>/dev/null
       got=$(uart_filter "$OUT/run/$name.txt" | body)
       ref=$VALIDATE_DIR/baselines/llext/$name.txt
-      [ -e "$ref" ] || ref=$VALIDATE_DIR/baselines/board-O1/$name.txt
+      [ -e "$ref" ] || ref=$VALIDATE_DIR/baselines/board-O2/$name.txt
       [ -e "$ref" ] || ref=$VALIDATE_DIR/baselines/emu-O1/$name.txt
       ref=$(body <"$ref")
       if ! grep -aq '^Program exited: 0$' "$OUT/run/$name.llext.ssh" 2>/dev/null; then

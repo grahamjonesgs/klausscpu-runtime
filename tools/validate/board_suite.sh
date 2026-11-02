@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # board_suite.sh <outdir> [OPT]
 #
-# Build the self-checking bare-metal programs at OPT (default -O1) in a staged
+# Build the self-checking bare-metal programs at OPT (default -O2) in a staged
 # copy, plus Dhrystone again with -fno-builtin (dhrystone_nobuiltin: the
 # like-for-like figure, since strcpy/strcmp became compiler built-ins), and
 # run each on the FPGA board over the UART, every run under flock $BOARD_LOCK.
@@ -17,7 +17,7 @@
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
 [ $# -ge 1 ] || die "usage: board_suite.sh <outdir> [OPT]"
-OUT=$(realpath -m "$1"); OPT=${2:--O1}
+OUT=$(realpath -m "$1"); OPT=${2:--O2}
 RUNS=${BOARD_RUNS:-2}
 PROGS=${BOARD_PROGS:-"hello test_64bit test_varargs test_printf test_fp test_switch test_asm queens bst expr test_big test_cache dhrystone perf_baseline perf_haz crypto_selftest test_rtos test_sync test_task_exit test_atomic test_diei test_divshadow test_flags test_unaligned test_hwcg test_leapc"}
 # Programs that never halt on the board (they idle after printing the result).

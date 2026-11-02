@@ -94,11 +94,11 @@ PICOLIBC ?= $(ROOT)/picolibc-install
 # -D__IEEE_LITTLE_ENDIAN and -D_LDBL_EQ_DBL are needed because the installed
 # machine/ieeefp.h is the generic one; our arch-specific overrides are only
 # applied during the picolibc build itself, not after installation.
-# Program optimisation level.  Default -O1 (validated); M8 A/B knob: `make OPT=-O2`
-# is now viable because M7's I-cache removed the fetch-bound penalty that made
-# unrolling/inlining a loss (LLVM's partial/runtime unroll only runs at -O2+).
-# The compiler-rt builtins below stay -O1 (stable).
-OPT ?= -O1
+# Program optimisation level.  Default -O2, the level the board suite
+# validates (tools/validate): on klaussCPU mul2 it ran CoreMark 7.5% and
+# Embench 7.8% faster than -O1, for 21% more .text; -O3 was 1% faster than
+# -O2 again and is not validated.  The compiler-rt builtins below stay -O1.
+OPT ?= -O2
 CFLAGS = -target $(TRIPLE) $(OPT) \
          -isystem $(PICOLIBC)/include \
          -nostdlib \
