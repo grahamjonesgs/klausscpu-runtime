@@ -112,16 +112,16 @@ bench.Os.embench.pass	19	higher	0
 bench.Os.embench.run	19	info	0
 bench.Os.embench.speed	0.939	higher	0.5
 bench.Os.embench.size	1.528	lower	0.5
-zephyr.mandel.kiter_s_max	3617	higher	3
-zephyr.doom.drawfps_median	40	higher	10
-zephyr.irq_soak.loops_60s	57350144	higher	1
+zephyr.mandel.kiter_s_max	3619	higher	3
+zephyr.doom.drawfps_median	39	higher	10
+zephyr.irq_soak.loops_60s	57319424	higher	1
 zephyr.irq_soak.viol_lost	0	lower	0
-zephyr.gui_lvgl.fill.ms_frame	72	lower	5
-zephyr.gui_lvgl.blend50.ms_frame	117	lower	5
-zephyr.gui_lvgl.rounded.ms_frame	68	lower	5
-zephyr.gui_lvgl.shadow.ms_frame	181	lower	5
-zephyr.gui_lvgl.text.ms_frame	138	lower	5
-zephyr.gui_lvgl.gradient.ms_frame	65	lower	5
+zephyr.gui_lvgl.fill.ms_frame	75	lower	5
+zephyr.gui_lvgl.blend50.ms_frame	131	lower	5
+zephyr.gui_lvgl.rounded.ms_frame	73	lower	5
+zephyr.gui_lvgl.shadow.ms_frame	180	lower	5
+zephyr.gui_lvgl.text.ms_frame	98	lower	5
+zephyr.gui_lvgl.gradient.ms_frame	64	lower	5
 # 2026-10-28: 180 bench/board/zephyr values from toolchain 65f26a14dd03
 # 2026-10-28: 170 bench/board values from toolchain ae53bf147923 (run as b21df20cdd38 + that change, uncommitted)
 # 2026-10-28: 170 bench/board values from toolchain c6433fbb1338 (clang built from its tree before the commit; it reports b79f3c4b6681+dirty)
@@ -142,8 +142,8 @@ zephyr.gui_lvgl.gradient.ms_frame	65	lower	5
 # 2026-11-01: 170 bench/board values from toolchain 5eada47c6210
 # 2026-11-01: 10 zephyr values from toolchain 5eada47c6210
 # 2026-11-01: tick_cost and irq_dev (Zephyr device interrupts) added, toolchain ee4225372285
-zephyr.tick_cost.median_cycles	282	lower	5
-zephyr.irq_dev.blit_irqs_5s	280960	higher	2
+zephyr.tick_cost.median_cycles	279	lower	5
+zephyr.irq_dev.blit_irqs_5s	303104	higher	2
 # 2026-11-01: 12 zephyr values (gui_lvgl text 260 -> 238, gradient 58 -> 64 with the interrupt rework; irq_soak 22283264 measured alone, 22199296 inside the suite)
 # 2026-11-02: 177 bench/board/zephyr values from toolchain llvm 5f97b29a8c0b+loop-tuning
 # 2026-11-02: 170 bench/board values from toolchain 8bbbe41dccdb
@@ -250,3 +250,4 @@ board.O2.perf_haz.muldiv.memwait	141	info	0
 # 2026-11-03: 170 bench/board values from toolchain 5f3691e9e102
 # 2026-11-03: 12 zephyr values from toolchain 5f3691e9e102
 # 2026-11-03: 170 bench/board values from toolchain d68c2d9a47da
+# 2026-11-03: 12 zephyr values from toolchain 5a1d8ac2678d

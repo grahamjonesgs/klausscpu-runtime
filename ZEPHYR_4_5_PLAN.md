@@ -171,6 +171,51 @@ Decision gate: continue with step 7, or keep wolfSSL on 4.5 and revisit at 4.6.
 - README, CLAUDE.md, `west.yml` comments, the expected boot banner (v4.5.0), and
   the patch list.  Merge to main, then retire `zephyr-ws/` 3.7.
 
+## 3b. Progress and step 6 results (2026-11-03)
+
+Done on this branch (all pushed):
+- **Steps 1-5:** hardware model v2, the kernel/arch interface, LLEXT, drivers
+  and config.  Every app builds on 4.5; ssh_shell still runs on wolfSSL.
+  The TRNG entropy driver passes Zephyr's entropy API tests on the board.
+- **Validation (second full run):** `validate.sh zephyr` (12 apps, emulator
+  and board, SSH, VNC grabs) passes once two things are done:
+  - the ISR0 stack regex accepts padded numbers (now fixed);
+  - the perf baselines move to the 4.5 figures.  LVGL 9's renderer is mixed
+    against LVGL 8 (blend50 +12%, rounded +7%, text -29%; the six frames
+    total -3%); IRQ throughput is +7.9% against 3.7.
+- **Performance:** with timeslicing off as on 3.7, the tick and IRQ round
+  trip match or beat 3.7.
+- **Step 8 (the PSA driver):** SHA-256/HMAC and AES-128-CTR on the crypto
+  block.
+- **Compiler:** klausscpu-llvm 6d29d71 fixes the backend crash that
+  mbedTLS's inline asm triggered.
+
+Step 6 measurements (apps/psa_spike, board at 100 MHz, through PSA):
+
+| | mbedTLS sw, 32-bit limbs | 64-bit limbs (patch) | + PSA driver | wolfSSL today |
+|---|---|---|---|---|
+| AES-128-CTR, 16 KiB | 680 KiB/s | 743 | **11440** | 932 (sw) / 3537 (hw) |
+| SHA-256, 16 KiB | 867 KiB/s | 863 | **18577** | 1430 (sw) |
+| HMAC-SHA-256, 64 B | 438 us | 440 | **81 us** | ~35 us (sw) |
+| X25519 agreement | 209 ms | 147 | 135 | |
+| ECDSA P-256 sign | 116 ms | 78 | 70 | |
+| RSA-2048 sign | 3120 ms | 1099 | 1091 | |
+| RSA-2048 keygen (first boot) | 76-373 s | | | |
+| SSH login (connect -> authenticated) | 4.2 s | ~1.3 s (est.) | ~1.3 s (est.) | ~65 ms |
+
+Reading:
+- The PSA driver makes bulk crypto and the per-packet MAC fast; that part of
+  the switch is solved.
+- **Logins are the gap.** Zephyr's SSH signs every handshake with the RSA
+  host key (its only host key type): about 1.1 s at best, so a login takes
+  about 1.3 s against wolfSSH's 65 ms.  An `ecdsa-sha2-nistp256` host key
+  (P-256 sign 70 ms) would bring a login to about 0.25 s, but Zephyr's SSH
+  server needs that code (upstreamable; PSA already does ECDSA).  A
+  Montgomery-multiplier block in hardware would help RSA and ECC alike.
+- **Still to decide (yours):** go ahead with step 7 (accept ~1.3 s logins,
+  or first add ECDSA host keys to Zephyr's SSH), or keep wolfSSL on 4.5,
+  which works now.  SFTP goes either way unless reimplemented.
+
 ## 4. Hardware changes for this migration
 
 Listed by how much they matter once the stack is mbedTLS + Zephyr SSH.
