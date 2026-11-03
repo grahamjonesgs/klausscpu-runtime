@@ -1,8 +1,8 @@
-rsource "arch/klausscpu/Kconfig"
+# The arch and SoC Kconfig files are sourced by hardware model v2 from this
+# module's arch_root/soc_root (zephyr/module.yml), not from here.
 rsource "drivers/serial/Kconfig"
 rsource "drivers/timer/Kconfig"
 rsource "drivers/ethernet/Kconfig"
 rsource "drivers/disk/Kconfig"
-rsource "soc/klausscpu/nexys_a7/Kconfig"
 rsource "ssh/Kconfig"
 rsource "vnc/Kconfig"

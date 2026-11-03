@@ -33,6 +33,7 @@
  */
 
 #include <zephyr/kernel.h>
+#include <errno.h>
 #include <zephyr/arch/cpu.h>
 
 /*
@@ -115,4 +116,11 @@ void arch_cpu_atomic_idle(unsigned int key)
 {
     ARG_UNUSED(key);
     arch_cpu_idle();
+}
+
+/* No coprocessor (FPU) context to preserve on this core. */
+int arch_coprocessors_disable(struct k_thread *thread)
+{
+    ARG_UNUSED(thread);
+    return -ENOTSUP;
 }

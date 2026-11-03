@@ -1,8 +1,5 @@
 if BOARD_NEXYS_A7
 
-config BOARD
-	default "nexys_a7"
-
 config SYS_CLOCK_HW_CYCLES_PER_SEC
 	default 100000000   # 100 MHz
 

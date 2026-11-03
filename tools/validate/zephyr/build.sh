@@ -25,7 +25,7 @@ EXTRA=()
 case $APP in
   hello) SRC=$ZEPHYR/samples/hello_world; MODS="$MOD" ;;
   dbg_synchronization) SRC=$ZEPHYR/samples/synchronization; MODS="$MOD"
-    EXTRA=(-DCONFIG_DEBUG_INFO=y -DCONFIG_THREAD_MONITOR=y -DCONFIG_THREAD_NAME=y) ;;
+    EXTRA=(-DCONFIG_THREAD_MONITOR=y -DCONFIG_THREAD_NAME=y) ;;
   doom) SRC=$MOD/apps/doom; MODS="$MOD" ;;
   irq_dev_spurious) SRC=$MOD/apps/irq_dev; MODS="$MOD"; EXTRA=(-DCONFIG_IRQ_DEV_SPURIOUS=y) ;;
   /*) SRC=$APP; MODS="$MOD" ;;

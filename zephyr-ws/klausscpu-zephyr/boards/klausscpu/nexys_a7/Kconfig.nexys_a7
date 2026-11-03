@@ -1,0 +1,2 @@
+config BOARD_NEXYS_A7
+	select SOC_KLAUSSCPU_NEXYS_A7

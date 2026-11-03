@@ -1,7 +1,7 @@
 # west manifest for the KlaussCPU Zephyr workspace.
 #
 # T2 "star" topology: this module is the manifest repo; it imports upstream
-# Zephyr at the pinned baseline (v3.7.0) and only the external modules the
+# Zephyr at the pinned baseline (v4.5.0) and only the external modules the
 # KlaussCPU port actually needs.  Initialise with:
 #
 #     cd zephyr-ws
@@ -23,7 +23,7 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: v3.7.0
+      revision: v4.5.0
       import:
         # Minimal-libc custom target: the only external module the ssh_shell app
         # needs is FatFs (CONFIG_FAT_FILESYSTEM_ELM → modules/fs/fatfs).  All
@@ -33,3 +33,9 @@ manifest:
         name-allowlist:
           - fatfs
           - lvgl   # embedded GUI library (gui_lvgl app, rendered over VNC)
+          # mbedTLS 4 / TF-PSA-Crypto: Zephyr's own SSH server and TLS sockets
+          # (ZEPHYR_4_5_PLAN.md step 7); tf-psa-crypto-drivers holds the
+          # driver dispatch layer the step 8 PSA driver plugs into.
+          - mbedtls
+          - tf-psa-crypto
+          - tf-psa-crypto-drivers

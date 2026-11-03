@@ -1,0 +1,5 @@
+# Hardware model v2 architecture list for this module's arch root.
+archs:
+  - name: klausscpu
+    path: klausscpu
+    full_name: KlaussCPU

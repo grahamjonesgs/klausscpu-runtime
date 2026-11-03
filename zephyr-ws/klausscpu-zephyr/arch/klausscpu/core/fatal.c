@@ -6,7 +6,7 @@
 #include <zephyr/arch/cpu.h>
 #include <zephyr/fatal.h>
 
-void z_klausscpu_fatal_error(unsigned int reason, const z_arch_esf_t *esf)
+void z_klausscpu_fatal_error(unsigned int reason, const struct arch_esf *esf)
 {
     z_fatal_error(reason, esf);
 }

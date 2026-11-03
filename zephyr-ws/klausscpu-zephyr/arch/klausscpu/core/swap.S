@@ -2,6 +2,9 @@
  * swap.S — KlaussCPU Zephyr context switch and timer ISR.
  *
  * arch_switch(void *switch_to, void **switched_from)
+ *
+ * The routine is z_klausscpu_switch; arch_switch() is the static inline
+ * wrapper in kernel_arch_func.h that Zephyr's kernel_arch_interface.h wants.
  * ─────────────────────────────────────────────────
  *   R0 = switch_to      : new thread's saved SP (void*)
  *   R1 = switched_from  : &current_thread->switch_handle (void**)
@@ -254,9 +257,9 @@ __start:
 
     .text   /* back to .text for arch_switch and timer ISR */
 
-    .globl  arch_switch
-    .type   arch_switch, @function
-arch_switch:
+    .globl  z_klausscpu_switch
+    .type   z_klausscpu_switch, @function
+z_klausscpu_switch:
     .cfi_startproc
     /* Save R0/R1 first so we can disable the timer safely. */
     push_cfi r0, 0
@@ -352,7 +355,7 @@ arch_switch:
     portRESTORE_CONTEXT
     iret
     .cfi_endproc
-    .size arch_switch, . - arch_switch
+    .size z_klausscpu_switch, . - z_klausscpu_switch
 
 
 /* ── Interrupt stubs ───────────────────────────────────────────────────── */

@@ -76,6 +76,16 @@ static ALWAYS_INLINE bool arch_irq_unlocked(unsigned int key)
     return key != 0u;
 }
 
+/* The ISA has no instruction that reads the interrupt-enable bit without
+ * changing it, so take it with DI and put it straight back with EI. */
+static ALWAYS_INLINE bool arch_cpu_irqs_are_enabled(void)
+{
+    unsigned int key = __builtin_klausscpu_di();
+
+    __builtin_klausscpu_ei(key);
+    return key != 0u;
+}
+
 /* k_cycle_get_32/64(): the free-running PERF_CYCLES counter behind the timer
  * driver (drivers/timer/klausscpu_timer.c), not the tick counter TIMER_COUNT
  * (0xF00F_0038), which wraps every tick period (1 ms at 1 kHz): k_busy_wait()
@@ -90,7 +100,7 @@ static ALWAYS_INLINE uint64_t arch_k_cycle_get_64(void)
     return sys_clock_cycle_get_64();
 }
 
-/* arch_switch is in swap.S; declared via arch_interface.h */
+/* arch_switch is the inline wrapper in arch/klausscpu/include/kernel_arch_func.h */
 
 static ALWAYS_INLINE unsigned int arch_num_cpus(void)
 {

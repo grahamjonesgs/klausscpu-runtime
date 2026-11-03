@@ -1,26 +1,28 @@
-config ARCH
-	default "klausscpu"
-
-config ARCH_IS_SET
-	bool
-	default y
-
-# KlaussCPU is 64-bit little-endian, 32-bit physical address space.
-config 64BIT
-	default y
+# KlaussCPU architecture.  Sourced by hardware model v2 from arch/archs.yml;
+# the SoC selects CPU_KLAUSSCPU, and everything else here applies only then.
 
 config CPU_KLAUSSCPU
 	bool
+	select ARCH_IS_SET
 	select ATOMIC_OPERATIONS_C
 	select USE_SWITCH_SUPPORTED
 	select USE_SWITCH
 	# Toolchain emits ELFCLASS32 relocatable objects even though the C ABI
 	# uses 64-bit pointers (CONFIG_64BIT=y), so llext must parse 32-bit ELF.
 	select LLEXT_ELF_CLASS32 if LLEXT
-	# Build in C11.  Clang reports __GNUC__ 4.2, so under -std=c99
-	# toolchain/gcc.h defines BUILD_ASSERT() as nothing and every
-	# kernel, arch and driver build-time check is silently skipped.
-	select REQUIRES_STD_C11
+
+if CPU_KLAUSSCPU
+
+config ARCH
+	default "klausscpu"
+
+# KlaussCPU is 64-bit little-endian, 32-bit physical address space.
+config 64BIT
+	default y
+
+# Zephyr builds in C17 by default.  Never drop below C11: Clang reports
+# __GNUC__ 4.2, so under -std=c99 toolchain/gcc.h defines BUILD_ASSERT() as
+# nothing and every kernel, arch and driver build-time check is skipped.
 
 config ARCH_HAS_USERSPACE
 	bool
@@ -67,3 +69,5 @@ config ISR_STACK_SIZE
 # The idle thread's default (256) does not.
 config IDLE_STACK_SIZE
 	default 1024
+
+endif # CPU_KLAUSSCPU

@@ -21,5 +21,13 @@ static ALWAYS_INLINE void arch_kernel_init(void)
 
 void z_klausscpu_fatal_error(unsigned int reason, const struct arch_esf *esf);
 
+/* Context switch, in swap.S (also entered from the ISR exit path). */
+void z_klausscpu_switch(void *switch_to, void **switched_from);
+
+static ALWAYS_INLINE void arch_switch(void *switch_to, void **switched_from)
+{
+    z_klausscpu_switch(switch_to, switched_from);
+}
+
 #endif /* _ASMLANGUAGE */
 #endif /* ZEPHYR_ARCH_KLAUSSCPU_INCLUDE_KERNEL_ARCH_FUNC_H_ */

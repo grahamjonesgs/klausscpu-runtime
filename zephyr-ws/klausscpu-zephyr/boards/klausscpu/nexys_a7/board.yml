@@ -1,0 +1,5 @@
+board:
+  name: nexys_a7
+  full_name: KlaussCPU on Digilent Nexys A7
+  socs:
+    - name: klausscpu_nexys_a7

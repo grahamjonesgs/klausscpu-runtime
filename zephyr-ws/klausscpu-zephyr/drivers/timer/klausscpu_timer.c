@@ -38,7 +38,7 @@ static int klausscpu_timer_init(void)
     return 0;
 }
 
-void sys_clock_set_timeout(int32_t ticks, bool idle)
+void sys_clock_set_timeout(uint32_t ticks, bool idle)
 {
     ARG_UNUSED(ticks);
     ARG_UNUSED(idle);

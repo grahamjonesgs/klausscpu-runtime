@@ -2,3 +2,10 @@ name: klausscpu-zephyr
 build:
   cmake: .
   kconfig: Kconfig
+  # Hardware model v2 roots: arch/archs.yml, soc/**/soc.yml, boards/**/board.yml
+  # and dts/bindings are found here without -DARCH_ROOT/-DSOC_ROOT/... flags.
+  settings:
+    arch_root: .
+    board_root: .
+    soc_root: .
+    dts_root: .

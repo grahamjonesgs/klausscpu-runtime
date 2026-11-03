@@ -19,7 +19,7 @@
 extern uint64_t _klausscpu_isr_handle;
 extern volatile uint32_t _klausscpu_sched_ready;
 extern void *z_get_next_switch_handle(void *interrupted);
-extern void arch_switch(void *switch_to, void **switched_from);
+extern void z_klausscpu_switch(void *switch_to, void **switched_from);
 
 static ALWAYS_INLINE void z_klausscpu_isr_exit(void)
 {
@@ -39,7 +39,7 @@ static ALWAYS_INLINE void z_klausscpu_isr_exit(void)
 	void *new_handle = z_get_next_switch_handle(old_handle);
 
 	if (new_handle != old_handle) {
-		arch_switch(new_handle, &old->switch_handle);
+		z_klausscpu_switch(new_handle, &old->switch_handle);
 	}
 }
 

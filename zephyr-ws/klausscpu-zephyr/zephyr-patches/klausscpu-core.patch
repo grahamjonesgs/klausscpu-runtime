@@ -1,24 +1,50 @@
+diff --git a/include/zephyr/arch/arch_inlines.h b/include/zephyr/arch/arch_inlines.h
+index 4e50385f1..997518b32 100644
+--- a/include/zephyr/arch/arch_inlines.h
++++ b/include/zephyr/arch/arch_inlines.h
+@@ -38,6 +38,8 @@
+ #include <zephyr/arch/hexagon/arch_inlines.h>
+ #elif defined(CONFIG_TRICORE)
+ #include <zephyr/arch/tricore/arch_inlines.h>
++#elif defined(CONFIG_CPU_KLAUSSCPU)
++/* KlaussCPU: single CPU, no inline arch helpers beyond arch.h */
+ #elif defined(CONFIG_ARCH_IS_SET)
+ #error "The selected architecture is missing from this dispatch header"
+ #endif
 diff --git a/include/zephyr/arch/cpu.h b/include/zephyr/arch/cpu.h
-index 1e107512fa2..147c40e0216 100644
+index c38d17b2a..96c153b10 100644
 --- a/include/zephyr/arch/cpu.h
 +++ b/include/zephyr/arch/cpu.h
-@@ -31,6 +31,8 @@
- #include <zephyr/arch/posix/arch.h>
- #elif defined(CONFIG_SPARC)
- #include <zephyr/arch/sparc/arch.h>
+@@ -37,6 +37,8 @@
+ #include <zephyr/arch/hexagon/arch.h>
+ #elif defined(CONFIG_TRICORE)
+ #include <zephyr/arch/tricore/arch.h>
 +#elif defined(CONFIG_CPU_KLAUSSCPU)
 +#include <zephyr/arch/klausscpu/arch.h>
+ #elif defined(CONFIG_ARCH_IS_SET)
+ #error "The selected architecture is missing from this dispatch header"
  #endif
- 
- #endif /* ZEPHYR_INCLUDE_ARCH_CPU_H_ */
+diff --git a/include/zephyr/arch/exception.h b/include/zephyr/arch/exception.h
+index 9598871ab..92d6b6cca 100644
+--- a/include/zephyr/arch/exception.h
++++ b/include/zephyr/arch/exception.h
+@@ -182,6 +182,8 @@ static inline void arch_exception_call_dump_hook(const char *format, ...)
+ #include <zephyr/arch/hexagon/exception.h>
+ #elif defined(CONFIG_TRICORE)
+ #include <zephyr/arch/tricore/exception.h>
++#elif defined(CONFIG_CPU_KLAUSSCPU)
++/* KlaussCPU: struct arch_esf is in zephyr/arch/klausscpu/arch.h */
+ #elif defined(CONFIG_ARCH_IS_SET)
+ #error "The selected architecture is missing from this dispatch header"
+ #endif
 diff --git a/include/zephyr/linker/linker-tool-gcc.h b/include/zephyr/linker/linker-tool-gcc.h
-index 32319a41543..4c3ca31ecd1 100644
+index 41fc5ed6d..4a9e0ac61 100644
 --- a/include/zephyr/linker/linker-tool-gcc.h
 +++ b/include/zephyr/linker/linker-tool-gcc.h
-@@ -59,6 +59,9 @@
- 	/* Not needed */
- #elif defined(CONFIG_SPARC)
- 	OUTPUT_FORMAT("elf32-sparc")
+@@ -65,6 +65,9 @@
+ 	OUTPUT_FORMAT("elf32-hexagon")
+ #elif defined(CONFIG_TRICORE)
+ 	OUTPUT_FORMAT("elf32-tricore")
 +#elif defined(CONFIG_CPU_KLAUSSCPU)
 +	/* KlaussCPU: 32-bit physical address space, little-endian ELF */
 +	OUTPUT_FORMAT("elf32-klausscpu", "elf32-klausscpu", "elf32-klausscpu")
@@ -26,26 +52,33 @@ index 32319a41543..4c3ca31ecd1 100644
  	#error Arch not supported.
  #endif
 diff --git a/include/zephyr/toolchain/common.h b/include/zephyr/toolchain/common.h
-index c84328365fd..41aa6fc5011 100644
+index 682ca6488..2a8a22717 100644
 --- a/include/zephyr/toolchain/common.h
 +++ b/include/zephyr/toolchain/common.h
-@@ -96,6 +96,10 @@
+@@ -104,7 +104,7 @@
+     #define   ALIGN(x)    .align    x
+   #elif defined(CONFIG_SPARC) || defined(CONFIG_TRICORE)
+     #define   ALIGN(x)    .align    x
+-  #elif defined(CONFIG_HEXAGON)
++  #elif defined(CONFIG_HEXAGON) || defined(CONFIG_CPU_KLAUSSCPU)
+     #define   ALIGN(x)    .balign   x
+   #else
+     #error Architecture unsupported
+@@ -149,7 +149,7 @@
  
      #define PERFOPT_ALIGN .align  4
  
-+  #elif defined(CONFIG_CPU_KLAUSSCPU)
-+
-+    #define PERFOPT_ALIGN .balign 4
-+
-   #else
+-  #elif defined(CONFIG_HEXAGON)
++  #elif defined(CONFIG_HEXAGON) || defined(CONFIG_CPU_KLAUSSCPU)
  
-     #error Architecture unsupported
+     #define PERFOPT_ALIGN .balign 4
+ 
 diff --git a/include/zephyr/toolchain/gcc.h b/include/zephyr/toolchain/gcc.h
-index 9af23fb219e..62ad689486d 100644
+index 637a092e0..853c7b8f4 100644
 --- a/include/zephyr/toolchain/gcc.h
 +++ b/include/zephyr/toolchain/gcc.h
-@@ -569,6 +569,18 @@ do {                                                                    \
- 		"\n\t.equ\t" #name "," #value       \
+@@ -635,6 +635,18 @@ do {                                                                    \
+ 		"\n\t.equ\t" #name "," #value        \
  		"\n\t.type\t" #name ",#object")
  
 +#elif defined(CONFIG_CPU_KLAUSSCPU)
@@ -60,24 +93,6 @@ index 9af23fb219e..62ad689486d 100644
 +		"\n\t.equ\t" #name "," #value       \
 +		"\n\t.type\t" #name ",@object")
 +
- #else
- #error processor architecture not supported
- #endif
-diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_config.h
-index 7ced4f74cdf..1c56bd5e9cc 100644
---- a/modules/fatfs/zephyr_fatfs_config.h
-+++ b/modules/fatfs/zephyr_fatfs_config.h
-@@ -78,8 +78,12 @@
- #undef FF_FS_TINY
- #define FF_FS_TINY 1
- 
-+/* KlaussCPU patch: enable FatFs timestamps.  We provide get_fattime() backed by
-+ * a software wall-clock set from SNTP at boot (.../klausscpu-zephyr/ssh/
-+ * wallclock.c) so files get real dates that `ls` can show.  (Upstream forces
-+ * NORTC=1 with no Kconfig option.) */
- #undef FF_FS_NORTC
--#define FF_FS_NORTC 1
-+#define FF_FS_NORTC 0
- 
- /* Zephyr uses FF_VOLUME_STRS */
- #undef FF_STR_VOLUME_ID
+ #elif defined(CONFIG_HEXAGON)
+ /* Hexagon (Qualcomm DSP) - use standard assembly approach */
+ #define GEN_ABSOLUTE_SYM(name, value)                                                              \
