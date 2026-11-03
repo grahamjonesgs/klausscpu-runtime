@@ -351,6 +351,21 @@ static inline uint32_t htonl(uint32_t v) {
 #define AES_STATUS_BUSY   (1u << 0)
 #define AES_STATUS_DONE   (1u << 1)   /* sticky; cleared by next GO/KEY_LOAD */
 
+/* AES CTR mode (klaussCPU crypto-restore-ctr; check AES_CAP before use).
+ * With AES_MODE_CTR set, a write to AES_IN1 (write IN0 first) runs one block:
+ * OUT = E_K(CTR) XOR IN, then CTR++.  CTR uses AES_IN's byte layout; byte 15
+ * (CTR1[63:56]) is the least significant byte of the big-endian counter.
+ * CTRL.GO still runs a raw ECB block on AES_IN. */
+#define REG_AES_CTR0    (*(volatile uint64_t *)(AES_BASE + 0x0C0u))  /* counter bytes 0..7  */
+#define REG_AES_CTR1    (*(volatile uint64_t *)(AES_BASE + 0x0C8u))  /* counter bytes 8..15 */
+#define REG_AES_MODE    (*(volatile uint32_t *)(AES_BASE + 0x0D0u))
+#define REG_AES_CAP     (*(volatile uint32_t *)(AES_BASE + 0x0F8u))  /* RO; 0 on older bitstreams */
+
+#define AES_MODE_CTR    (1u << 0)   /* AES_IN1 write starts a CTR block */
+#define AES_MODE_INC32  (1u << 3)   /* increment bytes 12..15 only (GCM inc32) */
+#define AES_CAP_CTR     (1u << 0)
+#define AES_CAP_INC32   (1u << 1)
+
 /* AES-GCM / GHASH: 0xF00A_0080
  * Raw GHASH interface: tag = (tag XOR X) * H in GF(2^128).
  * Software sequences AES-CTR + these GHASH steps to build full AES-GCM. */
@@ -379,8 +394,8 @@ static inline uint32_t htonl(uint32_t v) {
 #define SHA_BLOCK_PTR    ((volatile uint64_t *)(SHA_BASE + 0x010u))   /* 8 × 64-bit slots */
 #define SHA_DIGEST_PTR   ((volatile uint64_t *)(SHA_BASE + 0x050u))   /* 4 × 64-bit slots */
 /* Indexed access (equivalent to SHA_BLOCK_PTR[n] / SHA_DIGEST_PTR[n]). */
-#define REG_SHA_BLOCK(n)  (*(volatile uint64_t *)(SHA_BASE + 0x010u + (n)*8u))
-#define REG_SHA_DIGEST(n) (*(volatile uint64_t *)(SHA_BASE + 0x050u + (n)*8u))
+#define REG_SHA_BLOCK(n)  (SHA_BLOCK_PTR[n])
+#define REG_SHA_DIGEST(n) (SHA_DIGEST_PTR[n])
 
 #define SHA_CTRL_INIT    (1u << 0)   /* reset H to FIPS-180-4 IV */
 #define SHA_CTRL_START   (1u << 1)   /* compress block in BLOCK regs */
@@ -388,6 +403,20 @@ static inline uint32_t htonl(uint32_t v) {
  * bytes into the block data and calls SHA_CTRL_START for every block. */
 #define SHA_STATUS_BUSY  (1u << 0)
 #define SHA_STATUS_DONE  (1u << 1)
+
+/* SHA state save/restore (klaussCPU crypto-restore-ctr; check SHA_CAP first).
+ * Save: wait for BUSY=0, read SHA_DIGEST0..3.  Restore: write SHA_HIN0..3
+ * (DIGEST's packing), then SHA_CTRL_RESTORE, and poll BUSY=0 before touching
+ * BLOCK/HIN.  RESTORE|START in one write restores and compresses one block.
+ * INIT beats RESTORE/ZERO in the same write; both are ignored while BUSY. */
+#define SHA_HIN_PTR      ((volatile uint64_t *)(SHA_BASE + 0x0C0u))   /* 4 × 64-bit slots */
+#define REG_SHA_HIN(n)   (SHA_HIN_PTR[n])
+#define REG_SHA_CAP      (*(volatile uint32_t *)(SHA_BASE + 0x0F8u))  /* RO; 0 on older bitstreams */
+
+#define SHA_CTRL_RESTORE (1u << 2)   /* H <- SHA_HIN; clears DONE */
+#define SHA_CTRL_ZERO    (1u << 3)   /* H, HIN, BLOCK <- 0; clears DONE */
+#define SHA_CAP_RESTORE  (1u << 0)
+#define SHA_CAP_ZERO     (1u << 1)
 
 /* HMAC wrapper: 0xF00B_0080
  * START/FINAL are single-cycle H-load pulses; KEY_LOAD is ~135 cycles. */

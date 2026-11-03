@@ -182,7 +182,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_switch test_fp test_asm test_printf test_varargs test_atomic test_diei test_flags test_divshadow perf_baseline perf_haz perf_kern fs_demo \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
-           netboot loader crypto_selftest crypto_test dhrystone blit_selftest blit_capture \
+           netboot loader crypto_selftest crypto_selftest2 crypto_test dhrystone blit_selftest blit_capture \
            test_unaligned test_misalign test_hwcg test_leapc vga_off test_setjmp test_task_exit
 
 .PHONY: all clean $(PROGRAMS)
@@ -515,6 +515,16 @@ crypto_selftest.elf: crypto_selftest.o $(CRYPTO_HW_OBJ) $(LIBC_OBJS) $(RUNTIME_O
 	$(call link,$@,$(CRYPTO_HW_OBJ) crypto_selftest.o)
 
 crypto_selftest: crypto_selftest.elf
+
+# crypto_selftest2: CTR mode and SHA save/restore (klaussCPU crypto-restore-ctr);
+# prints SKIP where the capability registers read 0.
+crypto_selftest2.o: programs/crypto_selftest2.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+crypto_selftest2.elf: crypto_selftest2.o $(CRYPTO_HW_OBJ) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,$(CRYPTO_HW_OBJ) crypto_selftest2.o)
+
+crypto_selftest2: crypto_selftest2.elf
 
 crypto_test.o: programs/crypto_test.c
 	$(CC) $(CFLAGS) -c -o $@ $<

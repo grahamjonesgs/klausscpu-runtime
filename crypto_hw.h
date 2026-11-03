@@ -96,6 +96,54 @@ void hmac_sha256_sw(const uint8_t *key, size_t key_len,
                     const uint8_t *msg, size_t msg_len,
                     uint8_t out[32]);
 
+/* ── Capabilities ────────────────────────────────────────────────────────── */
+
+/* Feature bits of the loaded bitstream (AES_CAP_* / SHA_CAP_* in mmio.h).
+ * Older bitstreams and the emulator read 0.  The functions above use the
+ * fast paths below on their own when the bits are set. */
+uint32_t aes_hw_caps(void);
+uint32_t sha_hw_caps(void);
+
+/* ── AES-128 CTR in hardware (needs AES_CAP_CTR) ─────────────────────────── */
+
+/* CTR-encrypt/decrypt len bytes with the loaded key.  ctr is the 16-byte
+ * counter block and is advanced past every block used; inc32 selects GCM's
+ * 32-bit increment instead of the full 128-bit one.  For a final partial
+ * block, ks_tail (if non-NULL) receives that block's whole keystream, so a
+ * caller can use its remaining bytes on the next call. */
+void aes_ctr_hw(uint8_t ctr[16], const uint8_t *in, uint8_t *out, size_t len,
+                int inc32, uint8_t ks_tail[16]);
+
+/* ── SHA-256 with state save/restore (needs SHA_CAP_RESTORE) ─────────────── */
+
+/* A context that can be suspended between calls: the hardware holds it only
+ * inside sha256_hw_rupdate/rfinal, so any number may be in flight (callers
+ * still serialize access to the block).  h is in SHA_DIGEST's packing. */
+typedef struct {
+    uint64_t h[4];
+    uint64_t total_bytes;
+    uint8_t  buf[64];
+    uint32_t buf_len;
+} sha256_hw_rctx_t;
+
+void sha256_hw_rinit(sha256_hw_rctx_t *ctx);
+/* Start from a saved state h that has already hashed prefix_bytes (a
+ * multiple of 64), e.g. an HMAC midstate. */
+void sha256_hw_rinit_from(sha256_hw_rctx_t *ctx, const uint64_t h[4],
+                          uint64_t prefix_bytes);
+void sha256_hw_rupdate(sha256_hw_rctx_t *ctx, const uint8_t *data, size_t len);
+void sha256_hw_rfinal(sha256_hw_rctx_t *ctx, uint8_t out[32]);
+
+/* HMAC-SHA-256 from software midstates: any number of keys, any key length. */
+typedef struct {
+    uint64_t ih[4];   /* state after the ipad block */
+    uint64_t oh[4];   /* state after the opad block */
+} hmac_sha256_hw_key_t;
+
+void hmac_sha256_hw_rkey(hmac_sha256_hw_key_t *k, const uint8_t *key, size_t key_len);
+void hmac_sha256_hw_rmac(const hmac_sha256_hw_key_t *k, const uint8_t *msg,
+                         size_t msg_len, uint8_t out[32]);
+
 /* ── TRNG ────────────────────────────────────────────────────────────────── */
 
 /* Enable the TRNG and wait until the first conditioned output is ready.

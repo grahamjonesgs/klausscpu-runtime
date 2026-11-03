@@ -23,6 +23,52 @@ static inline void hmac_wait(void) {
     while (REG_HMAC_STATUS & HMAC_STATUS_BUSY) {}
 }
 
+/* A CTR block started by an AES_IN1 write: BUSY covers it, and DONE (cleared
+ * by the write) is set when OUT is valid. */
+static inline void aes_wait_out(void) {
+    uint32_t st;
+    do { st = REG_AES_STATUS; } while ((st & AES_STATUS_BUSY) || !(st & AES_STATUS_DONE));
+}
+
+/* After RESTORE / ZERO (and RESTORE|START), BUSY also covers a queued request. */
+static inline void sha_wait_idle(void) {
+    while (REG_SHA_STATUS & SHA_STATUS_BUSY) {}
+}
+
+/* 64-bit loads/stores of byte buffers.  The build is -fno-builtin, so a plain
+ * memcpy of 8 bytes is a library call; __builtin_memcpy is inlined (as byte
+ * accesses unless the buffer is known to be aligned). */
+typedef uint64_t __attribute__((may_alias, aligned(8))) u64_aligned;
+
+static inline uint64_t ld64(const uint8_t *p) {
+    if (((uintptr_t)p & 7u) == 0) return *(const u64_aligned *)p;
+    uint64_t v;
+    __builtin_memcpy(&v, p, 8);
+    return v;
+}
+
+static inline void st64(uint8_t *p, uint64_t v) {
+    if (((uintptr_t)p & 7u) == 0) { *(u64_aligned *)p = v; return; }
+    __builtin_memcpy(p, &v, 8);
+}
+
+/* ── Capabilities ────────────────────────────────────────────────────────── */
+
+/* The bitstream cannot change under a running program, so read each once. */
+uint32_t aes_hw_caps(void) {
+    static int read;
+    static uint32_t caps;
+    if (!read) { caps = REG_AES_CAP; read = 1; }
+    return caps;
+}
+
+uint32_t sha_hw_caps(void) {
+    static int read;
+    static uint32_t caps;
+    if (!read) { caps = REG_SHA_CAP; read = 1; }
+    return caps;
+}
+
 /* Write 64 bytes (8 × uint64_t) to SHA_BLOCK0..7. */
 static void sha_write_block(const uint8_t *data) {
     volatile uint64_t *blk = (volatile uint64_t *)(SHA_BASE + 0x010u);
@@ -129,8 +175,50 @@ void aes_hw_decrypt(uint64_t in_lo, uint64_t in_hi,
 
 static uint64_t bswap64(uint64_t v); /* defined below (GCM section) */
 
+void aes_ctr_hw(uint8_t ctr[16], const uint8_t *in, uint8_t *out, size_t len,
+                int inc32, uint8_t ks_tail[16]) {
+    aes_wait();
+    REG_AES_CTR0 = ld64(ctr);
+    REG_AES_CTR1 = ld64(ctr + 8);
+    REG_AES_MODE = AES_MODE_CTR | (inc32 ? AES_MODE_INC32 : 0u);
+
+    while (len >= 16) {
+        REG_AES_IN0 = ld64(in);
+        REG_AES_IN1 = ld64(in + 8);          /* starts the block */
+        aes_wait_out();
+        st64(out,     REG_AES_OUT0);
+        st64(out + 8, REG_AES_OUT1);
+        in += 16; out += 16; len -= 16;
+    }
+    if (len > 0) {
+        /* Zero-padded input: OUT beyond len is the bare keystream. */
+        uint8_t blk[16] = {0}, o[16];
+        memcpy(blk, in, len);
+        REG_AES_IN0 = ld64(blk);
+        REG_AES_IN1 = ld64(blk + 8);
+        aes_wait_out();
+        st64(o,     REG_AES_OUT0);
+        st64(o + 8, REG_AES_OUT1);
+        memcpy(out, o, len);
+        if (ks_tail)
+            for (int i = 0; i < 16; i++) ks_tail[i] = o[i] ^ blk[i];
+    }
+
+    st64(ctr,     REG_AES_CTR0);
+    st64(ctr + 8, REG_AES_CTR1);
+    REG_AES_MODE = 0;
+}
+
 void aes_ctr(uint64_t nonce_lo, uint64_t nonce_hi,
              const uint8_t *in, uint8_t *out, size_t len) {
+    if (aes_hw_caps() & AES_CAP_CTR) {
+        uint8_t ctr[16];
+        st64(ctr, nonce_lo);
+        st64(ctr + 8, nonce_hi);
+        aes_ctr_hw(ctr, in, out, len, 0, NULL);
+        return;
+    }
+
     uint64_t ctr_lo = nonce_lo, ctr_hi = nonce_hi;
 
     /* Full 16-byte blocks. */
@@ -199,6 +287,10 @@ static void ctr_inc(uint8_t ctr[16]) {
 
 /* GHASH one (zero-padded) block of up to 16 bytes. */
 static void ghash_block(const uint8_t *data, size_t len) {
+    if (len == 16) {
+        gcm_ghash_block(ld64(data), ld64(data + 8));
+        return;
+    }
     uint8_t blk[16] = {0};
     if (len) memcpy(blk, data, len > 16 ? 16 : len);
     uint64_t lo, hi;
@@ -240,6 +332,12 @@ void aes_gcm_encrypt(const uint8_t *iv,
     uint8_t ctr[16] = {0};
     memcpy(ctr, iv, 12); ctr[15] = 0x01;
     off = 0;
+    if ((aes_hw_caps() & (AES_CAP_CTR | AES_CAP_INC32)) == (AES_CAP_CTR | AES_CAP_INC32)) {
+        ctr[15] = 0x02;
+        aes_ctr_hw(ctr, pt, ct, len, 1, NULL);
+        for (; off < len; off += 16)
+            ghash_block(ct + off, (len - off >= 16) ? 16 : (len - off));
+    }
     while (off < len) {
         ctr_inc(ctr);
         uint64_t ctr_lo, ctr_hi, ks_lo, ks_hi;
@@ -330,6 +428,11 @@ int aes_gcm_decrypt(const uint8_t *iv,
     uint8_t ctr[16] = {0};
     memcpy(ctr, iv, 12); ctr[15] = 0x01;
     off = 0;
+    if ((aes_hw_caps() & (AES_CAP_CTR | AES_CAP_INC32)) == (AES_CAP_CTR | AES_CAP_INC32)) {
+        ctr[15] = 0x02;
+        aes_ctr_hw(ctr, ct, pt, len, 1, NULL);
+        off = len;
+    }
     while (off < len) {
         ctr_inc(ctr);
         uint64_t ctr_lo, ctr_hi, ks_lo, ks_hi;
@@ -417,6 +520,118 @@ void sha256_hw_final(sha256_ctx_t *ctx, uint8_t out[32]) {
     sha_finalize(ctx->buf, ctx->buf_len,
                  ctx->total_bytes * 8, out);
     ctx->initialized = 0;
+}
+
+/* ── SHA-256 with state save/restore ─────────────────────────────────────── */
+
+/* FIPS 180-4 IV as big-endian bytes, which is SHA_DIGEST/SHA_HIN's packing. */
+static const uint8_t sha256_iv[32] = {
+    0x6a, 0x09, 0xe6, 0x67, 0xbb, 0x67, 0xae, 0x85,
+    0x3c, 0x6e, 0xf3, 0x72, 0xa5, 0x4f, 0xf5, 0x3a,
+    0x51, 0x0e, 0x52, 0x7f, 0x9b, 0x05, 0x68, 0x8c,
+    0x1f, 0x83, 0xd9, 0xab, 0x5b, 0xe0, 0xcd, 0x19,
+};
+
+/* Compress n_blocks 64-byte blocks onto state h: RESTORE, the blocks, save.
+ * The first block goes with the RESTORE in one CTRL write. */
+static void sha_r_blocks(uint64_t h[4], const uint8_t *data, size_t n_blocks) {
+    if (n_blocks == 0) return;
+    sha_wait_idle();
+    for (int i = 0; i < 4; i++) REG_SHA_HIN(i) = h[i];
+    for (size_t b = 0; b < n_blocks; b++) {
+        for (int i = 0; i < 8; i++) REG_SHA_BLOCK(i) = ld64(data + b * 64 + i * 8);
+        REG_SHA_CTRL = b == 0 ? (SHA_CTRL_RESTORE | SHA_CTRL_START) : SHA_CTRL_START;
+        sha_wait_idle();
+        sha_wait();
+    }
+    for (int i = 0; i < 4; i++) h[i] = REG_SHA_DIGEST(i);
+}
+
+void sha256_hw_rinit(sha256_hw_rctx_t *ctx) {
+    for (int i = 0; i < 4; i++) ctx->h[i] = ld64(sha256_iv + i * 8);
+    ctx->total_bytes = 0;
+    ctx->buf_len = 0;
+}
+
+void sha256_hw_rinit_from(sha256_hw_rctx_t *ctx, const uint64_t h[4],
+                          uint64_t prefix_bytes) {
+    for (int i = 0; i < 4; i++) ctx->h[i] = h[i];
+    ctx->total_bytes = prefix_bytes;
+    ctx->buf_len = 0;
+}
+
+void sha256_hw_rupdate(sha256_hw_rctx_t *ctx, const uint8_t *data, size_t len) {
+    ctx->total_bytes += len;
+    if (ctx->buf_len > 0) {
+        size_t take = 64 - ctx->buf_len;
+        if (take > len) take = len;
+        memcpy(ctx->buf + ctx->buf_len, data, take);
+        ctx->buf_len += (uint32_t)take;
+        data += take; len -= take;
+        if (ctx->buf_len < 64) return;
+        sha_r_blocks(ctx->h, ctx->buf, 1);
+        ctx->buf_len = 0;
+    }
+    size_t n = len / 64;
+    sha_r_blocks(ctx->h, data, n);
+    data += n * 64; len -= n * 64;
+    if (len > 0) {
+        memcpy(ctx->buf, data, len);
+        ctx->buf_len = (uint32_t)len;
+    }
+}
+
+void sha256_hw_rfinal(sha256_hw_rctx_t *ctx, uint8_t out[32]) {
+    uint8_t pad[128];
+    size_t n = ctx->buf_len;
+    uint64_t bits = ctx->total_bytes * 8;
+
+    memset(pad, 0, sizeof(pad));
+    memcpy(pad, ctx->buf, n);
+    pad[n] = 0x80;
+    size_t blocks = (n < 56) ? 1 : 2;
+    for (int i = 0; i < 8; i++)
+        pad[blocks * 64 - 1 - i] = (uint8_t)(bits >> (8 * i));
+    sha_r_blocks(ctx->h, pad, blocks);
+    for (int i = 0; i < 4; i++) st64(out + i * 8, ctx->h[i]);
+    ctx->buf_len = 0;
+}
+
+/* ── HMAC-SHA-256 from software midstates ────────────────────────────────── */
+
+void hmac_sha256_hw_rkey(hmac_sha256_hw_key_t *k, const uint8_t *key, size_t key_len) {
+    uint8_t k0[64], blk[64];
+    sha256_hw_rctx_t c;
+
+    memset(k0, 0, sizeof(k0));
+    if (key_len > 64) {
+        sha256_hw_rinit(&c);
+        sha256_hw_rupdate(&c, key, key_len);
+        sha256_hw_rfinal(&c, k0);
+    } else {
+        memcpy(k0, key, key_len);
+    }
+    for (int i = 0; i < 64; i++) blk[i] = k0[i] ^ 0x36;
+    sha256_hw_rinit(&c);
+    sha_r_blocks(c.h, blk, 1);
+    memcpy(k->ih, c.h, sizeof(k->ih));
+    for (int i = 0; i < 64; i++) blk[i] = k0[i] ^ 0x5c;
+    sha256_hw_rinit(&c);
+    sha_r_blocks(c.h, blk, 1);
+    memcpy(k->oh, c.h, sizeof(k->oh));
+}
+
+void hmac_sha256_hw_rmac(const hmac_sha256_hw_key_t *k, const uint8_t *msg,
+                         size_t msg_len, uint8_t out[32]) {
+    sha256_hw_rctx_t c;
+    uint8_t inner[32];
+
+    sha256_hw_rinit_from(&c, k->ih, 64);
+    sha256_hw_rupdate(&c, msg, msg_len);
+    sha256_hw_rfinal(&c, inner);
+    sha256_hw_rinit_from(&c, k->oh, 64);
+    sha256_hw_rupdate(&c, inner, 32);
+    sha256_hw_rfinal(&c, out);
 }
 
 /* ── HMAC-SHA-256 (hardware HMAC wrapper) ────────────────────────────────── */
