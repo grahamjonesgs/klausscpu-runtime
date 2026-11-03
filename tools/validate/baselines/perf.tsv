@@ -16,112 +16,112 @@
 #              gui_lvgl ms/frame per LVGL benchmark.  Wall-clock rates:
 #              looser tolerances.
 # added 2026-10-28 from toolchain 65f26a14dd03
-bench.O2.coremark.cycles	1460541532	lower	0.5
-bench.O2.coremark.score	205.4	higher	0.5
+bench.O2.coremark.cycles	1457880694	lower	0.5
+bench.O2.coremark.score	205.7	higher	0.5
 bench.O2.coremark.pass	1	higher	0
-bench.O2.coremark_validate.cycles	1460384995	lower	0.5
-bench.O2.coremark_validate.score	205.4	higher	0.5
+bench.O2.coremark_validate.cycles	1457654818	lower	0.5
+bench.O2.coremark_validate.score	205.8	higher	0.5
 bench.O2.coremark_validate.pass	1	higher	0
-bench.O2.embench.aha-mont64.cycles	3076620	lower	0.5
+bench.O2.embench.aha-mont64.cycles	3075772	lower	0.5
 bench.O2.embench.aha-mont64.text	1596	lower	1
-bench.O2.embench.crc32.cycles	5793859	lower	0.5
+bench.O2.embench.crc32.cycles	5793856	lower	0.5
 bench.O2.embench.crc32.text	436	lower	1
-bench.O2.embench.cubic.cycles	4218512	lower	0.5
+bench.O2.embench.cubic.cycles	4209711	lower	0.5
 bench.O2.embench.cubic.text	2696	lower	1
-bench.O2.embench.edn.cycles	4188500	lower	0.5
+bench.O2.embench.edn.cycles	4149345	lower	0.5
 bench.O2.embench.edn.text	2292	lower	1
-bench.O2.embench.huffbench.cycles	3843606	lower	0.5
+bench.O2.embench.huffbench.cycles	3761263	lower	0.5
 bench.O2.embench.huffbench.text	2956	lower	1
-bench.O2.embench.matmult-int.cycles	5213403	lower	0.5
+bench.O2.embench.matmult-int.cycles	5139575	lower	0.5
 bench.O2.embench.matmult-int.text	1556	lower	1
-bench.O2.embench.minver.cycles	3843108	lower	0.5
+bench.O2.embench.minver.cycles	3798432	lower	0.5
 bench.O2.embench.minver.text	3836	lower	1
-bench.O2.embench.nbody.cycles	2871986	lower	0.5
+bench.O2.embench.nbody.cycles	2867123	lower	0.5
 bench.O2.embench.nbody.text	3872	lower	1
-bench.O2.embench.nettle-aes.cycles	4081254	lower	0.5
+bench.O2.embench.nettle-aes.cycles	4048573	lower	0.5
 bench.O2.embench.nettle-aes.text	4484	lower	1
-bench.O2.embench.nettle-sha256.cycles	4036422	lower	0.5
+bench.O2.embench.nettle-sha256.cycles	3965651	lower	0.5
 bench.O2.embench.nettle-sha256.text	7188	lower	1
-bench.O2.embench.nsichneu.cycles	4545075	lower	0.5
+bench.O2.embench.nsichneu.cycles	4548768	lower	0.5
 bench.O2.embench.nsichneu.text	17576	lower	1
-bench.O2.embench.picojpeg.cycles	4623404	lower	0.5
+bench.O2.embench.picojpeg.cycles	4516554	lower	0.5
 bench.O2.embench.picojpeg.text	25140	lower	1
-bench.O2.embench.qrduino.cycles	4360873	lower	0.5
+bench.O2.embench.qrduino.cycles	4357807	lower	0.5
 bench.O2.embench.qrduino.text	15580	lower	1
-bench.O2.embench.sglib-combined.cycles	4259744	lower	0.5
+bench.O2.embench.sglib-combined.cycles	4141621	lower	0.5
 bench.O2.embench.sglib-combined.text	4504	lower	1
-bench.O2.embench.slre.cycles	4128964	lower	0.5
+bench.O2.embench.slre.cycles	4012292	lower	0.5
 bench.O2.embench.slre.text	5864	lower	1
-bench.O2.embench.st.cycles	3093366	lower	0.5
+bench.O2.embench.st.cycles	3084471	lower	0.5
 bench.O2.embench.st.text	2876	lower	1
-bench.O2.embench.statemate.cycles	1966219	lower	0.5
+bench.O2.embench.statemate.cycles	1847400	lower	0.5
 bench.O2.embench.statemate.text	4820	lower	1
-bench.O2.embench.ud.cycles	3588199	lower	0.5
+bench.O2.embench.ud.cycles	3548313	lower	0.5
 bench.O2.embench.ud.text	2336	lower	1
-bench.O2.embench.wikisort.cycles	1416305	lower	0.5
+bench.O2.embench.wikisort.cycles	1385131	lower	0.5
 bench.O2.embench.wikisort.text	2352	lower	1
 bench.O2.embench.pass	19	higher	0
 bench.O2.embench.run	19	info	0
-bench.O2.embench.speed	1.052	higher	0.5
+bench.O2.embench.speed	1.067	higher	0.5
 bench.O2.embench.size	2.092	lower	0.5
-bench.Os.coremark.cycles	1861796649	lower	0.5
-bench.Os.coremark.score	161.1	higher	0.5
+bench.Os.coremark.cycles	1858684251	lower	0.5
+bench.Os.coremark.score	161.4	higher	0.5
 bench.Os.coremark.pass	1	higher	0
-bench.Os.coremark_validate.cycles	1868989777	lower	0.5
-bench.Os.coremark_validate.score	160.5	higher	0.5
+bench.Os.coremark_validate.cycles	1865801869	lower	0.5
+bench.Os.coremark_validate.score	160.7	higher	0.5
 bench.Os.coremark_validate.pass	1	higher	0
-bench.Os.embench.aha-mont64.cycles	3461111	lower	0.5
+bench.Os.embench.aha-mont64.cycles	3459416	lower	0.5
 bench.Os.embench.aha-mont64.text	1128	lower	1
-bench.Os.embench.crc32.cycles	5579121	lower	0.5
+bench.Os.embench.crc32.cycles	5578950	lower	0.5
 bench.Os.embench.crc32.text	332	lower	1
-bench.Os.embench.cubic.cycles	4241327	lower	0.5
+bench.Os.embench.cubic.cycles	4234346	lower	0.5
 bench.Os.embench.cubic.text	2064	lower	1
-bench.Os.embench.edn.cycles	5950585	lower	0.5
+bench.Os.embench.edn.cycles	5913258	lower	0.5
 bench.Os.embench.edn.text	1772	lower	1
-bench.Os.embench.huffbench.cycles	3978129	lower	0.5
+bench.Os.embench.huffbench.cycles	3900038	lower	0.5
 bench.Os.embench.huffbench.text	2356	lower	1
-bench.Os.embench.matmult-int.cycles	6612534	lower	0.5
+bench.Os.embench.matmult-int.cycles	6538656	lower	0.5
 bench.Os.embench.matmult-int.text	644	lower	1
-bench.Os.embench.minver.cycles	6109036	lower	0.5
+bench.Os.embench.minver.cycles	6069073	lower	0.5
 bench.Os.embench.minver.text	2144	lower	1
-bench.Os.embench.nbody.cycles	2902856	lower	0.5
+bench.Os.embench.nbody.cycles	2898622	lower	0.5
 bench.Os.embench.nbody.text	1312	lower	1
-bench.Os.embench.nettle-aes.cycles	4107452	lower	0.5
+bench.Os.embench.nettle-aes.cycles	4074453	lower	0.5
 bench.Os.embench.nettle-aes.text	3552	lower	1
-bench.Os.embench.nettle-sha256.cycles	4235202	lower	0.5
+bench.Os.embench.nettle-sha256.cycles	4165375	lower	0.5
 bench.Os.embench.nettle-sha256.text	6656	lower	1
-bench.Os.embench.nsichneu.cycles	5110185	lower	0.5
+bench.Os.embench.nsichneu.cycles	5112648	lower	0.5
 bench.Os.embench.nsichneu.text	16620	lower	1
-bench.Os.embench.picojpeg.cycles	5269651	lower	0.5
+bench.Os.embench.picojpeg.cycles	5123938	lower	0.5
 bench.Os.embench.picojpeg.text	11840	lower	1
-bench.Os.embench.qrduino.cycles	4577511	lower	0.5
+bench.Os.embench.qrduino.cycles	4575369	lower	0.5
 bench.Os.embench.qrduino.text	10452	lower	1
-bench.Os.embench.sglib-combined.cycles	4420544	lower	0.5
+bench.Os.embench.sglib-combined.cycles	4292497	lower	0.5
 bench.Os.embench.sglib-combined.text	3732	lower	1
-bench.Os.embench.slre.cycles	4361573	lower	0.5
+bench.Os.embench.slre.cycles	4272800	lower	0.5
 bench.Os.embench.slre.text	4456	lower	1
-bench.Os.embench.st.cycles	3140622	lower	0.5
+bench.Os.embench.st.cycles	3134921	lower	0.5
 bench.Os.embench.st.text	1376	lower	1
-bench.Os.embench.statemate.cycles	2626066	lower	0.5
+bench.Os.embench.statemate.cycles	2435555	lower	0.5
 bench.Os.embench.statemate.text	4580	lower	1
-bench.Os.embench.ud.cycles	4315844	lower	0.5
+bench.Os.embench.ud.cycles	4298107	lower	0.5
 bench.Os.embench.ud.text	1120	lower	1
-bench.Os.embench.wikisort.cycles	1868460	lower	0.5
+bench.Os.embench.wikisort.cycles	1838805	lower	0.5
 bench.Os.embench.wikisort.text	9984	lower	1
 bench.Os.embench.pass	19	higher	0
 bench.Os.embench.run	19	info	0
-bench.Os.embench.speed	0.927	higher	0.5
+bench.Os.embench.speed	0.939	higher	0.5
 bench.Os.embench.size	1.528	lower	0.5
-zephyr.mandel.kiter_s_max	3604	higher	3
-zephyr.doom.drawfps_median	39	higher	10
-zephyr.irq_soak.loops_60s	56247296	higher	1
+zephyr.mandel.kiter_s_max	3617	higher	3
+zephyr.doom.drawfps_median	40	higher	10
+zephyr.irq_soak.loops_60s	57350144	higher	1
 zephyr.irq_soak.viol_lost	0	lower	0
 zephyr.gui_lvgl.fill.ms_frame	72	lower	5
-zephyr.gui_lvgl.blend50.ms_frame	118	lower	5
+zephyr.gui_lvgl.blend50.ms_frame	117	lower	5
 zephyr.gui_lvgl.rounded.ms_frame	68	lower	5
-zephyr.gui_lvgl.shadow.ms_frame	182	lower	5
-zephyr.gui_lvgl.text.ms_frame	139	lower	5
-zephyr.gui_lvgl.gradient.ms_frame	66	lower	5
+zephyr.gui_lvgl.shadow.ms_frame	181	lower	5
+zephyr.gui_lvgl.text.ms_frame	138	lower	5
+zephyr.gui_lvgl.gradient.ms_frame	65	lower	5
 # 2026-10-28: 180 bench/board/zephyr values from toolchain 65f26a14dd03
 # 2026-10-28: 170 bench/board values from toolchain ae53bf147923 (run as b21df20cdd38 + that change, uncommitted)
 # 2026-10-28: 170 bench/board values from toolchain c6433fbb1338 (clang built from its tree before the commit; it reports b79f3c4b6681+dirty)
@@ -142,8 +142,8 @@ zephyr.gui_lvgl.gradient.ms_frame	66	lower	5
 # 2026-11-01: 170 bench/board values from toolchain 5eada47c6210
 # 2026-11-01: 10 zephyr values from toolchain 5eada47c6210
 # 2026-11-01: tick_cost and irq_dev (Zephyr device interrupts) added, toolchain ee4225372285
-zephyr.tick_cost.median_cycles	300	lower	5
-zephyr.irq_dev.blit_irqs_5s	273664	higher	2
+zephyr.tick_cost.median_cycles	282	lower	5
+zephyr.irq_dev.blit_irqs_5s	280960	higher	2
 # 2026-11-01: 12 zephyr values (gui_lvgl text 260 -> 238, gradient 58 -> 64 with the interrupt rework; irq_soak 22283264 measured alone, 22199296 inside the suite)
 # 2026-11-02: 177 bench/board/zephyr values from toolchain llvm 5f97b29a8c0b+loop-tuning
 # 2026-11-02: 170 bench/board values from toolchain 8bbbe41dccdb
@@ -168,21 +168,21 @@ zephyr.irq_dev.blit_irqs_5s	273664	higher	2
 # 2026-11-02: 170 bench/board values from toolchain 5cc29a7c95b6
 # 2026-11-02: 12 zephyr values from toolchain 5cc29a7c95b6
 # added 2026-11-02 from toolchain 5cc29a7c95b6
-board.O2.dhrystone.cycles_per_run	68	lower	0.2
-board.O2.dhrystone_nobuiltin.cycles_per_run	543.001	lower	0.2
-board.O2.perf_baseline.alu.cycles	8875480	lower	0.5
+board.O2.dhrystone.cycles_per_run	63	lower	0.2
+board.O2.dhrystone_nobuiltin.cycles_per_run	532.001	lower	0.2
+board.O2.perf_baseline.alu.cycles	8875481	lower	0.5
 board.O2.perf_baseline.alu.instr	5125018	info	0
-board.O2.perf_baseline.mem_stream.cycles	4049478	lower	0.5
+board.O2.perf_baseline.mem_stream.cycles	4049450	lower	0.5
 board.O2.perf_baseline.mem_stream.instr	950323	info	0
-board.O2.perf_baseline.ptr_chase.cycles	6476705	lower	0.5
+board.O2.perf_baseline.ptr_chase.cycles	6476442	lower	0.5
 board.O2.perf_baseline.ptr_chase.instr	900015	info	0
-board.O2.perf_baseline.branchy.cycles	12287921	lower	0.5
+board.O2.perf_baseline.branchy.cycles	12287951	lower	0.5
 board.O2.perf_baseline.branchy.instr	6671448	info	0
-board.O2.perf_baseline.calls_fib.cycles	21840093	lower	0.5
+board.O2.perf_baseline.calls_fib.cycles	19268975	lower	0.5
 board.O2.perf_baseline.calls_fib.instr	11715673	info	0
-board.O2.perf_baseline.muldiv.cycles	695854	lower	0.5
+board.O2.perf_baseline.muldiv.cycles	695856	lower	0.5
 board.O2.perf_baseline.muldiv.instr	337516	info	0
-board.O2.perf_haz.alu.cycles	8875472	info	0
+board.O2.perf_haz.alu.cycles	8875476	info	0
 board.O2.perf_haz.alu.instr	5125018	info	0
 board.O2.perf_haz.alu.data	3625058	info	0
 board.O2.perf_haz.alu.loaduse	70	info	0
@@ -190,28 +190,28 @@ board.O2.perf_haz.alu.flags	0	info	0
 board.O2.perf_haz.alu.sp	0	info	0
 board.O2.perf_haz.alu.muldiv	0	info	0
 board.O2.perf_haz.alu.brflush	2	info	0
-board.O2.perf_haz.alu.ifmiss	856	info	0
-board.O2.perf_haz.alu.memwait	193	info	0
-board.O2.perf_haz.mem_stream.cycles	4050116	info	0
+board.O2.perf_haz.alu.ifmiss	855	info	0
+board.O2.perf_haz.alu.memwait	191	info	0
+board.O2.perf_haz.mem_stream.cycles	4050022	info	0
 board.O2.perf_haz.mem_stream.instr	950323	info	0
-board.O2.perf_haz.mem_stream.data	1774198	info	0
-board.O2.perf_haz.mem_stream.loaduse	1649430	info	0
+board.O2.perf_haz.mem_stream.data	1774085	info	0
+board.O2.perf_haz.mem_stream.loaduse	1649320	info	0
 board.O2.perf_haz.mem_stream.flags	0	info	0
 board.O2.perf_haz.mem_stream.sp	0	info	0
-board.O2.perf_haz.mem_stream.muldiv	2467966	info	0
+board.O2.perf_haz.mem_stream.muldiv	2467872	info	0
 board.O2.perf_haz.mem_stream.brflush	25	info	0
-board.O2.perf_haz.mem_stream.ifmiss	1417	info	0
-board.O2.perf_haz.mem_stream.memwait	2581113	info	0
-board.O2.perf_haz.ptr_chase.cycles	6475965	info	0
+board.O2.perf_haz.mem_stream.ifmiss	1410	info	0
+board.O2.perf_haz.mem_stream.memwait	2581000	info	0
+board.O2.perf_haz.ptr_chase.cycles	6476017	info	0
 board.O2.perf_haz.ptr_chase.instr	900015	info	0
-board.O2.perf_haz.ptr_chase.data	5525709	info	0
-board.O2.perf_haz.ptr_chase.loaduse	5325734	info	0
+board.O2.perf_haz.ptr_chase.data	5525761	info	0
+board.O2.perf_haz.ptr_chase.loaduse	5325786	info	0
 board.O2.perf_haz.ptr_chase.flags	0	info	0
 board.O2.perf_haz.ptr_chase.sp	0	info	0
 board.O2.perf_haz.ptr_chase.muldiv	0	info	0
 board.O2.perf_haz.ptr_chase.brflush	2	info	0
 board.O2.perf_haz.ptr_chase.ifmiss	381	info	0
-board.O2.perf_haz.ptr_chase.memwait	4926019	info	0
+board.O2.perf_haz.ptr_chase.memwait	4926069	info	0
 board.O2.perf_haz.branchy.cycles	12287926	info	0
 board.O2.perf_haz.branchy.instr	6671448	info	0
 board.O2.perf_haz.branchy.data	3515655	info	0
@@ -221,8 +221,8 @@ board.O2.perf_haz.branchy.sp	0	info	0
 board.O2.perf_haz.branchy.muldiv	0	info	0
 board.O2.perf_haz.branchy.brflush	265867	info	0
 board.O2.perf_haz.branchy.ifmiss	1105110	info	0
-board.O2.perf_haz.branchy.memwait	174	info	0
-board.O2.perf_haz.calls_fib.cycles	21840084	info	0
+board.O2.perf_haz.branchy.memwait	172	info	0
+board.O2.perf_haz.calls_fib.cycles	19268969	info	0
 board.O2.perf_haz.calls_fib.instr	11715673	info	0
 board.O2.perf_haz.calls_fib.data	1292063	info	0
 board.O2.perf_haz.calls_fib.loaduse	263611	info	0
@@ -230,8 +230,8 @@ board.O2.perf_haz.calls_fib.flags	317811	info	0
 board.O2.perf_haz.calls_fib.sp	5	info	0
 board.O2.perf_haz.calls_fib.muldiv	0	info	0
 board.O2.perf_haz.calls_fib.brflush	423364	info	0
-board.O2.perf_haz.calls_fib.ifmiss	2816111	info	0
-board.O2.perf_haz.calls_fib.memwait	4409720	info	0
+board.O2.perf_haz.calls_fib.ifmiss	2816114	info	0
+board.O2.perf_haz.calls_fib.memwait	1838594	info	0
 board.O2.perf_haz.muldiv.cycles	695846	info	0
 board.O2.perf_haz.muldiv.instr	337516	info	0
 board.O2.perf_haz.muldiv.data	87581	info	0
@@ -241,9 +241,11 @@ board.O2.perf_haz.muldiv.sp	0	info	0
 board.O2.perf_haz.muldiv.muldiv	258180	info	0
 board.O2.perf_haz.muldiv.brflush	4	info	0
 board.O2.perf_haz.muldiv.ifmiss	213	info	0
-board.O2.perf_haz.muldiv.memwait	143	info	0
+board.O2.perf_haz.muldiv.memwait	141	info	0
 # 2026-11-02: 170 bench/board values from toolchain 5cc29a7c95b6
 # 2026-11-02: 170 bench/board values from toolchain 5cc29a7c95b6
 # 2026-11-02: 12 zephyr values from toolchain 5cc29a7c95b6
 # 2026-11-03: 170 bench/board values from toolchain d5c8495ba75e
 # 2026-11-03: 12 zephyr values from toolchain d5c8495ba75e
+# 2026-11-03: 170 bench/board values from toolchain 5f3691e9e102
+# 2026-11-03: 12 zephyr values from toolchain 5f3691e9e102
