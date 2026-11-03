@@ -63,7 +63,10 @@ build_freertos() {   # a staged copy of freertos/ (its objects go next to the so
   done
   (cd "$RT/freertos" && tar cf - --exclude='*.o' --exclude='*.lo' --exclude='*.d' --exclude='*.elf' \
       --exclude='*.bin' --exclude=.git --exclude=./obj --exclude=./wolfssl .) | (cd "$T/freertos" && tar xf -)
-  make -C "$T/freertos" -j"$JOBS" demo.elf DBG=-g >"$d/build.log" 2>&1 &&
+  # -O1, not FreeRTOS's default -O2: at -O2 TaskB's 8-iteration loop is fully
+  # unrolled, `breakpoint set -l` (LINE_TASKB) resolves to its first copy only,
+  # and once TaskB is past it the session's continue never stops again.
+  make -C "$T/freertos" -j"$JOBS" demo.elf DBG=-g OPT=-O1 >"$d/build.log" 2>&1 &&
     cp "$T/freertos/demo.elf" "$d/demo.elf"
   rm -rf "$T"
   [ -f "$d/demo.elf" ]
