@@ -105,6 +105,9 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
 /* ── Hardware crypto callbacks ───────────────────────────────────────────── */
 
 #define WOLF_CRYPTO_CB
+/* Consult the find callback (wolfssl_hw.c) on every operation, so cipher
+ * objects reach the hardware whatever devId wolfSSH / TLS gave them. */
+#define WOLF_CRYPTO_CB_FIND
 #define KLAUSSCPU_CRYPTO_DEV_ID  1
 
 /* ── ASN.1 parser ────────────────────────────────────────────────────────── */

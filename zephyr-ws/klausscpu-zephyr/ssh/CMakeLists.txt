@@ -43,6 +43,8 @@ if(CONFIG_KLAUSSCPU_SSH_SERVER)
     llext_loader.c
     sshkeys.c
     wolfssl_hw.c
+    # The AES/GHASH/TRNG driver shared with the bare-metal programs.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/crypto_hw.c
   )
   zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 endif()
