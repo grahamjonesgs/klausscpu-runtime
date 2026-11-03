@@ -201,20 +201,31 @@ Step 6 measurements (apps/psa_spike, board at 100 MHz, through PSA):
 | ECDSA P-256 sign | 116 ms | 78 | 70 | |
 | RSA-2048 sign | 3120 ms | 1099 | 1091 | |
 | RSA-2048 keygen (first boot) | 76-373 s | | | |
-| SSH login (connect -> authenticated) | 4.2 s | ~1.3 s (est.) | ~1.3 s (est.) | ~65 ms |
+
+Login, step by step (OpenSSH 10.2 -> psa_spike, connect to authenticated):
+
+| | Login |
+|---|---|
+| mbedTLS as shipped, RSA-2048 host key | 4.2 s |
+| + ECDSA P-256 host key (ssh-ecdsa-host-key.patch) | 0.96 s |
+| + Everest X25519 agreement | ~0.85 s |
+| + Everest X25519 public keys, cached host point | **0.45-0.77 s** |
+| wolfSSH today | ~65 ms |
 
 Reading:
-- The PSA driver makes bulk crypto and the per-packet MAC fast; that part of
-  the switch is solved.
-- **Logins are the gap.** Zephyr's SSH signs every handshake with the RSA
-  host key (its only host key type): about 1.1 s at best, so a login takes
-  about 1.3 s against wolfSSH's 65 ms.  An `ecdsa-sha2-nistp256` host key
-  (P-256 sign 70 ms) would bring a login to about 0.25 s, but Zephyr's SSH
-  server needs that code (upstreamable; PSA already does ECDSA).  A
-  Montgomery-multiplier block in hardware would help RSA and ECC alike.
-- **Still to decide (yours):** go ahead with step 7 (accept ~1.3 s logins,
-  or first add ECDSA host keys to Zephyr's SSH), or keep wolfSSL on 4.5,
-  which works now.  SFTP goes either way unless reimplemented.
+- The PSA driver makes bulk crypto and the per-packet MAC fast.
+- ECDSA host keys (now in ssh-ecdsa-host-key.patch, upstreamable) and the
+  Everest changes cut a login from 4.2 s to about 0.5 s.  That is still
+  roughly 7-10x wolfSSH.  What is left:
+  - about 70 ms per message after the key exchange, not yet explained (no
+    poll timeouts in the server loop; next to look at are TCP ACK
+    behaviour and per-packet work);
+  - the ECDSA signature, 69 ms;
+  - X25519, 2 x 13 ms.
+- A Montgomery-multiplier block in hardware would mainly help the signature.
+- **Still to decide (yours):** go ahead with step 7 (Zephyr SSH: ~0.5 s
+  logins, no SFTP, ECDSA or RSA host key persisted on the SD card), or keep
+  wolfSSL on 4.5, which works now and keeps SFTP and 65 ms logins.
 
 ## 4. Hardware changes for this migration
 
