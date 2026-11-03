@@ -1,0 +1,476 @@
+diff --git a/include/zephyr/net/ssh/keygen.h b/include/zephyr/net/ssh/keygen.h
+index b26c748a4..91b4cfa58 100644
+--- a/include/zephyr/net/ssh/keygen.h
++++ b/include/zephyr/net/ssh/keygen.h
+@@ -29,6 +29,8 @@ extern "C" {
+ enum ssh_host_key_type {
+ 	/** RSA host key type */
+ 	SSH_HOST_KEY_TYPE_RSA,
++	/** ECDSA host key type, NIST P-256 (ecdsa-sha2-nistp256) */
++	SSH_HOST_KEY_TYPE_ECDSA_P256,
+ };
+ 
+ /** @brief Formats that SSH host keys can be exported/imported in */
+diff --git a/subsys/net/lib/ssh/Kconfig b/subsys/net/lib/ssh/Kconfig
+index f6b95b2bc..33a68e65b 100644
+--- a/subsys/net/lib/ssh/Kconfig
++++ b/subsys/net/lib/ssh/Kconfig
+@@ -118,6 +118,26 @@ config SSH_HOST_KEY_ALG_RSA_SHA2_512
+ 	bool "rsa-sha2-512 host key algorithm"
+ 	imply PSA_WANT_ALG_SHA_512
+ 
++config SSH_HOST_KEY_ECDSA
++	bool "ECDSA (NIST P-256) server host key support"
++	imply PSA_WANT_ECC_SECP_R1_256
++	imply PSA_WANT_ALG_ECDSA
++	imply PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE
++	imply PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_IMPORT
++	imply PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_EXPORT
++	imply PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY
++	help
++	  Lets the SSH server use an ECDSA P-256 host key (ssh_keygen with
++	  SSH_HOST_KEY_TYPE_ECDSA_P256, or an imported SEC1/PKCS#8 EC key).
++	  Signing with it is much cheaper than with an RSA key on small CPUs.
++	  The server offers only the host key algorithms that match its key.
++	  The SSH client still verifies RSA host keys only.
++
++config SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	bool "ecdsa-sha2-nistp256 host key algorithm"
++	default y
++	depends on SSH_HOST_KEY_ECDSA
++
+ config SSH_IDENTITY_OVERRIDE_ENABLE
+ 	bool "Override the default SSH identity (useful for testing)"
+ 
+diff --git a/subsys/net/lib/ssh/ssh_core.h b/subsys/net/lib/ssh/ssh_core.h
+index 587620fb3..24d2dfa53 100644
+--- a/subsys/net/lib/ssh/ssh_core.h
++++ b/subsys/net/lib/ssh/ssh_core.h
+@@ -34,6 +34,9 @@ enum ssh_host_key_alg {
+ #ifdef CONFIG_SSH_HOST_KEY_ALG_RSA_SHA2_512
+ 	SSH_HOST_KEY_ALG_RSA_SHA2_512,
+ #endif
++#ifdef CONFIG_SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256,
++#endif
+ };
+ 
+ enum ssh_encryption_alg {
+diff --git a/subsys/net/lib/ssh/ssh_host_key.c b/subsys/net/lib/ssh/ssh_host_key.c
+index 7fbec83db..dd2a11b80 100644
+--- a/subsys/net/lib/ssh/ssh_host_key.c
++++ b/subsys/net/lib/ssh/ssh_host_key.c
+@@ -5,6 +5,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <string.h>
++
+ #include <zephyr/sys/byteorder.h>
+ 
+ #include <zephyr/logging/log.h>
+@@ -71,8 +73,20 @@ static const struct host_key_alg_info host_key_alg_info[] = {
+ 		.hash_alg = PSA_ALG_SHA_512
+ 	},
+ #endif
++#ifdef CONFIG_SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	[SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256] = {
++		.signature_type_string = SSH_STRING_LITERAL("ecdsa-sha2-nistp256"),
++		.hash_alg = PSA_ALG_SHA_256
++	},
++#endif
+ };
+ 
++/* RFC 5656: the key/signature type and the curve name of a P-256 key */
++#define SSH_ECDSA_P256_TYPE  "ecdsa-sha2-nistp256"
++#define SSH_ECDSA_P256_CURVE "nistp256"
++/* PSA public key format: uncompressed point 0x04 || X || Y */
++#define SSH_ECDSA_P256_POINT_LEN 65
++
+ #define SSH_RSA_EXPONENT 65537
+ 
+ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_alg alg)
+@@ -83,6 +97,9 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
+ #endif
+ #ifdef CONFIG_SSH_HOST_KEY_ALG_RSA_SHA2_512
+ 	case SSH_HOST_KEY_ALG_RSA_SHA2_512:
++#endif
++#ifdef CONFIG_SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	case SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256:
+ #endif
+ 		return &host_key_alg_info[alg];
+ 	default:
+@@ -90,6 +107,22 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
+ 	}
+ }
+ 
++static bool host_key_alg_is_ecdsa(enum ssh_host_key_alg alg)
++{
++#ifdef CONFIG_SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	return alg == SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256;
++#else
++	ARG_UNUSED(alg);
++	return false;
++#endif
++}
++
++bool ssh_host_key_alg_verifiable(enum ssh_host_key_alg host_key_alg)
++{
++	return get_host_key_alg_info(host_key_alg) != NULL &&
++	       !host_key_alg_is_ecdsa(host_key_alg);
++}
++
+ static int signature_type_str_to_id(const struct ssh_string *signature_type)
+ {
+ 	for (int i = 0; i < ARRAY_SIZE(host_key_alg_info); i++) {
+@@ -297,8 +330,7 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+ 		return ret;
+ 	}
+ 
+-	if (key_index < 0 || key_index >= ARRAY_SIZE(ssh_host_key) ||
+-	    key_size_bits < 1024 || key_size_bits > SSH_RSA_MAX_KEY_BITS) {
++	if (key_index < 0 || key_index >= ARRAY_SIZE(ssh_host_key)) {
+ 		return -EINVAL;
+ 	}
+ 
+@@ -310,22 +342,34 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+ 	switch (key_type) {
+ #ifdef CONFIG_SSH_HOST_KEY_RSA
+ 	case SSH_HOST_KEY_TYPE_RSA:
++		if (key_size_bits < 1024 || key_size_bits > SSH_RSA_MAX_KEY_BITS) {
++			return -EINVAL;
++		}
++		psa_set_key_type(&attr, PSA_KEY_TYPE_RSA_KEY_PAIR);
++		psa_set_key_algorithm(&attr, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_ANY_HASH));
++		break;
++#endif
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	case SSH_HOST_KEY_TYPE_ECDSA_P256:
++		if (key_size_bits != 256) {
++			return -EINVAL;
++		}
++		psa_set_key_type(&attr, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
++		psa_set_key_algorithm(&attr, PSA_ALG_ECDSA(PSA_ALG_ANY_HASH));
+ 		break;
+ #endif
+ 	default:
+ 		return -ENOTSUP;
+ 	}
+ 
+-	psa_set_key_type(&attr, PSA_KEY_TYPE_RSA_KEY_PAIR);
+ 	psa_set_key_bits(&attr, key_size_bits);
+-	psa_set_key_algorithm(&attr, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_ANY_HASH));
+ 	psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH |
+ 				PSA_KEY_USAGE_EXPORT);
+ 
+ 	status = psa_generate_key(&attr, &host_key->key_id);
+ 	psa_reset_key_attributes(&attr);
+ 	if (status != PSA_SUCCESS) {
+-		NET_ERR("RSA host key gen failed: %d", status);
++		NET_ERR("Host key gen failed: %d", status);
+ 		return -EIO;
+ 	}
+ 
+@@ -336,6 +380,24 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+ 	return 0;
+ }
+ 
++bool ssh_host_key_alg_usable(int host_key_index, enum ssh_host_key_alg host_key_alg)
++{
++	const struct ssh_host_key *host_key;
++
++	if (host_key_index < 0 || host_key_index >= ARRAY_SIZE(ssh_host_key) ||
++	    get_host_key_alg_info(host_key_alg) == NULL) {
++		return false;
++	}
++	host_key = &ssh_host_key[host_key_index];
++	if (!host_key->in_use) {
++		return false;
++	}
++	if (host_key_alg_is_ecdsa(host_key_alg)) {
++		return host_key->key_type == SSH_HOST_KEY_TYPE_ECDSA_P256;
++	}
++	return host_key->key_type == SSH_HOST_KEY_TYPE_RSA;
++}
++
+ static void free_host_key(struct ssh_host_key *host_key)
+ {
+ 	psa_destroy_key(host_key->key_id);
+@@ -376,6 +438,37 @@ int ssh_keygen_export(int key_index, bool private_key, enum ssh_host_key_format
+ 		return -EINVAL;
+ 	}
+ 
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	if (host_key->key_type == SSH_HOST_KEY_TYPE_ECDSA_P256) {
++		/* PSA exports an EC key raw (scalar / point), which the import
++		 * path cannot parse back: write SEC1 / SubjectPublicKeyInfo
++		 * DER or PEM through the PK bridge instead.
++		 */
++		mbedtls_pk_context pk;
++
++		mbedtls_pk_init(&pk);
++		ret = mbedtls_pk_copy_from_psa(host_key->key_id, &pk);
++		if (ret == 0) {
++			if (fmt == SSH_HOST_KEY_FORMAT_PEM) {
++				ret = private_key ? mbedtls_pk_write_key_pem(&pk, buf, buf_len)
++						  : mbedtls_pk_write_pubkey_pem(&pk, buf, buf_len);
++				if (ret == 0) {
++					ret = (int)strlen(buf) + 1;
++				}
++			} else {
++				/* mbedtls writes DER at the end of the buffer */
++				ret = private_key ? mbedtls_pk_write_key_der(&pk, buf, buf_len)
++						  : mbedtls_pk_write_pubkey_der(&pk, buf, buf_len);
++				if (ret > 0) {
++					memmove(buf, (uint8_t *)buf + buf_len - ret, ret);
++				}
++			}
++		}
++		mbedtls_pk_free(&pk);
++		return ret < 0 ? -EIO : ret;
++	}
++#endif
++
+ 	if (fmt == SSH_HOST_KEY_FORMAT_DER) {
+ 		size_t der_len;
+ 		psa_status_t status;
+@@ -487,6 +580,40 @@ int ssh_keygen_import(int key_index, bool private_key, enum ssh_host_key_format
+ 		return -EIO;
+ 	}
+ 
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	if (mbedtls_pk_get_type(&pk) == MBEDTLS_PK_ECKEY) {
++		psa_key_usage_t usage = private_key ?
++			PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH | PSA_KEY_USAGE_EXPORT :
++			PSA_KEY_USAGE_VERIFY_HASH | PSA_KEY_USAGE_EXPORT;
++
++		ret = mbedtls_pk_get_psa_attributes(&pk, private_key ? PSA_KEY_USAGE_SIGN_HASH
++								     : PSA_KEY_USAGE_VERIFY_HASH,
++						    &attr);
++		if (ret == 0 &&
++		    (psa_get_key_bits(&attr) != 256 ||
++		     PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(&attr)) !=
++			     PSA_ECC_FAMILY_SECP_R1)) {
++			NET_ERR("Only P-256 EC host keys are supported");
++			ret = -1;
++		}
++		if (ret == 0) {
++			psa_set_key_algorithm(&attr, PSA_ALG_ECDSA(PSA_ALG_ANY_HASH));
++			psa_set_key_usage_flags(&attr, usage);
++			ret = mbedtls_pk_import_into_psa(&pk, &attr, &host_key->key_id);
++		}
++		psa_reset_key_attributes(&attr);
++		mbedtls_pk_free(&pk);
++		if (ret != 0) {
++			NET_ERR("Failed to import EC key: -0x%04X", -ret);
++			return -EIO;
++		}
++		host_key->key_bits = 256;
++		host_key->in_use = true;
++		host_key->key_type = SSH_HOST_KEY_TYPE_ECDSA_P256;
++		return 0;
++	}
++#endif
++
+ 	/* Re-export as DER to get a known format for PSA */
+ 	if (private_key) {
+ 		ret = mbedtls_pk_write_key_der(&pk, der_buf, sizeof(der_buf));
+@@ -569,8 +696,36 @@ int ssh_host_key_write_pub_key(struct ssh_payload *payload, int host_key_index)
+ 	switch (host_key->key_type) {
+ #ifdef CONFIG_SSH_HOST_KEY_RSA
+ 	case SSH_HOST_KEY_TYPE_RSA:
+-#endif
+ 		break;
++#endif
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	case SSH_HOST_KEY_TYPE_ECDSA_P256: {
++		/* RFC 5656 3.1: string type, string curve, string Q */
++		static const struct ssh_string ec_type = SSH_STRING_LITERAL(SSH_ECDSA_P256_TYPE);
++		static const struct ssh_string ec_curve = SSH_STRING_LITERAL(SSH_ECDSA_P256_CURVE);
++		uint8_t point[SSH_ECDSA_P256_POINT_LEN];
++		struct ssh_string q;
++		size_t point_len;
++
++		status = psa_export_public_key(host_key->key_id, point, sizeof(point), &point_len);
++		if (status != PSA_SUCCESS || point_len != SSH_ECDSA_P256_POINT_LEN) {
++			NET_ERR("Failed to export pubkey: %d", status);
++			return -EIO;
++		}
++		q = (struct ssh_string){ .len = point_len, .data = point };
++		start_offset = payload->len;
++		if (!ssh_payload_skip_bytes(payload, 4) ||
++		    !ssh_payload_write_string(payload, &ec_type) ||
++		    !ssh_payload_write_string(payload, &ec_curve) ||
++		    !ssh_payload_write_string(payload, &q)) {
++			return -ENOBUFS;
++		}
++		if (payload->data != NULL) {
++			sys_put_be32(payload->len - start_offset - 4, &payload->data[start_offset]);
++		}
++		return 0;
++	}
++#endif
+ 	default:
+ 		return -ENOTSUP;
+ 	}
+@@ -642,7 +797,7 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
+ 	}
+ 
+ 	alg_info = get_host_key_alg_info(host_key_alg);
+-	if (alg_info == NULL) {
++	if (alg_info == NULL || !ssh_host_key_alg_usable(host_key_index, host_key_alg)) {
+ 		return -ENOTSUP;
+ 	}
+ 
+@@ -663,6 +818,31 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
+ 		return -ENOBUFS;
+ 	}
+ 
++	if (host_key_alg_is_ecdsa(host_key_alg)) {
++		/* RFC 5656 3.1.2: the signature blob is mpint r, mpint s; PSA
++		 * gives r || s, each 32 bytes for P-256.
++		 */
++		uint32_t blob_start;
++
++		status = psa_sign_hash(host_key->key_id, PSA_ALG_ECDSA(alg_info->hash_alg),
++				       hash, hash_len, signature_buff, sizeof(signature_buff),
++				       &sig_len);
++		if (status != PSA_SUCCESS || sig_len != 64) {
++			NET_ERR("Failed to sign hash: %d", status);
++			return -EIO;
++		}
++		blob_start = payload->len;
++		if (!ssh_payload_skip_bytes(payload, 4) ||
++		    !ssh_payload_write_mpint(payload, signature_buff, 32, false) ||
++		    !ssh_payload_write_mpint(payload, signature_buff + 32, 32, false)) {
++			return -ENOBUFS;
++		}
++		sys_put_be32(payload->len - blob_start - 4, &payload->data[blob_start]);
++		string_len = payload->len - signature_start_offset - sizeof(uint32_t);
++		sys_put_be32(string_len, &payload->data[signature_start_offset]);
++		return 0;
++	}
++
+ 	status = psa_sign_hash(host_key->key_id,
+ 			       PSA_ALG_RSA_PKCS1V15_SIGN(alg_info->hash_alg),
+ 			       hash, hash_len, signature_buff, sizeof(signature_buff),
+@@ -791,7 +971,7 @@ int ssh_host_key_verify_signature(const enum ssh_host_key_alg *host_key_alg,
+ 	}
+ 
+ 	alg_info = get_host_key_alg_info(*host_key_alg);
+-	if (alg_info == NULL) {
++	if (alg_info == NULL || !ssh_host_key_alg_verifiable(*host_key_alg)) {
+ 		return -ENOTSUP;
+ 	}
+ 
+diff --git a/subsys/net/lib/ssh/ssh_host_key.h b/subsys/net/lib/ssh/ssh_host_key.h
+index 182085ce5..e12c2f39e 100644
+--- a/subsys/net/lib/ssh/ssh_host_key.h
++++ b/subsys/net/lib/ssh/ssh_host_key.h
+@@ -14,6 +14,12 @@
+ #include <zephyr/net/ssh/keygen.h>
+ 
+ int ssh_host_key_write_pub_key(struct ssh_payload *payload, int host_key_index);
++
++/* Whether the server's host key can sign with host_key_alg (its key type). */
++bool ssh_host_key_alg_usable(int host_key_index, enum ssh_host_key_alg host_key_alg);
++
++/* Whether ssh_host_key_verify_signature() supports host_key_alg (RSA only). */
++bool ssh_host_key_alg_verifiable(enum ssh_host_key_alg host_key_alg);
+ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index,
+ 				 enum ssh_host_key_alg host_key_alg,
+ 				 const void *data, uint32_t data_len);
+diff --git a/subsys/net/lib/ssh/ssh_kex.c b/subsys/net/lib/ssh/ssh_kex.c
+index 757b3304d..93805df1e 100644
+--- a/subsys/net/lib/ssh/ssh_kex.c
++++ b/subsys/net/lib/ssh/ssh_kex.c
+@@ -33,6 +33,9 @@ static const struct ssh_string supported_server_host_key_algs[] = {
+ #ifdef CONFIG_SSH_HOST_KEY_ALG_RSA_SHA2_512
+ 	[SSH_HOST_KEY_ALG_RSA_SHA2_512] = SSH_STRING_LITERAL("rsa-sha2-512"),
+ #endif
++#ifdef CONFIG_SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256
++	[SSH_HOST_KEY_ALG_ECDSA_SHA2_NISTP256] = SSH_STRING_LITERAL("ecdsa-sha2-nistp256"),
++#endif
+ };
+ 
+ static const struct ssh_string supported_encryption_algs[] = {
+@@ -59,8 +62,28 @@ BUILD_ASSERT(ARRAY_SIZE(supported_mac_algs) > 0);
+ BUILD_ASSERT(ARRAY_SIZE(supported_compression_algs) > 0);
+ BUILD_ASSERT(ARRAY_SIZE(supported_languages) > 0);
+ 
++/* A server offers the host key algorithms its own key can sign with; a client
++ * those whose signatures it can verify.
++ */
++static bool host_key_alg_offered(struct ssh_transport *transport, int alg)
++{
++	if (IS_ENABLED(CONFIG_SSH_SERVER) && transport->server) {
++		return ssh_host_key_alg_usable(transport->host_key_index, alg);
++	}
++	return ssh_host_key_alg_verifiable(alg);
++}
++
+ int ssh_kex_send_kexinit(struct ssh_transport *transport)
+ {
++	struct ssh_string host_key_algs[ARRAY_SIZE(supported_server_host_key_algs)];
++	size_t num_host_key_algs = 0;
++
++	ARRAY_FOR_EACH(supported_server_host_key_algs, i) {
++		if (host_key_alg_offered(transport, i)) {
++			host_key_algs[num_host_key_algs++] = supported_server_host_key_algs[i];
++		}
++	}
++
+ 	const bool first_kex_pkt_follows = false;
+ 	const uint32_t reserved = 0;
+ 	int ret;
+@@ -93,8 +116,7 @@ int ssh_kex_send_kexinit(struct ssh_transport *transport)
+ 	    !ssh_payload_write_byte(&payload, SSH_MSG_KEXINIT) ||
+ 	    !ssh_payload_write_csrand(&payload, KEXINIT_COOKIE_SIZE) ||
+ 	    !ssh_payload_write_name_list(&payload, kex_algs, num_kex_algs) ||
+-	    !ssh_payload_write_name_list(&payload, supported_server_host_key_algs,
+-					 ARRAY_SIZE(supported_server_host_key_algs)) ||
++	    !ssh_payload_write_name_list(&payload, host_key_algs, num_host_key_algs) ||
+ 	    !ssh_payload_write_name_list(&payload, supported_encryption_algs,
+ 					 ARRAY_SIZE(supported_encryption_algs)) ||
+ 	    !ssh_payload_write_name_list(&payload, supported_encryption_algs,
+@@ -255,9 +277,37 @@ int ssh_kex_process_kexinit(struct ssh_transport *transport, struct ssh_payload
+ 
+ 	NET_DBG("Remote %s algs: %.*s", "host key", name_list.size, name_list.data);
+ 
+-	ret = kex_name_list_find_first(transport->server, supported_server_host_key_algs,
+-				       ARRAY_SIZE(supported_server_host_key_algs),
+-				       &name_list, &name);
++	/* As kex_name_list_find_first(), over the algorithms this side offered */
++	ret = -1;
++	if (IS_ENABLED(CONFIG_SSH_SERVER) && transport->server) {
++		while (ret < 0 && ssh_payload_name_list_iter(&name_list, &name)) {
++			ARRAY_FOR_EACH(supported_server_host_key_algs, i) {
++				if (host_key_alg_offered(transport, i) &&
++				    ssh_strings_equal(&supported_server_host_key_algs[i], &name)) {
++					ret = i;
++					break;
++				}
++			}
++		}
++	} else {
++		ARRAY_FOR_EACH(supported_server_host_key_algs, i) {
++			struct ssh_payload name_list_copy = name_list;
++
++			if (!host_key_alg_offered(transport, i)) {
++				continue;
++			}
++			while (ssh_payload_name_list_iter(&name_list_copy, &name)) {
++				if (ssh_strings_equal(&supported_server_host_key_algs[i], &name)) {
++					name_list = name_list_copy;
++					ret = i;
++					break;
++				}
++			}
++			if (ret >= 0) {
++				break;
++			}
++		}
++	}
+ 	if (ret < 0) {
+ 		NET_DBG("No suitable %s alg", "host key");
+ 		return ret;

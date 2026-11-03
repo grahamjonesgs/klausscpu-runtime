@@ -34,17 +34,21 @@ git -C zephyr fetch --depth=1 https://github.com/zephyrproject-rtos/zephyr tag v
 
 # b) Re-apply the vendored patches AFTER EVERY `west update`
 #    (zephyr/ and modules/ are gitignored, so the patches don't persist).
-for p in klausscpu-core llext-klausscpu cbprintf-klausscpu minimal-libc-strcasecmp; do
+for p in klausscpu-core llext-klausscpu cbprintf-klausscpu minimal-libc-strcasecmp \
+         ssh-ecdsa-host-key; do
   git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/$p.patch
 done
 git -C modules/crypto/tf-psa-crypto apply \
   ../../../klausscpu-zephyr/zephyr-patches/tf-psa-crypto-klausscpu.patch
-#    Verify: `git -C zephyr status --short` lists 14 paths (one new file).
+#    Verify: `git -C zephyr status --short` lists 20 paths (one new file).
 #    klausscpu-core: the arch dispatch in cpu.h, arch_inlines.h, exception.h,
 #      linker-tool-gcc.h, toolchain/common.h and gcc.h.
-#    llext-klausscpu: LLEXT_ELF_CLASS32, keep_symtab, arch_elf_check_header.
+#    llext-klausscpu: LLEXT_ELF_CLASS32, keep_symtab, arch_elf_check_header,
+#      and no alignment pre-padding from a .bss's nominal file offset.
 #    cbprintf-klausscpu: 8-byte vararg slots (LOG_*/printk multi-arg output).
 #    minimal-libc-strcasecmp: the net shell's dns.c needs strcasecmp.
+#    ssh-ecdsa-host-key: ecdsa-sha2-nistp256 server host keys for Zephyr's
+#      SSH (CONFIG_SSH_HOST_KEY_ECDSA); a login takes ~1 s against ~4 s RSA.
 #    tf-psa-crypto-klausscpu: 64-bit bignum limbs (RSA-2048 sign 3.1 s ->
 #      1.1 s, X25519 and P-256 ~1.5x), and the dispatch hooks for the
 #      KlaussCPU PSA driver (drivers/crypto: SHA-256 / HMAC on the SHA block).

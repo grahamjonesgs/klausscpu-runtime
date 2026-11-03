@@ -6,4 +6,9 @@ config PSA_SPIKE_BOOT_BENCH
 	  Prints the psabench results with printk and then idles: no network,
 	  no host key, no SSH server.
 
+config PSA_SPIKE_HOST_KEY_ECDSA
+	bool "ECDSA P-256 host key (RSA-2048 otherwise)"
+	default y
+	select SSH_HOST_KEY_ECDSA
+
 source "Kconfig.zephyr"

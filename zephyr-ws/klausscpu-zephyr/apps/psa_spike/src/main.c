@@ -419,9 +419,15 @@ int main(void)
 	}
 
 	t0 = k_cycle_get_64();
+#ifdef CONFIG_PSA_SPIKE_HOST_KEY_ECDSA
+	ret = ssh_keygen(HOST_KEY_INDEX, SSH_HOST_KEY_TYPE_ECDSA_P256, 256);
+	LOG_INF("host key: ECDSA P-256 generated in %lu ms (%d)",
+		(unsigned long)(us_since(t0) / 1000), ret);
+#else
 	ret = ssh_keygen(HOST_KEY_INDEX, SSH_HOST_KEY_TYPE_RSA, 2048);
 	LOG_INF("host key: RSA-2048 generated in %lu ms (%d)",
 		(unsigned long)(us_since(t0) / 1000), ret);
+#endif
 
 	bind_addr.sin_family = NET_AF_INET;
 	bind_addr.sin_port = net_htons(22);

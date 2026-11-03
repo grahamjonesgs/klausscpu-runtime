@@ -80,7 +80,7 @@ index e525c5326..441660cd9 100644
  	bool "Do not allocate static LLEXT heap"
  	help
 diff --git a/subsys/llext/llext_load.c b/subsys/llext/llext_load.c
-index 9625fe9b6..6ddcb71f7 100644
+index 9625fe9b6..a4101e053 100644
 --- a/subsys/llext/llext_load.c
 +++ b/subsys/llext/llext_load.c
 @@ -45,6 +45,12 @@ __weak int arch_elf_veneer_init(struct llext_loader *ldr, struct llext *ext)
@@ -108,7 +108,27 @@ index 9625fe9b6..6ddcb71f7 100644
  	/*
  	 * Read all ELF section headers and initialize maps.  Buffers allocated
  	 * below are freed when leaving do_llext_load(), so don't count them in
-@@ -1026,9 +1037,12 @@ out:
+@@ -500,6 +511,19 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext,
+ 
+ 		size_t prepad = region->sh_offset & (region->sh_addralign - 1);
+ 
++		/*
++		 * SHT_NOBITS sections take no space in the file, so their
++		 * sh_offset is nominal and need not be aligned (lld places a
++		 * .bss straight after the previous section's last byte).
++		 * Pre-padding from it would put the section that many bytes
++		 * past the aligned allocation: a 4-byte aligned .bss at
++		 * offset 0x1dcf landed 3 bytes off and trapped on the first
++		 * 32-bit store.  The allocation is already aligned.
++		 */
++		if (region->sh_type == SHT_NOBITS) {
++			prepad = 0;
++		}
++
+ 		if (ldr->hdr.e_type == ET_DYN) {
+ 			/* Only shared files populate sh_addr fields */
+ 			if (prepad > region->sh_addr) {
+@@ -1026,9 +1050,12 @@ out:
  
  	/* Until proper inter-llext linking is implemented, the symbol table is
  	 * not useful outside of the loading process; keep it only if debugging
