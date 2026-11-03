@@ -1,0 +1,10 @@
+config ENTROPY_KLAUSSCPU_TRNG
+	bool "KlaussCPU TRNG entropy driver"
+	default y
+	depends on DT_HAS_KLAUSSCPU_TRNG_ENABLED
+	depends on ENTROPY_GENERATOR
+	select ENTROPY_HAS_DRIVER
+	help
+	  Zephyr entropy driver for the KlaussCPU TRNG (0xF00C_0000).  With it
+	  chosen as zephyr,entropy, sys_rand/sys_csrand and mbedTLS take their
+	  randomness from the hardware instead of a test generator.

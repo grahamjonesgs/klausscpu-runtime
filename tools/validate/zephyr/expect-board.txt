@@ -5,7 +5,7 @@ hello	Hello World! nexys_a7
 dbg_synchronization	thread_b: Hello World from cpu 0 on nexys_a7
 irq_soak	BEAT t=60 s loops=[0-9]+ ticks=[0-9]+ viol=0 lost=0
 irq_dev	IRQDEV RESULT PASS
-irq_dev	ISR0 +: STACK: unused [0-9]+ usage [0-9]+ / 4096 \([0-9]{1,2} %\)
+irq_dev	ISR0 +: STACK: unused [0-9]+ usage [0-9]+ / 4096 \( *[0-9]{1,2} %\)
 irq_dev	PASS irq_dev: idle stack keeps room for two nested stub frames
 irq_dev_spurious	spurious interrupt, IRQ 1 has no handler
 tick_cost	TICKCOST min=[0-9]+ p10=[0-9]+ median=[2-4][0-9]{2} p90=

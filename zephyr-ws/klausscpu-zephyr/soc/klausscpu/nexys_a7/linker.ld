@@ -73,6 +73,8 @@ SECTIONS
 #include <zephyr/linker/common-rom/common-rom-logging.ld>
 #include <zephyr/linker/common-rom/common-rom-net.ld>
 #include <zephyr/linker/common-rom/common-rom-misc.ld>
+/* ztest suites/tests (empty unless the image links ztest). */
+#include <zephyr/linker/common-rom/common-rom-ztest.ld>
 
     SECTION_PROLOGUE(_RODATA_SECTION_NAME,,)
     {

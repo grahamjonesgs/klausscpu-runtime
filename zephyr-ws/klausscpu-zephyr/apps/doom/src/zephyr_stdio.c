@@ -308,19 +308,7 @@ off_t lseek(int fd, off_t off, int whence)
 
 /* ── string/file helpers minimal libc lacks ─────────────────────────────── */
 
-int strcasecmp(const char *a, const char *b)
-{
-	while (*a && *b) {
-		int d = tolower((unsigned char)*a) - tolower((unsigned char)*b);
-
-		if (d) {
-			return d;
-		}
-		a++;
-		b++;
-	}
-	return tolower((unsigned char)*a) - tolower((unsigned char)*b);
-}
+/* strcasecmp() comes from minimal libc (zephyr-patches/minimal-libc-strcasecmp.patch). */
 
 char *strdup(const char *s)
 {

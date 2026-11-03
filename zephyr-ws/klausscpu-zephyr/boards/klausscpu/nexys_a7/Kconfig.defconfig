@@ -17,6 +17,11 @@ config KLAUSSCPU_TIMER
 config HEAP_MEM_POOL_SIZE
 	default 65536
 
+# The TRNG entropy driver (chosen zephyr,entropy) backs sys_rand_get/
+# sys_csrand_get and mbedTLS, so every app gets it.
+config ENTROPY_GENERATOR
+	default y
+
 # FatFs takes its volume names from devicetree only for Zephyr's own disk
 # compatibles, so the SD card (klausscpu,sd, registered as "SD") is named here.
 config FS_FATFS_CUSTOM_MOUNT_POINTS

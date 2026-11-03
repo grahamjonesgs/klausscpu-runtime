@@ -1,0 +1,11 @@
+description: |
+  KlaussCPU true random number generator: ring oscillators, a conditioner and
+  NIST SP 800-90B continuous health tests, read as 64-bit words from a FIFO.
+
+compatible: "klausscpu,trng"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true

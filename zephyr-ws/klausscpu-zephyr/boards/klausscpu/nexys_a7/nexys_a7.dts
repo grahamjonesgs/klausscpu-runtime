@@ -10,6 +10,7 @@
 		zephyr,sram = &sram0;
 		zephyr,console = &uart0;
 		zephyr,shell-uart = &uart0;
+		zephyr,entropy = &trng0;
 	};
 
 	cpus {
@@ -51,6 +52,13 @@
 	eth0: ethernet@f0060000 {
 		compatible = "klausscpu,ethernet";
 		reg = <0xF0060000 0x2000>;
+		status = "okay";
+	};
+
+	/* True random number generator at 0xF00C_0000. */
+	trng0: trng@f00c0000 {
+		compatible = "klausscpu,trng";
+		reg = <0xF00C0000 0x100>;
 		status = "okay";
 	};
 

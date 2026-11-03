@@ -1,0 +1,251 @@
+/* psa_spike — Zephyr's SSH server on mbedTLS / PSA on KlaussCPU, and a
+ * benchmark of the PSA operations SSH and TLS use (ZEPHYR_4_5_PLAN.md step 6).
+ *
+ * Boot: DHCP, an RSA-2048 host key (timed), then the SSH server on :22 with
+ * user admin / password klausscpu and a shell.  `psabench` (UART or SSH)
+ * times each operation in software, or through a PSA driver once one exists.
+ */
+
+#include <string.h>
+
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_mgmt.h>
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/ssh/keygen.h>
+#include <zephyr/net/ssh/server.h>
+#include <zephyr/shell/shell.h>
+#include <zephyr/shell/shell_ssh.h>
+#include <psa/crypto.h>
+
+LOG_MODULE_REGISTER(psa_spike, LOG_LEVEL_INF);
+
+#define HOST_KEY_INDEX 0
+
+static struct net_mgmt_event_callback dhcp_cb;
+static struct k_sem dhcp_sem;
+
+static void dhcp_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
+			 struct net_if *iface)
+{
+	ARG_UNUSED(cb);
+	ARG_UNUSED(iface);
+	if (mgmt_event == NET_EVENT_IPV4_DHCP_BOUND) {
+		k_sem_give(&dhcp_sem);
+	}
+}
+
+static int wait_for_dhcp(void)
+{
+	struct net_if *iface = net_if_get_default();
+
+	k_sem_init(&dhcp_sem, 0, 1);
+	net_mgmt_init_event_callback(&dhcp_cb, dhcp_handler, NET_EVENT_IPV4_DHCP_BOUND);
+	net_mgmt_add_event_callback(&dhcp_cb);
+	if (!iface) {
+		return -ENODEV;
+	}
+	net_dhcpv4_start(iface);
+	return k_sem_take(&dhcp_sem, K_SECONDS(15));
+}
+
+/* ── benchmark ──────────────────────────────────────────────────────────── */
+
+#define BUF 16384
+static uint8_t in_buf[BUF], out_buf[BUF + 64];
+
+static uint64_t us_since(uint64_t t0)
+{
+	return (k_cycle_get_64() - t0) / (sys_clock_hw_cycles_per_sec() / 1000000u);
+}
+
+static unsigned long kibps(size_t bytes, uint64_t us)
+{
+	return us ? (unsigned long)((uint64_t)bytes * 1000000u / us / 1024u) : 0;
+}
+
+static psa_key_id_t import_sym(psa_key_type_t type, psa_algorithm_t alg,
+			       psa_key_usage_t usage, size_t bytes)
+{
+	psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+	uint8_t key[32];
+	psa_key_id_t id = 0;
+
+	psa_generate_random(key, bytes);
+	psa_set_key_type(&a, type);
+	psa_set_key_algorithm(&a, alg);
+	psa_set_key_usage_flags(&a, usage);
+	psa_set_key_bits(&a, bytes * 8);
+	if (psa_import_key(&a, key, bytes, &id) != PSA_SUCCESS) {
+		return 0;
+	}
+	return id;
+}
+
+static psa_key_id_t gen_asym(psa_key_type_t type, size_t bits, psa_algorithm_t alg,
+			     psa_key_usage_t usage, uint64_t *us)
+{
+	psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+	psa_key_id_t id = 0;
+	uint64_t t0 = k_cycle_get_64();
+
+	psa_set_key_type(&a, type);
+	psa_set_key_bits(&a, bits);
+	psa_set_key_algorithm(&a, alg);
+	psa_set_key_usage_flags(&a, usage);
+	if (psa_generate_key(&a, &id) != PSA_SUCCESS) {
+		return 0;
+	}
+	*us = us_since(t0);
+	return id;
+}
+
+static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
+{
+	uint8_t hash[32], sig[512], pub[160], secret[64], tag[16], iv[12];
+	size_t olen;
+	uint64_t t0, us;
+	psa_status_t st;
+	psa_key_id_t k;
+	const int reps = 4;
+	bool asym = argc < 2 || strcmp(argv[1], "sym") != 0;
+
+	psa_generate_random(in_buf, BUF);
+	psa_generate_random(hash, sizeof(hash));
+
+	/* Bulk: SSH's only cipher (aes128-ctr + hmac-sha2-256) and TLS 1.3's GCM. */
+	k = import_sym(PSA_KEY_TYPE_AES, PSA_ALG_CTR, PSA_KEY_USAGE_ENCRYPT, 16);
+	t0 = k_cycle_get_64();
+	for (int i = 0; i < reps; i++) {
+		st = psa_cipher_encrypt(k, PSA_ALG_CTR, in_buf, BUF, out_buf, sizeof(out_buf),
+					&olen);
+	}
+	us = us_since(t0);
+	shell_print(sh, "AES-128-CTR      16 KiB  %6lu KiB/s  (status %d)",
+		    kibps(BUF * reps, us), st);
+	psa_destroy_key(k);
+
+	k = import_sym(PSA_KEY_TYPE_AES, PSA_ALG_GCM, PSA_KEY_USAGE_ENCRYPT, 16);
+	psa_generate_random(iv, sizeof(iv));
+	t0 = k_cycle_get_64();
+	for (int i = 0; i < reps; i++) {
+		st = psa_aead_encrypt(k, PSA_ALG_GCM, iv, sizeof(iv), NULL, 0, in_buf, BUF,
+				      out_buf, sizeof(out_buf), &olen);
+	}
+	us = us_since(t0);
+	shell_print(sh, "AES-128-GCM      16 KiB  %6lu KiB/s  (status %d)",
+		    kibps(BUF * reps, us), st);
+	psa_destroy_key(k);
+
+	t0 = k_cycle_get_64();
+	for (int i = 0; i < reps; i++) {
+		st = psa_hash_compute(PSA_ALG_SHA_256, in_buf, BUF, hash, sizeof(hash), &olen);
+	}
+	us = us_since(t0);
+	shell_print(sh, "SHA-256          16 KiB  %6lu KiB/s  (status %d)",
+		    kibps(BUF * reps, us), st);
+
+	k = import_sym(PSA_KEY_TYPE_HMAC, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+		       PSA_KEY_USAGE_SIGN_MESSAGE, 32);
+	t0 = k_cycle_get_64();
+	for (int i = 0; i < reps; i++) {
+		st = psa_mac_compute(k, PSA_ALG_HMAC(PSA_ALG_SHA_256), in_buf, BUF, tag,
+				     sizeof(hash), &olen);
+	}
+	us = us_since(t0);
+	shell_print(sh, "HMAC-SHA-256     16 KiB  %6lu KiB/s  (status %d)",
+		    kibps(BUF * reps, us), st);
+	t0 = k_cycle_get_64();
+	for (int i = 0; i < 64; i++) {
+		st = psa_mac_compute(k, PSA_ALG_HMAC(PSA_ALG_SHA_256), in_buf, 64, out_buf,
+				     32, &olen);
+	}
+	us = us_since(t0);
+	shell_print(sh, "HMAC-SHA-256     64 B    %6lu us each", (unsigned long)(us / 64));
+	psa_destroy_key(k);
+
+	if (!asym) {
+		return 0;
+	}
+
+	/* Key exchange: curve25519-sha256 (SSH), x25519 (TLS 1.3). */
+	k = gen_asym(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY), 255, PSA_ALG_ECDH,
+		     PSA_KEY_USAGE_DERIVE, &us);
+	shell_print(sh, "X25519 keygen            %6lu us", (unsigned long)us);
+	psa_export_public_key(k, pub, sizeof(pub), &olen);
+	t0 = k_cycle_get_64();
+	st = psa_raw_key_agreement(PSA_ALG_ECDH, k, pub, olen, secret, sizeof(secret), &olen);
+	shell_print(sh, "X25519 agreement         %6lu us  (status %d)",
+		    (unsigned long)us_since(t0), st);
+	psa_destroy_key(k);
+
+	/* Host keys: rsa-sha2-256 (all Zephyr's SSH offers), ECDSA P-256 (TLS
+	 * cert, and the alternative SSH host key). */
+	k = gen_asym(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1), 256,
+		     PSA_ALG_ECDSA(PSA_ALG_SHA_256), PSA_KEY_USAGE_SIGN_HASH, &us);
+	shell_print(sh, "ECDSA P-256 keygen       %6lu us", (unsigned long)us);
+	t0 = k_cycle_get_64();
+	st = psa_sign_hash(k, PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, sizeof(hash), sig,
+			   sizeof(sig), &olen);
+	shell_print(sh, "ECDSA P-256 sign         %6lu us  (status %d)",
+		    (unsigned long)us_since(t0), st);
+	t0 = k_cycle_get_64();
+	st = psa_verify_hash(k, PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, sizeof(hash), sig, olen);
+	shell_print(sh, "ECDSA P-256 verify       %6lu us  (status %d)",
+		    (unsigned long)us_since(t0), st);
+	psa_destroy_key(k);
+
+	k = gen_asym(PSA_KEY_TYPE_RSA_KEY_PAIR, 2048, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256),
+		     PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH, &us);
+	shell_print(sh, "RSA-2048 keygen          %6lu ms", (unsigned long)(us / 1000));
+	t0 = k_cycle_get_64();
+	st = psa_sign_hash(k, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256), hash, sizeof(hash),
+			   sig, sizeof(sig), &olen);
+	shell_print(sh, "RSA-2048 sign            %6lu us  (status %d)",
+		    (unsigned long)us_since(t0), st);
+	t0 = k_cycle_get_64();
+	st = psa_verify_hash(k, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256), hash, sizeof(hash),
+			     sig, olen);
+	shell_print(sh, "RSA-2048 verify          %6lu us  (status %d)",
+		    (unsigned long)us_since(t0), st);
+	psa_destroy_key(k);
+	return 0;
+}
+
+SHELL_CMD_ARG_REGISTER(psabench, NULL, "Time PSA operations ([sym] skips the slow asymmetric part)",
+		       cmd_psabench, 1, 1);
+
+int main(void)
+{
+	static struct net_sockaddr_in bind_addr;
+	uint64_t t0;
+	int ret;
+
+	printk("\nKlaussCPU psa_spike: Zephyr SSH on mbedTLS\n");
+	ret = psa_crypto_init();
+	if (ret != PSA_SUCCESS) {
+		LOG_ERR("psa_crypto_init: %d", ret);
+	}
+	if (wait_for_dhcp() != 0) {
+		LOG_WRN("no DHCP lease");
+	}
+
+	t0 = k_cycle_get_64();
+	ret = ssh_keygen(HOST_KEY_INDEX, SSH_HOST_KEY_TYPE_RSA, 2048);
+	LOG_INF("host key: RSA-2048 generated in %lu ms (%d)",
+		(unsigned long)(us_since(t0) / 1000), ret);
+
+	bind_addr.sin_family = NET_AF_INET;
+	bind_addr.sin_port = net_htons(22);
+	ret = ssh_server_start(ssh_server_instance(0), (struct net_sockaddr *)&bind_addr,
+			       HOST_KEY_INDEX, "admin", "klausscpu", NULL, 0,
+			       shell_sshd_event_callback,
+			       shell_sshd_transport_event_callback, NULL);
+	LOG_INF("SSH listening on port 22 (%d)", ret);
+
+	/* Never return from main on this arch (thread exit jumps to PC 0). */
+	k_sleep(K_FOREVER);
+	return 0;
+}

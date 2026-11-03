@@ -324,24 +324,5 @@ static int _klausscpu_sched_ready_init(void)
 }
 SYS_INIT(_klausscpu_sched_ready_init, APPLICATION, 99);
 
-#include <zephyr/random/random.h>
-
-#define _TRNG_BASE    0xF00C0000u
-#define _TRNG_CTRL    (*(volatile uint32_t *)(unsigned long)(_TRNG_BASE + 0x000u))
-#define _TRNG_STATUS  (*(volatile uint32_t *)(unsigned long)(_TRNG_BASE + 0x008u))
-#define _TRNG_DATA    (*(volatile uint64_t *)(unsigned long)(_TRNG_BASE + 0x010u))
-
-void z_impl_sys_rand_get(void *dst, size_t len)
-{
-    _TRNG_CTRL = 1;
-    uint8_t *p = (uint8_t *)dst;
-    size_t done = 0;
-    while (done < len) {
-        while (!(_TRNG_STATUS & 1u)) {}
-        uint64_t w = _TRNG_DATA;
-        size_t chunk = len - done;
-        if (chunk > 8) chunk = 8;
-        __builtin_memcpy(p + done, &w, chunk);
-        done += chunk;
-    }
-}
+/* sys_rand_get() comes from Zephyr's entropy-device generator on the TRNG
+ * driver (drivers/entropy, chosen zephyr,entropy), which checks HEALTH_OK. */

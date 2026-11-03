@@ -1,0 +1,2 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_ENTROPY_KLAUSSCPU_TRNG entropy_klausscpu_trng.c)

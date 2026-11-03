@@ -119,7 +119,10 @@ for step in $STEPS; do
       echo "$a $(wc -c <"$O/$a.out")B" >>"$O/summary.txt"
     done
     check "$HERE/expect-board.txt" "$O" board
-    if grep -al 'FATAL ERROR' "$O"/*.out 2>/dev/null; then echo "FAIL: a Zephyr fatal error (above)"; fail=1; fi
+    # irq_dev_spurious ends in the spurious-IRQ fatal error by design.
+    if grep -al 'FATAL ERROR' $(ls "$O"/*.out | grep -v '/irq_dev_spurious\.out$') 2>/dev/null; then
+      echo "FAIL: a Zephyr fatal error (above)"; fail=1
+    fi
     python3 -I "$VALIDATE_DIR/perf.py" extract zephyr "$O" zephyr >"$OUT/perf.tsv"
     ;;
   *) die "unknown step $step" ;;

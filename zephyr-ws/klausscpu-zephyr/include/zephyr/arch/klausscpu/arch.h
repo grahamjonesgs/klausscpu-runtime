@@ -11,6 +11,7 @@
 #include <zephyr/arch/common/sys_bitops.h>
 #include <zephyr/arch/common/ffs.h>
 #include <zephyr/arch/common/addr_types.h>
+#include <zephyr/arch/common/sys_io.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/timer/system_timer.h>
 #include <zephyr/arch/klausscpu/irq.h>
