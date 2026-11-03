@@ -47,4 +47,6 @@ if(CONFIG_KLAUSSCPU_SSH_SERVER)
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/crypto_hw.c
   )
   zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+  # Headers wolfSSL 5.7.2 expects from Zephyr 3.x (compat/README in the file).
+  zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/compat)
 endif()

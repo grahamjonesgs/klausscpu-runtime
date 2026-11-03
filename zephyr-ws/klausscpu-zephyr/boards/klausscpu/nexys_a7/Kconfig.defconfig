@@ -17,4 +17,12 @@ config KLAUSSCPU_TIMER
 config HEAP_MEM_POOL_SIZE
 	default 65536
 
+# FatFs takes its volume names from devicetree only for Zephyr's own disk
+# compatibles, so the SD card (klausscpu,sd, registered as "SD") is named here.
+config FS_FATFS_CUSTOM_MOUNT_POINTS
+	default "SD" if FAT_FILESYSTEM_ELM
+
+config FS_FATFS_CUSTOM_MOUNT_POINT_COUNT
+	default 1 if FAT_FILESYSTEM_ELM
+
 endif # BOARD_NEXYS_A7

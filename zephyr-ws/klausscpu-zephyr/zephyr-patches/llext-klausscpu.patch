@@ -1,17 +1,8 @@
 diff --git a/include/zephyr/llext/elf.h b/include/zephyr/llext/elf.h
-index b0477416a43..6d7323b9ed0 100644
+index f9a51fb41..ee67fd4e9 100644
 --- a/include/zephyr/llext/elf.h
 +++ b/include/zephyr/llext/elf.h
-@@ -211,6 +211,8 @@ struct elf64_shdr {
- #define SHF_WRITE 0x1           /**< Section is writable */
- #define SHF_ALLOC 0x2           /**< Section is present in memory */
- #define SHF_EXECINSTR 0x4       /**< Section contains executable instructions */
-+#define SHF_MERGE 0x10          /**< Section may be merged to eliminate duplication */
-+#define SHF_STRINGS 0x20        /**< Section contains null-terminated strings */
- 
- /**
-  * @brief Symbol table entry(32-bit)
-@@ -497,7 +499,14 @@ struct elf64_dyn {
+@@ -458,7 +458,14 @@ struct elf64_dyn {
  };
  /** @endcond */
  
@@ -28,13 +19,13 @@ index b0477416a43..6d7323b9ed0 100644
  typedef struct elf64_ehdr elf_ehdr_t;
  /** Machine sized section header structure */
 diff --git a/include/zephyr/llext/llext.h b/include/zephyr/llext/llext.h
-index 19fbe7a0b55..b688eb11676 100644
+index ab7593bc9..023e91a83 100644
 --- a/include/zephyr/llext/llext.h
 +++ b/include/zephyr/llext/llext.h
-@@ -126,6 +126,13 @@ struct llext_load_param {
- 	 * the memory buffer, when calculating relocation targets.
+@@ -229,6 +229,13 @@ struct llext_load_param {
+ 	 *       before the extension can be unloaded via @ref llext_unload.
  	 */
- 	bool pre_located;
+ 	bool keep_section_info;
 +	/**
 +	 * Retain the extension's symbol table (ext->sym_tab) after loading so
 +	 * the caller can resolve symbols by name with llext_find_sym().  By
@@ -45,10 +36,10 @@ index 19fbe7a0b55..b688eb11676 100644
  };
  
  /** Default initializer for @ref llext_load_param */
-@@ -241,6 +248,21 @@ int llext_add_domain(struct llext *ext, struct k_mem_domain *domain);
- int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc,
- 			     uintptr_t sym_base_addr, const char *sym_name, uintptr_t load_bias);
- 
+@@ -423,6 +430,21 @@ int llext_add_domain(struct llext *ext, struct k_mem_domain *domain);
+  * @retval -ENOTSUP Unsupported relocation
+  * @retval -ENOEXEC Invalid relocation
+  */
 +/**
 + * @brief Architecture specific check of an extension's ELF header
 + *
@@ -64,14 +55,14 @@ index 19fbe7a0b55..b688eb11676 100644
 + */
 +int arch_elf_check_header(const elf_ehdr_t *hdr);
 +
- /**
-  * @brief Locates an ELF section in the file.
-  *
+ int arch_elf_relocate(struct llext_loader *ldr, struct llext *ext, elf_rela_t *rel,
+ 		      const elf_shdr_t *shdr);
+ 
 diff --git a/subsys/llext/Kconfig b/subsys/llext/Kconfig
-index d3e85b6cb9f..e948f41f4fa 100644
+index e525c5326..441660cd9 100644
 --- a/subsys/llext/Kconfig
 +++ b/subsys/llext/Kconfig
-@@ -41,6 +41,16 @@ config LLEXT_TYPE_ELF_SHAREDLIB
+@@ -43,6 +43,16 @@ config LLEXT_TYPE_ELF_SHAREDLIB
  
  endchoice
  
@@ -85,39 +76,16 @@ index d3e85b6cb9f..e948f41f4fa 100644
 +	  ELFCLASS32 relocatable objects, such as KlaussCPU. Without this the
 +	  loader would size every ELF structure for ELF64 and reject the file.
 +
- config LLEXT_HEAP_SIZE
- 	int "llext heap memory size in kilobytes"
- 	default 8
-diff --git a/subsys/llext/llext_link.c b/subsys/llext/llext_link.c
-index dcbd441d0e1..349c7a0a152 100644
---- a/subsys/llext/llext_link.c
-+++ b/subsys/llext/llext_link.c
-@@ -189,11 +189,13 @@ int llext_link(struct llext_loader *ldr, struct llext *ext, bool do_local)
- 			}
- 			break;
- 		case SHT_RELA:
--			/* FIXME: currently implemented only on the Xtensa code path */
--			if (!IS_ENABLED(CONFIG_XTENSA)) {
--				LOG_ERR("Found unsupported SHT_RELA section %d", i);
--				return -ENOTSUP;
--			}
-+			/*
-+			 * Xtensa uses a separate GOT/PLT code path below; the
-+			 * generic path here also handles RELA: it reads the full
-+			 * elf_rela_t (including r_addend) and passes it to
-+			 * arch_elf_relocate, which is exactly what RELA targets
-+			 * such as KlaussCPU expect.
-+			 */
- 			if (shdr->sh_entsize != sizeof(elf_rela_t)) {
- 				LOG_ERR("Invalid entry size %zd for SHT_RELA section %d",
- 					(size_t)shdr->sh_entsize, i);
+ config LLEXT_HEAP_DYNAMIC
+ 	bool "Do not allocate static LLEXT heap"
+ 	help
 diff --git a/subsys/llext/llext_load.c b/subsys/llext/llext_load.c
-index de3cdd6402b..189d5d1ffde 100644
+index 9625fe9b6..6ddcb71f7 100644
 --- a/subsys/llext/llext_load.c
 +++ b/subsys/llext/llext_load.c
-@@ -38,6 +38,12 @@ LOG_MODULE_DECLARE(llext, CONFIG_LLEXT_LOG_LEVEL);
- 
- static const char ELF_MAGIC[] = {0x7f, 'E', 'L', 'F'};
+@@ -45,6 +45,12 @@ __weak int arch_elf_veneer_init(struct llext_loader *ldr, struct llext *ext)
+ 	return 0;
+ }
  
 +__weak int arch_elf_check_header(const elf_ehdr_t *hdr)
 +{
@@ -125,10 +93,10 @@ index de3cdd6402b..189d5d1ffde 100644
 +	return 0;
 +}
 +
- /*
-  * Load basic ELF file data
-  */
-@@ -80,6 +86,11 @@ static int llext_load_elf_data(struct llext_loader *ldr, struct llext *ext)
+ const void *llext_loaded_sect_ptr(struct llext_loader *ldr, struct llext *ext, unsigned int sh_ndx)
+ {
+ 	enum llext_mem mem_idx = ldr->sect_map[sh_ndx].mem_idx;
+@@ -102,6 +108,11 @@ static int llext_load_elf_data(struct llext_loader *ldr, struct llext *ext)
  		return -ENOEXEC;
  	}
  
@@ -140,133 +108,7 @@ index de3cdd6402b..189d5d1ffde 100644
  	/*
  	 * Read all ELF section headers and initialize maps.  Buffers allocated
  	 * below are freed when leaving do_llext_load(), so don't count them in
-@@ -184,6 +195,24 @@ static int llext_find_tables(struct llext_loader *ldr)
- 		}
- 	}
- 
-+	/*
-+	 * LLVM's integrated assembler emits a single string table that serves
-+	 * as both the section-header string table (e_shstrndx) and the symbol
-+	 * string table (symtab->sh_link), whereas GNU binutils emits two
-+	 * separate tables. In the merged case the loop above only assigns
-+	 * LLEXT_MEM_SHSTRTAB, leaving LLEXT_MEM_STRTAB unset. Recover it from
-+	 * the string table referenced by the symbol table's sh_link.
-+	 */
-+	if (!ldr->sects[LLEXT_MEM_STRTAB].sh_type &&
-+	    ldr->sects[LLEXT_MEM_SYMTAB].sh_type) {
-+		unsigned int strtab_idx = ldr->sects[LLEXT_MEM_SYMTAB].sh_link;
-+
-+		if (strtab_idx < ldr->sect_cnt &&
-+		    ldr->sect_hdrs[strtab_idx].sh_type == SHT_STRTAB) {
-+			ldr->sects[LLEXT_MEM_STRTAB] = ldr->sect_hdrs[strtab_idx];
-+		}
-+	}
-+
- 	if (!ldr->sects[LLEXT_MEM_SHSTRTAB].sh_type ||
- 	    !ldr->sects[LLEXT_MEM_STRTAB].sh_type ||
- 	    !ldr->sects[LLEXT_MEM_SYMTAB].sh_type) {
-@@ -252,8 +281,16 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
- 			 */
- 			memcpy(region, shdr, sizeof(*region));
- 		} else {
--			/* Make sure this section is compatible with the region */
--			if (shdr->sh_flags != region->sh_flags) {
-+			/* Make sure this section is compatible with the region.
-+			 * SHF_MERGE/SHF_STRINGS are link-time-only hints with no
-+			 * runtime meaning, so ignore them: LLVM emits e.g. both
-+			 * .rodata (A) and .rodata.str1.1 (AMS) / .rodata.cst32 (AM),
-+			 * which all belong in the same read-only region.
-+			 */
-+			const elf_word flag_mask = ~(elf_word)(SHF_MERGE | SHF_STRINGS);
-+
-+			if ((shdr->sh_flags & flag_mask) !=
-+			    (region->sh_flags & flag_mask)) {
- 				LOG_ERR("Unsupported section flags for %s (region %d)",
- 					name, mem_idx);
- 				return -ENOEXEC;
-@@ -295,6 +332,8 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
- 			region->sh_addr = address;
- 			region->sh_offset = bot_ofs;
- 			region->sh_size = top_ofs - bot_ofs;
-+			region->sh_addralign = MAX(region->sh_addralign,
-+						   shdr->sh_addralign);
- 		}
- 	}
- 
-@@ -313,6 +352,17 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
- 				continue;
- 			}
- 
-+			/*
-+			 * LLVM's integrated assembler merges .shstrtab and the
-+			 * symbol .strtab into one section, so LLEXT_MEM_SHSTRTAB
-+			 * and LLEXT_MEM_STRTAB can describe the exact same ELF
-+			 * range. An identical alias is not an interleaving of
-+			 * distinct sections, so it is not a real overlap.
-+			 */
-+			if (x->sh_offset == y->sh_offset && x->sh_size == y->sh_size) {
-+				continue;
-+			}
-+
- 			if (ldr->hdr.e_type == ET_DYN) {
- 				/*
- 				 * Test all merged VMA ranges for overlaps
-@@ -351,6 +401,39 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
- 		}
- 	}
- 
-+	/*
-+	 * A region is copied from the file as one block and its sections keep
-+	 * their file-offset distances, so a section is aligned in memory only
-+	 * if its offset from the region's start is.  The file offsets are
-+	 * aligned, but the region starts at its first section, which may need
-+	 * less alignment than a later one (.rodata.str1.1 then .rodata): start
-+	 * an ET_REL region's copy at its offset rounded down to the largest
-+	 * alignment in it (the bytes before the first section are unused).
-+	 * The region's memory is allocated at least that aligned (llext_mem.c).
-+	 * Done after the overlap test, which the extra bytes would trip, and
-+	 * only for the code and data regions: the readers of the string,
-+	 * symbol and export tables take their region to start at the section.
-+	 */
-+	if (ldr->hdr.e_type == ET_REL) {
-+		static const enum llext_mem padded[] = {
-+			LLEXT_MEM_TEXT, LLEXT_MEM_DATA, LLEXT_MEM_RODATA,
-+		};
-+
-+		for (i = 0; i < ARRAY_SIZE(padded); i++) {
-+			elf_shdr_t *region = ldr->sects + padded[i];
-+			size_t align = region->sh_addralign;
-+			size_t pad;
-+
-+			if (region->sh_type == SHT_NULL || region->sh_size == 0 ||
-+			    align <= 1) {
-+				continue;
-+			}
-+			pad = region->sh_offset % align;
-+			region->sh_offset -= pad;
-+			region->sh_size += pad;
-+		}
-+	}
-+
- 	/*
- 	 * Calculate each ELF section's offset inside its memory region. This
- 	 * is done as a separate pass so the final regions are already defined.
-@@ -361,6 +444,14 @@ static int llext_map_sections(struct llext_loader *ldr, struct llext *ext)
- 
- 		if (mem_idx != LLEXT_MEM_COUNT) {
- 			ldr->sect_map[i].offset = shdr->sh_offset - ldr->sects[mem_idx].sh_offset;
-+			if (ldr->hdr.e_type == ET_REL && shdr->sh_addralign > 1 &&
-+			    ldr->sect_map[i].offset % shdr->sh_addralign != 0) {
-+				LOG_ERR("Section %d is misaligned in region %d "
-+					"(offset 0x%zx, alignment %zd)",
-+					i, mem_idx, (size_t)ldr->sect_map[i].offset,
-+					(size_t)shdr->sh_addralign);
-+				return -ENOEXEC;
-+			}
- 		}
- 	}
- 
-@@ -646,9 +737,13 @@ out:
+@@ -1026,9 +1037,12 @@ out:
  
  	/* Until proper inter-llext linking is implemented, the symbol table is
  	 * not useful outside of the loading process; keep it only if debugging
@@ -275,27 +117,9 @@ index de3cdd6402b..189d5d1ffde 100644
 +	 * is detected.
  	 */
 -	if (!(IS_ENABLED(CONFIG_LLEXT_LOG_LEVEL_DBG) && ret == 0)) {
-+	bool keep_symtab = IS_ENABLED(CONFIG_LLEXT_LOG_LEVEL_DBG) ||
-+			   (ldr_parm && ldr_parm->keep_symtab);
++	bool keep_symtab = IS_ENABLED(CONFIG_LLEXT_LOG_LEVEL_DBG) || ldr_parm->keep_symtab;
 +
 +	if (!(keep_symtab && ret == 0)) {
- 		llext_free(ext->sym_tab.syms);
+ 		llext_free_metadata(ext->sym_tab.syms);
  		ext->sym_tab.sym_cnt = 0;
  		ext->sym_tab.syms = NULL;
-diff --git a/subsys/llext/llext_mem.c b/subsys/llext/llext_mem.c
-index 78ea782dcec..621599f48da 100644
---- a/subsys/llext/llext_mem.c
-+++ b/subsys/llext/llext_mem.c
-@@ -86,7 +86,11 @@ static int llext_copy_section(struct llext_loader *ldr, struct llext *ext,
- 	 */
- #ifndef CONFIG_ARM_MPU
- 	const uintptr_t sect_alloc = ROUND_UP(ldr->sects[mem_idx].sh_size, LLEXT_PAGE_SIZE);
--	const uintptr_t sect_align = LLEXT_PAGE_SIZE;
-+	/* At least the region's largest section alignment (llext_map_sections
-+	 * lays its sections out relative to an address aligned that much).
-+	 */
-+	const uintptr_t sect_align = MAX(LLEXT_PAGE_SIZE,
-+					 (uintptr_t)ldr->sects[mem_idx].sh_addralign);
- #else
- 	uintptr_t sect_alloc = LLEXT_PAGE_SIZE;
- 

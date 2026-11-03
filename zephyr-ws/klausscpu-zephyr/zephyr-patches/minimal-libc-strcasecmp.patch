@@ -1,0 +1,43 @@
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 29f2db743..3f55bf2c3 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -24,6 +24,7 @@ zephyr_library_sources(
+   source/stdlib/exit.c
+   source/stdlib/qsort.c
+   source/string/strerror.c
++  source/string/strcasecmp.c
+   source/string/strncasecmp.c
+   source/string/strstr.c
+   source/string/string.c
+diff --git a/lib/libc/minimal/include/strings.h b/lib/libc/minimal/include/strings.h
+index 5c9301940..679cc97ae 100644
+--- a/lib/libc/minimal/include/strings.h
++++ b/lib/libc/minimal/include/strings.h
+@@ -15,6 +15,7 @@
+ extern "C" {
+ #endif
+ 
++extern int strcasecmp(const char *s1, const char *s2);
+ extern int strncasecmp(const char *s1, const char *s2, size_t n);
+ 
+ #ifdef __cplusplus
+diff --git a/lib/libc/minimal/source/string/strcasecmp.c b/lib/libc/minimal/source/string/strcasecmp.c
+new file mode 100644
+index 000000000..b81a17688
+--- /dev/null
++++ b/lib/libc/minimal/source/string/strcasecmp.c
+@@ -0,0 +1,13 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdint.h>
++#include <strings.h>
++
++/* Case-insensitive compare of NUL-terminated strings (POSIX strcasecmp). */
++int
++strcasecmp(const char *s1, const char *s2)
++{
++	return strncasecmp(s1, s2, SIZE_MAX);
++}

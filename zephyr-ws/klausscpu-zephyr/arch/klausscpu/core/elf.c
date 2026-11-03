@@ -10,12 +10,11 @@
  * of lld/ELF/Arch/KlaussCPU.cpp::relocate() — the formulas here MUST match
  * lld so a loaded extension behaves identically to a statically linked one.
  *
- * Targets Zephyr 3.7 LTS, whose hook signature is:
- *     int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc,
- *                           uintptr_t sym_base_addr, const char *sym_name,
- *                           uintptr_t load_bias);
- * (Newer Zephyr changed this to (ldr, ext, rel, shdr) and does symbol
- *  lookup inside the arch hook — see arch/riscv/core/elf.c on main.)
+ * Since Zephyr 4.0 the hook is
+ *     int arch_elf_relocate(struct llext_loader *ldr, struct llext *ext,
+ *                           elf_rela_t *rel, const elf_shdr_t *shdr);
+ * and the arch finds the patched location and the symbol itself, with the
+ * helpers in <zephyr/llext/llext_internal.h> (as arch/riscv/core/elf.c).
  *
  * KlaussCPU relocations are whole-field (no HI20/LO12 splitting) except the
  * short call's word displacement, so unlike RISC-V/ARM this handler is tiny:
@@ -32,6 +31,7 @@
 #include <zephyr/arch/klausscpu/llext.h>
 #include <zephyr/llext/elf.h>
 #include <zephyr/llext/llext.h>
+#include <zephyr/llext/llext_internal.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
@@ -114,12 +114,30 @@ int arch_elf_check_header(const elf_ehdr_t *hdr)
  *   A = rel->r_addend   (RELA addend; KlaussCPU emits .rela sections)
  *   P = loc             (address of the field being patched)
  */
-int arch_elf_relocate(elf_rela_t *rel, uintptr_t loc, uintptr_t sym_base_addr,
-		      const char *sym_name, uintptr_t load_bias)
+int arch_elf_relocate(struct llext_loader *ldr, struct llext *ext, elf_rela_t *rel,
+		      const elf_shdr_t *shdr)
 {
 	uint32_t reloc_type = ELF32_R_TYPE(rel->r_info);
+	uintptr_t loc = llext_get_reloc_instruction_location(ldr, ext, shdr->sh_info, rel);
+	uintptr_t sym_base_addr;
+	const char *sym_name;
+	elf_sym_t sym;
+	int ret;
 
-	ARG_UNUSED(load_bias); /* RELA gives absolute S+A / self-relative P; no bias needed */
+	if (reloc_type == R_KLAUSSCPU_NONE) {
+		return 0;
+	}
+	ret = llext_read_symbol(ldr, ext, rel, &sym);
+	if (ret != 0) {
+		LOG_ERR("could not read the symbol of a relocation");
+		return ret;
+	}
+	sym_name = llext_symbol_name(ldr, ext, &sym);
+	ret = llext_lookup_symbol(ldr, ext, &sym_base_addr, rel, &sym, sym_name, shdr);
+	if (ret != 0) {
+		LOG_ERR("could not find symbol '%s'", sym_name ? sym_name : "?");
+		return ret;
+	}
 
 	LOG_DBG("reloc type %u  loc %#lx  S %#lx  A %ld  sym '%s'", reloc_type,
 		(unsigned long)loc, (unsigned long)sym_base_addr,

@@ -33,9 +33,9 @@ static void on_pointer(uint16_t x, uint16_t y, uint8_t buttons)
 	ptr_pressed = (buttons & 1) != 0;   /* left button */
 }
 
-static void lvgl_ptr_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
+static void lvgl_ptr_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
-	ARG_UNUSED(drv);
+	ARG_UNUSED(indev);
 	data->point.x = ptr_x;
 	data->point.y = ptr_y;
 	data->state = ptr_pressed ? LV_INDEV_STATE_PRESSED
@@ -114,7 +114,7 @@ static void win_front_cb(lv_event_t *e)
 static lv_obj_t *make_window(const char *title, lv_coord_t x, lv_coord_t y,
 			     lv_coord_t w, lv_coord_t h)
 {
-	lv_obj_t *win = lv_win_create(lv_scr_act(), 26);
+	lv_obj_t *win = lv_win_create(lv_scr_act());
 	lv_obj_t *hdr;
 
 	lv_obj_set_size(win, w, h);
@@ -123,6 +123,7 @@ static lv_obj_t *make_window(const char *title, lv_coord_t x, lv_coord_t y,
 
 	/* Drag the window by its title bar; raise it to the front on touch. */
 	hdr = lv_win_get_header(win);
+	lv_obj_set_height(hdr, 26);   /* LVGL 9: no header height argument */
 	lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_event_cb(hdr, win_drag_cb, LV_EVENT_PRESSING, win);
 	lv_obj_add_event_cb(hdr, win_front_cb, LV_EVENT_PRESSED, win);
@@ -500,7 +501,7 @@ static struct net_mgmt_event_callback dhcp_cb;
 static struct k_sem dhcp_sem;
 
 static void dhcp_handler(struct net_mgmt_event_callback *cb,
-			 uint32_t mgmt_event, struct net_if *iface)
+			 uint64_t mgmt_event, struct net_if *iface)
 {
 	ARG_UNUSED(cb);
 	ARG_UNUSED(iface);
@@ -544,12 +545,10 @@ int main(void)
 	vnc_server_start();              /* demo off; LVGL owns the framebuffer */
 	vnc_register_input(NULL, on_pointer);
 
-	static lv_indev_drv_t indev_drv;
+	lv_indev_t *indev = lv_indev_create();
 
-	lv_indev_drv_init(&indev_drv);
-	indev_drv.type = LV_INDEV_TYPE_POINTER;
-	indev_drv.read_cb = lvgl_ptr_read;
-	lv_indev_drv_register(&indev_drv);
+	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_read_cb(indev, lvgl_ptr_read);
 
 	build_desktop();
 	lv_timer_create(ui_tick, 500, NULL);   /* clock + live monitor + chart */

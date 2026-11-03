@@ -77,7 +77,7 @@ static struct net_mgmt_event_callback dhcp_cb;
 static struct k_sem dhcp_sem;
 
 static void dhcp_handler(struct net_mgmt_event_callback *cb,
-			 uint32_t mgmt_event, struct net_if *iface)
+			 uint64_t mgmt_event, struct net_if *iface)
 {
 	if (mgmt_event != NET_EVENT_IPV4_DHCP_BOUND) {
 		return;

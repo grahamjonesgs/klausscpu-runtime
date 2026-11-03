@@ -421,10 +421,12 @@ static void eth_klausscpu_iface_init(struct net_if *iface)
 	ethernet_init(iface);
 }
 
-static enum ethernet_hw_caps eth_klausscpu_get_capabilities(const struct device *dev)
+static enum ethernet_hw_caps eth_klausscpu_get_capabilities(const struct device *dev,
+							     struct net_if *iface)
 {
 	ARG_UNUSED(dev);
-	return ETHERNET_LINK_100BASE_T;
+	ARG_UNUSED(iface);
+	return ETHERNET_LINK_100BASE;
 }
 
 static const struct ethernet_api eth_klausscpu_api = {

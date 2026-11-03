@@ -6,6 +6,11 @@
 #ifndef WOLFSSL_USER_SETTINGS_H
 #define WOLFSSL_USER_SETTINGS_H
 
+/* wolfSSL 5.7.2's settings.h includes <version.h> and checks
+ * KERNEL_VERSION_NUMBER to pick the Zephyr >= 3.1 header paths; Zephyr 4.x
+ * generates <zephyr/version.h> instead, so define it here first. */
+#include <zephyr/version.h>
+
 /* ── Target / OS ─────────────────────────────────────────────────────────── */
 
 #define SINGLE_THREADED            /* no pthreads needed; single-core CPU */
@@ -16,6 +21,7 @@
  * mapped onto Zephyr fs_*).  The server still loads its host key from memory
  * (sshkeys.c), so no file I/O happens for auth. */
 #define WOLFSSL_NO_SOCK            /* don't compile default socket layer */
+#define WOLFSSH_USER_IO            /* wolfSSH too: ssh_server.c sets its own recv/send */
 #define WOLFSSL_USER_IO            /* suppress EmbedReceive/EmbedSend */
 
 /* Select the Zephyr filesystem/RTOS port in wolfSSL+wolfSSH headers (port.h

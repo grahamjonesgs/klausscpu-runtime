@@ -333,10 +333,7 @@ char *strdup(const char *s)
 	return p;
 }
 
-int remove(const char *path)
-{
-	return (fs_unlink(path) < 0) ? -1 : 0;
-}
+/* remove() comes from Zephyr's common libc (CONFIG_COMMON_LIBC_REMOVE). */
 
 int rename(const char *from, const char *to)
 {

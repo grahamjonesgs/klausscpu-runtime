@@ -400,8 +400,8 @@ int main(void)
 	irq_disconnect_dynamic(IRQ_BLIT, 0, blit_isr, &blit_sem, 0);
 
 	/* ── E: ISR stack high-water mark ─────────────────────────────────── */
-		thread_analyzer_print();
-	thread_analyzer_run(stack_cb);
+		thread_analyzer_print(0);
+	thread_analyzer_run(stack_cb, 0);
 	printk("IRQDEV idle stack unused: %u\n", g_idle_unused);
 	check("idle stack keeps room for two nested stub frames (>= 280 bytes)",
 	      g_idle_unused >= 280);

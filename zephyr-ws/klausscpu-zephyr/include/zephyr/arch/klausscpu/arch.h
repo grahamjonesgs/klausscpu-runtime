@@ -90,6 +90,9 @@ static ALWAYS_INLINE bool arch_cpu_irqs_are_enabled(void)
  * driver (drivers/timer/klausscpu_timer.c), not the tick counter TIMER_COUNT
  * (0xF00F_0038), which wraps every tick period (1 ms at 1 kHz): k_busy_wait()
  * and every interval over a tick would be wrong. */
+extern uint32_t sys_clock_cycle_get_32(void);
+extern uint64_t sys_clock_cycle_get_64(void);
+
 static ALWAYS_INLINE uint32_t arch_k_cycle_get_32(void)
 {
     return sys_clock_cycle_get_32();
