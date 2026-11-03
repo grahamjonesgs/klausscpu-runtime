@@ -57,7 +57,7 @@ index 587620fb3..24d2dfa53 100644
  
  enum ssh_encryption_alg {
 diff --git a/subsys/net/lib/ssh/ssh_host_key.c b/subsys/net/lib/ssh/ssh_host_key.c
-index 7fbec83db..dd2a11b80 100644
+index 7fbec83db..b1ad79b6a 100644
 --- a/subsys/net/lib/ssh/ssh_host_key.c
 +++ b/subsys/net/lib/ssh/ssh_host_key.c
 @@ -5,6 +5,8 @@
@@ -69,7 +69,21 @@ index 7fbec83db..dd2a11b80 100644
  #include <zephyr/sys/byteorder.h>
  
  #include <zephyr/logging/log.h>
-@@ -71,8 +73,20 @@ static const struct host_key_alg_info host_key_alg_info[] = {
+@@ -49,6 +51,13 @@ struct ssh_host_key {
+ 	psa_key_id_t key_id;
+ 	size_t key_bits;
+ 	bool in_use;
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	/* The EC public point, derived once: PSA recomputes it from the
++	 * private scalar on every export, and a handshake needs it twice.
++	 */
++	uint8_t ec_point[65];
++	bool ec_point_valid;
++#endif
+ };
+ 
+ struct host_key_alg_info {
+@@ -71,8 +80,20 @@ static const struct host_key_alg_info host_key_alg_info[] = {
  		.hash_alg = PSA_ALG_SHA_512
  	},
  #endif
@@ -90,7 +104,7 @@ index 7fbec83db..dd2a11b80 100644
  #define SSH_RSA_EXPONENT 65537
  
  static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_alg alg)
-@@ -83,6 +97,9 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
+@@ -83,6 +104,9 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
  #endif
  #ifdef CONFIG_SSH_HOST_KEY_ALG_RSA_SHA2_512
  	case SSH_HOST_KEY_ALG_RSA_SHA2_512:
@@ -100,7 +114,7 @@ index 7fbec83db..dd2a11b80 100644
  #endif
  		return &host_key_alg_info[alg];
  	default:
-@@ -90,6 +107,22 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
+@@ -90,6 +114,22 @@ static const struct host_key_alg_info *get_host_key_alg_info(enum ssh_host_key_a
  	}
  }
  
@@ -123,7 +137,7 @@ index 7fbec83db..dd2a11b80 100644
  static int signature_type_str_to_id(const struct ssh_string *signature_type)
  {
  	for (int i = 0; i < ARRAY_SIZE(host_key_alg_info); i++) {
-@@ -297,8 +330,7 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+@@ -297,8 +337,7 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
  		return ret;
  	}
  
@@ -133,7 +147,7 @@ index 7fbec83db..dd2a11b80 100644
  		return -EINVAL;
  	}
  
-@@ -310,22 +342,34 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+@@ -310,22 +349,34 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
  	switch (key_type) {
  #ifdef CONFIG_SSH_HOST_KEY_RSA
  	case SSH_HOST_KEY_TYPE_RSA:
@@ -171,7 +185,7 @@ index 7fbec83db..dd2a11b80 100644
  		return -EIO;
  	}
  
-@@ -336,6 +380,24 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
+@@ -336,10 +387,31 @@ int ssh_keygen(int key_index, enum ssh_host_key_type key_type, size_t key_size_b
  	return 0;
  }
  
@@ -196,7 +210,14 @@ index 7fbec83db..dd2a11b80 100644
  static void free_host_key(struct ssh_host_key *host_key)
  {
  	psa_destroy_key(host_key->key_id);
-@@ -376,6 +438,37 @@ int ssh_keygen_export(int key_index, bool private_key, enum ssh_host_key_format
+ 	host_key->key_id = PSA_KEY_ID_NULL;
++#ifdef CONFIG_SSH_HOST_KEY_ECDSA
++	host_key->ec_point_valid = false;
++#endif
+ }
+ 
+ int ssh_keygen_free(int key_index)
+@@ -376,6 +448,37 @@ int ssh_keygen_export(int key_index, bool private_key, enum ssh_host_key_format
  		return -EINVAL;
  	}
  
@@ -234,7 +255,7 @@ index 7fbec83db..dd2a11b80 100644
  	if (fmt == SSH_HOST_KEY_FORMAT_DER) {
  		size_t der_len;
  		psa_status_t status;
-@@ -487,6 +580,40 @@ int ssh_keygen_import(int key_index, bool private_key, enum ssh_host_key_format
+@@ -487,6 +590,40 @@ int ssh_keygen_import(int key_index, bool private_key, enum ssh_host_key_format
  		return -EIO;
  	}
  
@@ -275,7 +296,7 @@ index 7fbec83db..dd2a11b80 100644
  	/* Re-export as DER to get a known format for PSA */
  	if (private_key) {
  		ret = mbedtls_pk_write_key_der(&pk, der_buf, sizeof(der_buf));
-@@ -569,8 +696,36 @@ int ssh_host_key_write_pub_key(struct ssh_payload *payload, int host_key_index)
+@@ -569,8 +706,40 @@ int ssh_host_key_write_pub_key(struct ssh_payload *payload, int host_key_index)
  	switch (host_key->key_type) {
  #ifdef CONFIG_SSH_HOST_KEY_RSA
  	case SSH_HOST_KEY_TYPE_RSA:
@@ -287,16 +308,20 @@ index 7fbec83db..dd2a11b80 100644
 +		/* RFC 5656 3.1: string type, string curve, string Q */
 +		static const struct ssh_string ec_type = SSH_STRING_LITERAL(SSH_ECDSA_P256_TYPE);
 +		static const struct ssh_string ec_curve = SSH_STRING_LITERAL(SSH_ECDSA_P256_CURVE);
-+		uint8_t point[SSH_ECDSA_P256_POINT_LEN];
 +		struct ssh_string q;
 +		size_t point_len;
 +
-+		status = psa_export_public_key(host_key->key_id, point, sizeof(point), &point_len);
-+		if (status != PSA_SUCCESS || point_len != SSH_ECDSA_P256_POINT_LEN) {
-+			NET_ERR("Failed to export pubkey: %d", status);
-+			return -EIO;
++		if (!host_key->ec_point_valid) {
++			status = psa_export_public_key(host_key->key_id, host_key->ec_point,
++						       sizeof(host_key->ec_point), &point_len);
++			if (status != PSA_SUCCESS || point_len != SSH_ECDSA_P256_POINT_LEN) {
++				NET_ERR("Failed to export pubkey: %d", status);
++				return -EIO;
++			}
++			host_key->ec_point_valid = true;
 +		}
-+		q = (struct ssh_string){ .len = point_len, .data = point };
++		q = (struct ssh_string){ .len = SSH_ECDSA_P256_POINT_LEN,
++					 .data = host_key->ec_point };
 +		start_offset = payload->len;
 +		if (!ssh_payload_skip_bytes(payload, 4) ||
 +		    !ssh_payload_write_string(payload, &ec_type) ||
@@ -313,7 +338,7 @@ index 7fbec83db..dd2a11b80 100644
  	default:
  		return -ENOTSUP;
  	}
-@@ -642,7 +797,7 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
+@@ -642,7 +811,7 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
  	}
  
  	alg_info = get_host_key_alg_info(host_key_alg);
@@ -322,7 +347,7 @@ index 7fbec83db..dd2a11b80 100644
  		return -ENOTSUP;
  	}
  
-@@ -663,6 +818,31 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
+@@ -663,6 +832,31 @@ int ssh_host_key_write_signature(struct ssh_payload *payload, int host_key_index
  		return -ENOBUFS;
  	}
  
@@ -354,7 +379,7 @@ index 7fbec83db..dd2a11b80 100644
  	status = psa_sign_hash(host_key->key_id,
  			       PSA_ALG_RSA_PKCS1V15_SIGN(alg_info->hash_alg),
  			       hash, hash_len, signature_buff, sizeof(signature_buff),
-@@ -791,7 +971,7 @@ int ssh_host_key_verify_signature(const enum ssh_host_key_alg *host_key_alg,
+@@ -791,7 +985,7 @@ int ssh_host_key_verify_signature(const enum ssh_host_key_alg *host_key_alg,
  	}
  
  	alg_info = get_host_key_alg_info(*host_key_alg);

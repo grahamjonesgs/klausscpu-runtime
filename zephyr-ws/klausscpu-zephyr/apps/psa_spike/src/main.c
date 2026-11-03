@@ -242,6 +242,41 @@ static int psacheck(void)
 		fails += !ok;
 		psa_destroy_key(k);
 	}
+	/* X25519, RFC 7748 6.1: Alice's private key with Bob's public key. */
+	{
+		static const char *a_priv = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
+		static const char *b_pub  = "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f";
+		static const char *shared = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
+		uint8_t priv[32], pub[32], out[32];
+		psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+		psa_key_id_t k;
+
+		for (int i = 0; i < 32; i++) {
+			char t1[3] = {a_priv[2 * i], a_priv[2 * i + 1], 0};
+			char t2[3] = {b_pub[2 * i], b_pub[2 * i + 1], 0};
+
+			priv[i] = (uint8_t)strtoul(t1, NULL, 16);
+			pub[i] = (uint8_t)strtoul(t2, NULL, 16);
+		}
+		psa_set_key_type(&a, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY));
+		psa_set_key_bits(&a, 255);
+		psa_set_key_algorithm(&a, PSA_ALG_ECDH);
+		psa_set_key_usage_flags(&a, PSA_KEY_USAGE_DERIVE);
+		psa_import_key(&a, priv, 32, &k);
+		psa_set_key_usage_flags(&a, PSA_KEY_USAGE_DERIVE | PSA_KEY_USAGE_EXPORT);
+		psa_key_id_t k2;
+
+		psa_import_key(&a, priv, 32, &k2);
+		memset(out, 0, sizeof(out));
+		psa_raw_key_agreement(PSA_ALG_ECDH, k, pub, 32, out, sizeof(out), &olen);
+		psa_destroy_key(k);
+		fails += check_eq("X25519 RFC 7748 6.1 shared secret", out, shared);
+		memset(out, 0, sizeof(out));
+		psa_export_public_key(k2, out, sizeof(out), &olen);
+		psa_destroy_key(k2);
+		fails += check_eq("X25519 RFC 7748 6.1 Alice public key", out,
+				  "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+	}
 	P("psacheck: %d failure(s)", fails);
 	return fails;
 }

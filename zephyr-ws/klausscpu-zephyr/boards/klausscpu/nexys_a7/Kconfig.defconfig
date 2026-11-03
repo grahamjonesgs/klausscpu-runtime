@@ -24,6 +24,10 @@ config HEAP_MEM_POOL_SIZE
 config TIMESLICE_SIZE
 	default 0
 
+# klausscpu-tf-psa-crypto.h: TF-PSA-Crypto options Zephyr's Kconfig lacks.
+config TF_PSA_CRYPTO_USER_CONFIG_FILE
+	default "klausscpu-tf-psa-crypto.h" if MBEDTLS
+
 # The PSA accelerator hooks (drivers/crypto, klausscpu-psa-driver-config.h).
 config TF_PSA_CRYPTO_DRIVER_CONFIG_FILE
 	default "klausscpu-psa-driver-config.h" if PSA_CRYPTO_DRIVER_KLAUSSCPU
