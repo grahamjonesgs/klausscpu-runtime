@@ -193,6 +193,55 @@ static int psacheck(void)
 		snprintk(name, sizeof(name), "HMAC-SHA-256 RFC 4231 TC%d", t + 1);
 		fails += check_eq(name, d, tc[t].mac);
 	}
+	/* AES-128-CTR, SP 800-38A F.5.1, through the multi-part API split at
+	 * 7 / 50 / 7 bytes (a partial block's keystream carried over), then the
+	 * one-shot decrypt of IV || ciphertext. */
+	{
+		static const uint8_t key[16] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+						0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
+		static const uint8_t icb[16] = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
+						0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff};
+		static const char *pt_hex = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51"
+					    "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
+		static const char *ct_hex = "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff"
+					    "5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee";
+		uint8_t pt[64], ct[64], buf[80];
+		psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+		psa_cipher_operation_t cop = PSA_CIPHER_OPERATION_INIT;
+		psa_key_id_t k;
+		size_t o1 = 0, o2 = 0, o3 = 0, o4 = 0;
+
+		for (int i = 0; i < 64; i++) {
+			char t1[3] = {pt_hex[2 * i], pt_hex[2 * i + 1], 0};
+			char t2[3] = {ct_hex[2 * i], ct_hex[2 * i + 1], 0};
+
+			pt[i] = (uint8_t)strtoul(t1, NULL, 16);
+			ct[i] = (uint8_t)strtoul(t2, NULL, 16);
+		}
+		psa_set_key_type(&a, PSA_KEY_TYPE_AES);
+		psa_set_key_algorithm(&a, PSA_ALG_CTR);
+		psa_set_key_usage_flags(&a, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+		psa_import_key(&a, key, 16, &k);
+		psa_cipher_encrypt_setup(&cop, k, PSA_ALG_CTR);
+		psa_cipher_set_iv(&cop, icb, 16);
+		psa_cipher_update(&cop, pt, 7, buf, sizeof(buf), &o1);
+		psa_cipher_update(&cop, pt + 7, 50, buf + o1, sizeof(buf) - o1, &o2);
+		psa_cipher_update(&cop, pt + 57, 7, buf + o1 + o2, sizeof(buf) - o1 - o2, &o3);
+		psa_cipher_finish(&cop, buf + o1 + o2 + o3, sizeof(buf), &o4);
+		bool ok = o1 + o2 + o3 + o4 == 64 && memcmp(buf, ct, 64) == 0;
+
+		P("%s  AES-128-CTR F.5.1, multi-part 7/50/7", ok ? "PASS" : "FAIL");
+		fails += !ok;
+		memcpy(buf, icb, 16);
+		memcpy(buf + 16, ct, 64);
+		uint8_t back[64];
+
+		psa_cipher_decrypt(k, PSA_ALG_CTR, buf, 80, back, sizeof(back), &o1);
+		ok = o1 == 64 && memcmp(back, pt, 64) == 0;
+		P("%s  AES-128-CTR F.5.1, one-shot decrypt", ok ? "PASS" : "FAIL");
+		fails += !ok;
+		psa_destroy_key(k);
+	}
 	P("psacheck: %d failure(s)", fails);
 	return fails;
 }
