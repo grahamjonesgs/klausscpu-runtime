@@ -1,0 +1,13 @@
+diff --git a/drivers/builtin/include/mbedtls/private/bignum.h b/drivers/builtin/include/mbedtls/private/bignum.h
+index 8e8290e..b2cf980 100644
+--- a/drivers/builtin/include/mbedtls/private/bignum.h
++++ b/drivers/builtin/include/mbedtls/private/bignum.h
+@@ -127,7 +127,7 @@ typedef uint64_t mbedtls_mpi_uint;
+     defined(__ia64__)  || defined(__alpha__)      || \
+     (defined(__sparc__) && defined(__arch64__)) || \
+     defined(__s390x__) || defined(__mips64)       || \
+-    defined(__aarch64__))
++    defined(__aarch64__) || defined(__klausscpu__))
+         #if !defined(MBEDTLS_HAVE_INT64)
+             #define MBEDTLS_HAVE_INT64
+         #endif /* MBEDTLS_HAVE_INT64 */

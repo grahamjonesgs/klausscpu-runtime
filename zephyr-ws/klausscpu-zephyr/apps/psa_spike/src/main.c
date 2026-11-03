@@ -22,6 +22,20 @@
 
 LOG_MODULE_REGISTER(psa_spike, LOG_LEVEL_INF);
 
+#include "rsa_test_key.h"
+
+/* Results go to the shell that ran psabench, or to printk at boot. */
+static const struct shell *bench_sh;
+#define P(...)                                                                     \
+	do {                                                                       \
+		if (bench_sh) {                                                    \
+			shell_print(bench_sh, __VA_ARGS__);                        \
+		} else {                                                           \
+			printk(__VA_ARGS__);                                       \
+			printk("\n");                                              \
+		}                                                                  \
+	} while (0)
+
 #define HOST_KEY_INDEX 0
 
 static struct net_mgmt_event_callback dhcp_cb;
@@ -102,7 +116,7 @@ static psa_key_id_t gen_asym(psa_key_type_t type, size_t bits, psa_algorithm_t a
 	return id;
 }
 
-static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
+static void psabench(bool asym, bool keygen)
 {
 	uint8_t hash[32], sig[512], pub[160], secret[64], tag[16], iv[12];
 	size_t olen;
@@ -110,7 +124,6 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 	psa_status_t st;
 	psa_key_id_t k;
 	const int reps = 4;
-	bool asym = argc < 2 || strcmp(argv[1], "sym") != 0;
 
 	psa_generate_random(in_buf, BUF);
 	psa_generate_random(hash, sizeof(hash));
@@ -123,7 +136,7 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 					&olen);
 	}
 	us = us_since(t0);
-	shell_print(sh, "AES-128-CTR      16 KiB  %6lu KiB/s  (status %d)",
+	P("AES-128-CTR      16 KiB  %6lu KiB/s  (status %d)",
 		    kibps(BUF * reps, us), st);
 	psa_destroy_key(k);
 
@@ -135,7 +148,7 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 				      out_buf, sizeof(out_buf), &olen);
 	}
 	us = us_since(t0);
-	shell_print(sh, "AES-128-GCM      16 KiB  %6lu KiB/s  (status %d)",
+	P("AES-128-GCM      16 KiB  %6lu KiB/s  (status %d)",
 		    kibps(BUF * reps, us), st);
 	psa_destroy_key(k);
 
@@ -144,7 +157,7 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 		st = psa_hash_compute(PSA_ALG_SHA_256, in_buf, BUF, hash, sizeof(hash), &olen);
 	}
 	us = us_since(t0);
-	shell_print(sh, "SHA-256          16 KiB  %6lu KiB/s  (status %d)",
+	P("SHA-256          16 KiB  %6lu KiB/s  (status %d)",
 		    kibps(BUF * reps, us), st);
 
 	k = import_sym(PSA_KEY_TYPE_HMAC, PSA_ALG_HMAC(PSA_ALG_SHA_256),
@@ -155,7 +168,7 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 				     sizeof(hash), &olen);
 	}
 	us = us_since(t0);
-	shell_print(sh, "HMAC-SHA-256     16 KiB  %6lu KiB/s  (status %d)",
+	P("HMAC-SHA-256     16 KiB  %6lu KiB/s  (status %d)",
 		    kibps(BUF * reps, us), st);
 	t0 = k_cycle_get_64();
 	for (int i = 0; i < 64; i++) {
@@ -163,58 +176,85 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 				     32, &olen);
 	}
 	us = us_since(t0);
-	shell_print(sh, "HMAC-SHA-256     64 B    %6lu us each", (unsigned long)(us / 64));
+	P("HMAC-SHA-256     64 B    %6lu us each", (unsigned long)(us / 64));
 	psa_destroy_key(k);
 
 	if (!asym) {
-		return 0;
+		return;
 	}
 
 	/* Key exchange: curve25519-sha256 (SSH), x25519 (TLS 1.3). */
 	k = gen_asym(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_MONTGOMERY), 255, PSA_ALG_ECDH,
 		     PSA_KEY_USAGE_DERIVE, &us);
-	shell_print(sh, "X25519 keygen            %6lu us", (unsigned long)us);
+	P("X25519 keygen            %6lu us", (unsigned long)us);
 	psa_export_public_key(k, pub, sizeof(pub), &olen);
 	t0 = k_cycle_get_64();
 	st = psa_raw_key_agreement(PSA_ALG_ECDH, k, pub, olen, secret, sizeof(secret), &olen);
-	shell_print(sh, "X25519 agreement         %6lu us  (status %d)",
+	P("X25519 agreement         %6lu us  (status %d)",
 		    (unsigned long)us_since(t0), st);
 	psa_destroy_key(k);
 
 	/* Host keys: rsa-sha2-256 (all Zephyr's SSH offers), ECDSA P-256 (TLS
 	 * cert, and the alternative SSH host key). */
 	k = gen_asym(PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1), 256,
-		     PSA_ALG_ECDSA(PSA_ALG_SHA_256), PSA_KEY_USAGE_SIGN_HASH, &us);
-	shell_print(sh, "ECDSA P-256 keygen       %6lu us", (unsigned long)us);
+		     PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+		     PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH, &us);
+	P("ECDSA P-256 keygen       %6lu us", (unsigned long)us);
 	t0 = k_cycle_get_64();
 	st = psa_sign_hash(k, PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, sizeof(hash), sig,
 			   sizeof(sig), &olen);
-	shell_print(sh, "ECDSA P-256 sign         %6lu us  (status %d)",
+	P("ECDSA P-256 sign         %6lu us  (status %d)",
 		    (unsigned long)us_since(t0), st);
 	t0 = k_cycle_get_64();
 	st = psa_verify_hash(k, PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, sizeof(hash), sig, olen);
-	shell_print(sh, "ECDSA P-256 verify       %6lu us  (status %d)",
+	P("ECDSA P-256 verify       %6lu us  (status %d)",
 		    (unsigned long)us_since(t0), st);
 	psa_destroy_key(k);
 
-	k = gen_asym(PSA_KEY_TYPE_RSA_KEY_PAIR, 2048, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256),
-		     PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH, &us);
-	shell_print(sh, "RSA-2048 keygen          %6lu ms", (unsigned long)(us / 1000));
+	/* RSA-2048 signing on a fixed test key (rsa_test_key.h): the
+	 * rsa-sha2-256 host key signature every Zephyr SSH handshake makes. */
+	{
+		psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+
+		psa_set_key_type(&a, PSA_KEY_TYPE_RSA_KEY_PAIR);
+		psa_set_key_algorithm(&a, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256));
+		psa_set_key_usage_flags(&a, PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH);
+		st = psa_import_key(&a, rsa_test_key, sizeof(rsa_test_key), &k);
+		if (st != PSA_SUCCESS) {
+			P("RSA-2048 import failed (status %d)", st);
+			return;
+		}
+	}
 	t0 = k_cycle_get_64();
 	st = psa_sign_hash(k, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256), hash, sizeof(hash),
 			   sig, sizeof(sig), &olen);
-	shell_print(sh, "RSA-2048 sign            %6lu us  (status %d)",
-		    (unsigned long)us_since(t0), st);
+	P("RSA-2048 sign            %6lu us  (status %d)", (unsigned long)us_since(t0), st);
 	t0 = k_cycle_get_64();
 	st = psa_verify_hash(k, PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256), hash, sizeof(hash),
 			     sig, olen);
-	shell_print(sh, "RSA-2048 verify          %6lu us  (status %d)",
-		    (unsigned long)us_since(t0), st);
+	P("RSA-2048 verify          %6lu us  (status %d)", (unsigned long)us_since(t0), st);
 	psa_destroy_key(k);
+
+	if (keygen) {
+		k = gen_asym(PSA_KEY_TYPE_RSA_KEY_PAIR, 2048,
+			     PSA_ALG_RSA_PKCS1V15_SIGN(PSA_ALG_SHA_256), PSA_KEY_USAGE_SIGN_HASH,
+			     &us);
+		P("RSA-2048 keygen          %6lu ms", (unsigned long)(us / 1000));
+		psa_destroy_key(k);
+	}
+}
+
+static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
+{
+	bench_sh = sh;
+	psabench(argc < 2 || strcmp(argv[1], "sym") != 0,
+		 argc >= 2 && strcmp(argv[1], "keygen") == 0);
+	bench_sh = NULL;
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(psabench, NULL, "Time PSA operations ([sym] skips the slow asymmetric part)",
+SHELL_CMD_ARG_REGISTER(psabench, NULL,
+		       "Time PSA operations (sym: symmetric only; keygen: add RSA-2048 keygen)",
 		       cmd_psabench, 1, 1);
 
 int main(void)
@@ -227,6 +267,11 @@ int main(void)
 	ret = psa_crypto_init();
 	if (ret != PSA_SUCCESS) {
 		LOG_ERR("psa_crypto_init: %d", ret);
+	}
+	if (IS_ENABLED(CONFIG_PSA_SPIKE_BOOT_BENCH)) {
+		psabench(true, false);
+		printk("psabench done\n");
+		k_sleep(K_FOREVER);
 	}
 	if (wait_for_dhcp() != 0) {
 		LOG_WRN("no DHCP lease");

@@ -23,20 +23,30 @@ The Zephyr tree and modules are **fetched, not committed** (gitignored). On a
 fresh clone, from `zephyr-ws/`:
 
 ```sh
-# a) Zephyr v3.7.0 + the fatfs module (manifest = klausscpu-zephyr/west.yml)
-pip install --user west
+# a) Zephyr v4.5.0 + modules (manifest = klausscpu-zephyr/west.yml), in a
+#    venv with Zephyr's Python requirements
+python3 -m venv .venv && . .venv/bin/activate && pip install west
 west init -l klausscpu-zephyr
-west update                         # pulls zephyr/ (~1.1 GB) + fatfs + lvgl
+west update --narrow -o=--depth=1   # zephyr/ + fatfs, lvgl, mbedtls, tf-psa-crypto(-drivers)
+pip install -r zephyr/scripts/requirements-base.txt
+# The shallow clone has no tags, so the boot banner would show a hash:
+git -C zephyr fetch --depth=1 https://github.com/zephyrproject-rtos/zephyr tag v4.5.0
 
-# b) Re-apply the three vendored Zephyr patches AFTER EVERY `west update`
-#    (the zephyr/ tree is gitignored, so the patches don't persist there).
-git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/klausscpu-core.patch
-git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch
-git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/cbprintf-klausscpu.patch
-#    Verify: `git -C zephyr status` shows exactly 11 changed files.
-#    (cbprintf-klausscpu.patch: adds klausscpu to the VA_STACK_ALIGN table so
-#     cbprintf packaging aligns 32-bit varargs correctly — fixes LOG_*/printk
-#     multi-arg %u/%d garble.  Only needed for the lvgl/gui apps but harmless.)
+# b) Re-apply the vendored patches AFTER EVERY `west update`
+#    (zephyr/ and modules/ are gitignored, so the patches don't persist).
+for p in klausscpu-core llext-klausscpu cbprintf-klausscpu minimal-libc-strcasecmp; do
+  git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/$p.patch
+done
+git -C modules/crypto/tf-psa-crypto apply \
+  ../../../klausscpu-zephyr/zephyr-patches/tf-psa-crypto-klausscpu.patch
+#    Verify: `git -C zephyr status --short` lists 14 paths (one new file).
+#    klausscpu-core: the arch dispatch in cpu.h, arch_inlines.h, exception.h,
+#      linker-tool-gcc.h, toolchain/common.h and gcc.h.
+#    llext-klausscpu: LLEXT_ELF_CLASS32, keep_symtab, arch_elf_check_header.
+#    cbprintf-klausscpu: 8-byte vararg slots (LOG_*/printk multi-arg output).
+#    minimal-libc-strcasecmp: the net shell's dns.c needs strcasecmp.
+#    tf-psa-crypto-klausscpu: 64-bit bignum limbs (RSA-2048 sign 3.1 s ->
+#      1.1 s, X25519 and P-256 ~1.5x).
 
 # c) wolfSSL + wolfSSH (only needed for the ssh_shell app) — built from source
 #    as Zephyr modules. build-wolfssl.sh also pins the module name to `wolfssl`
@@ -129,8 +139,9 @@ atomics) plus the `mmio.h` helpers.
 
 ## Gotchas (things that bite)
 
-- **Re-apply the three patches after every `west update`** — the `zephyr/` tree is
-  gitignored and fetched clean each time, so the patches don't survive.
+- **Re-apply the patches after every `west update`** — `zephyr/` and
+  `modules/` are gitignored and fetched clean each time, so the patches don't
+  survive.
 - **`EXTRA_ZEPHYR_MODULES` for `ssh_shell` must include both wolfSSL and wolfSSH**
   or Kconfig aborts with `undefined symbol WOLFSSL`. They point at the *source*
   trees (`wolfssl-src`/`wolfssh-src`), not the install dirs.

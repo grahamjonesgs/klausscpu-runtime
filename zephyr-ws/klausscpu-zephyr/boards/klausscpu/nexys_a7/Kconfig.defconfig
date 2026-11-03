@@ -17,6 +17,13 @@ config KLAUSSCPU_TIMER
 config HEAP_MEM_POOL_SIZE
 	default 65536
 
+# Zephyr 4.x defaults to 20 ms round-robin timeslicing; 3.7 had it off
+# (TIMESLICE_SIZE 0).  On, every context switch re-arms the slice timeout:
+# irq_dev's IRQ -> semaphore -> thread round trip ran 26% slower.  Apps that
+# want round-robin can still set TIMESLICE_SIZE.
+config TIMESLICE_SIZE
+	default 0
+
 # The TRNG entropy driver (chosen zephyr,entropy) backs sys_rand_get/
 # sys_csrand_get and mbedTLS, so every app gets it.
 config ENTROPY_GENERATOR

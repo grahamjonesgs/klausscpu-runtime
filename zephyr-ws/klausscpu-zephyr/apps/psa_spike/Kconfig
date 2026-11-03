@@ -1,0 +1,9 @@
+mainmenu "psa_spike"
+
+config PSA_SPIKE_BOOT_BENCH
+	bool "Run the PSA benchmark on the UART at boot instead of starting SSH"
+	help
+	  Prints the psabench results with printk and then idles: no network,
+	  no host key, no SSH server.
+
+source "Kconfig.zephyr"
