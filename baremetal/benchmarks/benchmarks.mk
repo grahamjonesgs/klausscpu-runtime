@@ -34,8 +34,10 @@ BENCH_CRT_OBJS := $(CRT_FP_OBJS)
 COREMARK_SRC  := $(BENCH)/coremark
 COREMARK_PORT := $(BENCH)/coremark-port
 # Fixed iteration count, sized for > 10 s on the board (run rules) with
-# margin for a faster compiler.  0 = let core_main.c auto-size to >= 10 s.
-COREMARK_ITERATIONS ?= 2000
+# margin for a faster core and compiler: 2000 fell to 9.7 s on klaussCPU
+# ldbyp (2.06 CoreMark/MHz at 100 MHz), 3000 is 14.6 s there.  0 = let
+# core_main.c auto-size to >= 10 s.
+COREMARK_ITERATIONS ?= 3000
 CM_NAMES := core_list_join core_main core_matrix core_state core_util
 COREMARK_CFLAGS = $(CFLAGS) -I$(COREMARK_PORT) -I$(COREMARK_SRC) \
                   -DITERATIONS=$(COREMARK_ITERATIONS) -DFLAGS_STR='"$(OPT)"'
