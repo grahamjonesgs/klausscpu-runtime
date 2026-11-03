@@ -1,0 +1,15 @@
+--- Captured UART output ---
+KlaussCPU crypto self-test 2 (CTR mode, SHA save/restore)
+
+=== AES CTR mode (AES_CAP=0x0) ===
+SKIP  AES CTR mode not in this bitstream
+
+=== SHA-256 save/restore (SHA_CAP=0x0) ===
+SKIP  SHA RESTORE not in this bitstream
+
+=== Timing (100 MHz) ===
+SKIP  timing: no CTR / RESTORE in this bitstream
+
+0 passed, 0 failed
+ALL PASS
+--- end UART ---
