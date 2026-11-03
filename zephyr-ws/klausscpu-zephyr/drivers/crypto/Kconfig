@@ -1,0 +1,8 @@
+config PSA_CRYPTO_DRIVER_KLAUSSCPU
+	bool "KlaussCPU crypto block as a PSA accelerator driver"
+	default y
+	depends on MBEDTLS
+	help
+	  SHA-256 (and with it HMAC-SHA-256) for TF-PSA-Crypto on the
+	  KlaussCPU SHA block, when the bitstream has state save/restore.
+	  Needs zephyr-patches/tf-psa-crypto-klausscpu.patch.

@@ -6,6 +6,7 @@
  * times each operation in software, or through a PSA driver once one exists.
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
@@ -114,6 +115,86 @@ static psa_key_id_t gen_asym(psa_key_type_t type, size_t bits, psa_algorithm_t a
 	}
 	*us = us_since(t0);
 	return id;
+}
+
+/* Known answers through the PSA API, whichever driver serves them. */
+static int check_eq(const char *name, const uint8_t *got, const char *want_hex)
+{
+	uint8_t want[32];
+
+	for (int i = 0; i < 32; i++) {
+		unsigned int b;
+		char t[3] = {want_hex[2 * i], want_hex[2 * i + 1], 0};
+
+		b = (unsigned int)strtoul(t, NULL, 16);
+		want[i] = (uint8_t)b;
+	}
+	bool ok = memcmp(got, want, 32) == 0;
+
+	P("%s  %s", ok ? "PASS" : "FAIL", name);
+	return ok ? 0 : 1;
+}
+
+static int psacheck(void)
+{
+	static uint8_t a_chunk[1000];
+	uint8_t d[32], d2[32];
+	size_t olen;
+	int fails = 0;
+	psa_hash_operation_t op = PSA_HASH_OPERATION_INIT, op2 = PSA_HASH_OPERATION_INIT;
+
+	psa_hash_compute(PSA_ALG_SHA_256, (const uint8_t *)"abc", 3, d, sizeof(d), &olen);
+	fails += check_eq("SHA-256(\"abc\")", d,
+			  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+	/* 1,000,000 x 'a' in chunks of 1..1000 bytes, interleaved with a
+	 * second operation hashing "abc". */
+	memset(a_chunk, 'a', sizeof(a_chunk));
+	psa_hash_setup(&op, PSA_ALG_SHA_256);
+	psa_hash_setup(&op2, PSA_ALG_SHA_256);
+	psa_hash_update(&op2, (const uint8_t *)"a", 1);
+	size_t done = 0, n = 1;
+
+	while (done < 1000000) {
+		size_t take = MIN(n, 1000000 - done);
+
+		psa_hash_update(&op, a_chunk, take);
+		done += take;
+		n = n % 963 + 37;   /* 37..999: within a_chunk */
+	}
+	psa_hash_update(&op2, (const uint8_t *)"bc", 2);
+	psa_hash_finish(&op, d, sizeof(d), &olen);
+	psa_hash_finish(&op2, d2, sizeof(d2), &olen);
+	fails += check_eq("SHA-256(10^6 x 'a'), odd chunks", d,
+			  "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+	fails += check_eq("SHA-256 interleaved with it", d2,
+			  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+	/* RFC 4231 test cases 1 and 2. */
+	static const struct { uint8_t key[20]; size_t klen; const char *msg; const char *mac; } tc[] = {
+		{ {0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+		   0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b}, 20, "Hi There",
+		  "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7" },
+		{ {'J', 'e', 'f', 'e'}, 4, "what do ya want for nothing?",
+		  "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843" },
+	};
+	for (int t = 0; t < 2; t++) {
+		psa_key_attributes_t a = PSA_KEY_ATTRIBUTES_INIT;
+		psa_key_id_t k;
+		char name[32];
+
+		psa_set_key_type(&a, PSA_KEY_TYPE_HMAC);
+		psa_set_key_algorithm(&a, PSA_ALG_HMAC(PSA_ALG_SHA_256));
+		psa_set_key_usage_flags(&a, PSA_KEY_USAGE_SIGN_MESSAGE);
+		psa_import_key(&a, tc[t].key, tc[t].klen, &k);
+		psa_mac_compute(k, PSA_ALG_HMAC(PSA_ALG_SHA_256), (const uint8_t *)tc[t].msg,
+				strlen(tc[t].msg), d, sizeof(d), &olen);
+		psa_destroy_key(k);
+		snprintk(name, sizeof(name), "HMAC-SHA-256 RFC 4231 TC%d", t + 1);
+		fails += check_eq(name, d, tc[t].mac);
+	}
+	P("psacheck: %d failure(s)", fails);
+	return fails;
 }
 
 static void psabench(bool asym, bool keygen)
@@ -253,6 +334,16 @@ static int cmd_psabench(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_psacheck(const struct shell *sh, size_t argc, char **argv)
+{
+	bench_sh = sh;
+	psacheck();
+	bench_sh = NULL;
+	return 0;
+}
+
+SHELL_CMD_REGISTER(psacheck, NULL, "Known-answer tests through the PSA API", cmd_psacheck);
+
 SHELL_CMD_ARG_REGISTER(psabench, NULL,
 		       "Time PSA operations (sym: symmetric only; keygen: add RSA-2048 keygen)",
 		       cmd_psabench, 1, 1);
@@ -269,6 +360,7 @@ int main(void)
 		LOG_ERR("psa_crypto_init: %d", ret);
 	}
 	if (IS_ENABLED(CONFIG_PSA_SPIKE_BOOT_BENCH)) {
+		psacheck();
 		psabench(true, false);
 		printk("psabench done\n");
 		k_sleep(K_FOREVER);

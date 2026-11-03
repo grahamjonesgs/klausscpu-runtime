@@ -46,7 +46,8 @@ git -C modules/crypto/tf-psa-crypto apply \
 #    cbprintf-klausscpu: 8-byte vararg slots (LOG_*/printk multi-arg output).
 #    minimal-libc-strcasecmp: the net shell's dns.c needs strcasecmp.
 #    tf-psa-crypto-klausscpu: 64-bit bignum limbs (RSA-2048 sign 3.1 s ->
-#      1.1 s, X25519 and P-256 ~1.5x).
+#      1.1 s, X25519 and P-256 ~1.5x), and the dispatch hooks for the
+#      KlaussCPU PSA driver (drivers/crypto: SHA-256 / HMAC on the SHA block).
 
 # c) wolfSSL + wolfSSH (only needed for the ssh_shell app) — built from source
 #    as Zephyr modules. build-wolfssl.sh also pins the module name to `wolfssl`

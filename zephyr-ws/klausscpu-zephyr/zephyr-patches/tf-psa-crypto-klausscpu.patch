@@ -1,3 +1,142 @@
+diff --git a/dispatch/include/psa/crypto_driver_contexts_primitives.h b/dispatch/include/psa/crypto_driver_contexts_primitives.h
+index b2d1e9a..0a1a942 100644
+--- a/dispatch/include/psa/crypto_driver_contexts_primitives.h
++++ b/dispatch/include/psa/crypto_driver_contexts_primitives.h
+@@ -27,6 +27,9 @@
+ 
+ /* Include the context structure definitions for the Mbed TLS software drivers */
+ #include "mbedtls/private/crypto_builtin_primitives.h"
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++#include "klausscpu_psa_driver.h"
++#endif
+ 
+ /* Include the context structure definitions for those drivers that were
+  * declared during the autogeneration process. */
+@@ -119,6 +122,9 @@ typedef union {
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     cc3xx_hash_operation_t cc3xx_driver_ctx;
+ #endif
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++    klausscpu_psa_hash_ctx_t klausscpu_ctx;
++#endif
+ } psa_driver_hash_context_t;
+ 
+ typedef union {
+diff --git a/dispatch/psa_crypto_driver_wrappers.h b/dispatch/psa_crypto_driver_wrappers.h
+index b5496f7..33da4f0 100644
+--- a/dispatch/psa_crypto_driver_wrappers.h
++++ b/dispatch/psa_crypto_driver_wrappers.h
+@@ -61,6 +61,10 @@
+ #include "tfm_builtin_key_loader.h"
+ #endif /* PSA_CRYPTO_DRIVER_TFM_BUILTIN_KEY_LOADER */
+ 
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++#include "klausscpu_psa_driver.h"
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
++
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+ #ifndef PSA_CRYPTO_DRIVER_PRESENT
+ #define PSA_CRYPTO_DRIVER_PRESENT
+@@ -88,6 +92,9 @@ enum {
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     PSA_CRYPTO_CC3XX_DRIVER_ID,
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++    PSA_CRYPTO_KLAUSSCPU_DRIVER_ID,
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ };
+ 
+ /* END-driver id */
+@@ -1649,6 +1656,12 @@ static inline psa_status_t psa_driver_wrapper_hash_compute(
+     return( status );
+ #endif /* defined(PSA_WANT_ALG_SHA_384) || defined(PSA_WANT_ALG_SHA_512) */
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++    status = klausscpu_psa_hash_compute( alg, input, input_length,
++                                         hash, hash_size, hash_length );
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++        return( status );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -1696,6 +1709,13 @@ static inline psa_status_t psa_driver_wrapper_hash_setup(
+     return( status );
+ #endif /* defined(PSA_WANT_ALG_SHA_384) || defined(PSA_WANT_ALG_SHA_512) */
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++    status = klausscpu_psa_hash_setup( &operation->ctx.klausscpu_ctx, alg );
++    if( status == PSA_SUCCESS )
++        operation->id = PSA_CRYPTO_KLAUSSCPU_DRIVER_ID;
++    if( status != PSA_ERROR_NOT_SUPPORTED )
++        return( status );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+ 
+     /* If software fallback is compiled in, try fallback */
+@@ -1742,6 +1762,13 @@ static inline psa_status_t psa_driver_wrapper_hash_clone(
+                         &target_operation->ctx.cc3xx_driver_ctx ) );
+ 
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++        case PSA_CRYPTO_KLAUSSCPU_DRIVER_ID:
++            target_operation->id = PSA_CRYPTO_KLAUSSCPU_DRIVER_ID;
++            return( klausscpu_psa_hash_clone(
++                        &source_operation->ctx.klausscpu_ctx,
++                        &target_operation->ctx.klausscpu_ctx ) );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             (void) target_operation;
+@@ -1774,6 +1801,11 @@ static inline psa_status_t psa_driver_wrapper_hash_update(
+                         &operation->ctx.cc3xx_driver_ctx,
+                         input, input_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++        case PSA_CRYPTO_KLAUSSCPU_DRIVER_ID:
++            return( klausscpu_psa_hash_update( &operation->ctx.klausscpu_ctx,
++                                               input, input_length ) );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             (void) input;
+@@ -1808,6 +1840,11 @@ static inline psa_status_t psa_driver_wrapper_hash_finish(
+                         &operation->ctx.cc3xx_driver_ctx,
+                         hash, hash_size, hash_length ) );
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++        case PSA_CRYPTO_KLAUSSCPU_DRIVER_ID:
++            return( klausscpu_psa_hash_finish( &operation->ctx.klausscpu_ctx,
++                                               hash, hash_size, hash_length ) );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             (void) hash;
+@@ -1837,6 +1874,10 @@ static inline psa_status_t psa_driver_wrapper_hash_abort(
+             return( cc3xx_hash_abort(
+                         &operation->ctx.cc3xx_driver_ctx ) );
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++        case PSA_CRYPTO_KLAUSSCPU_DRIVER_ID:
++            return( klausscpu_psa_hash_abort( &operation->ctx.klausscpu_ctx ) );
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ #endif /* PSA_CRYPTO_ACCELERATOR_DRIVER_PRESENT */
+         default:
+             return( PSA_ERROR_BAD_STATE );
+diff --git a/dispatch/psa_crypto_driver_wrappers_no_static.c b/dispatch/psa_crypto_driver_wrappers_no_static.c
+index 40145b9..00e6722 100644
+--- a/dispatch/psa_crypto_driver_wrappers_no_static.c
++++ b/dispatch/psa_crypto_driver_wrappers_no_static.c
+@@ -86,6 +86,9 @@ enum {
+ #if defined(PSA_CRYPTO_DRIVER_CC3XX)
+     PSA_CRYPTO_CC3XX_DRIVER_ID,
+ #endif /* PSA_CRYPTO_DRIVER_CC3XX */
++#if defined(PSA_CRYPTO_DRIVER_KLAUSSCPU)
++    PSA_CRYPTO_KLAUSSCPU_DRIVER_ID,
++#endif /* PSA_CRYPTO_DRIVER_KLAUSSCPU */
+ };
+ 
+ /* END-driver id */
 diff --git a/drivers/builtin/include/mbedtls/private/bignum.h b/drivers/builtin/include/mbedtls/private/bignum.h
 index 8e8290e..b2cf980 100644
 --- a/drivers/builtin/include/mbedtls/private/bignum.h
