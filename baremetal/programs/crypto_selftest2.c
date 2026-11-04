@@ -11,9 +11,9 @@
  *
  * The new paths are checked against the legacy ones (hardware ECB with a
  * software counter, one-shot sha256_hw, hmac_sha256_sw), which
- * crypto_selftest covers.  Each block prints SKIP on a bitstream (or the
- * emulator) whose capability register reads 0.  Then cycle counts, which vary
- * run to run.
+ * crypto_selftest covers.  Each block, and the timing, prints SKIP on a
+ * bitstream (or the emulator) whose capability registers read 0.  The TIME
+ * lines' numbers vary run to run.
  */
 
 #include <stdio.h>
@@ -352,6 +352,12 @@ static void timing(void) {
     uint64_t t0, t1, t2;
 
     printf("\n=== Timing (100 MHz) ===\n");
+    if (!(aes_hw_caps() & AES_CAP_CTR) && !(sha_hw_caps() & SHA_CAP_RESTORE)) {
+        /* An older bitstream, or the emulator, which has no crypto blocks
+         * at all: their status polls would never finish there. */
+        printf("SKIP  timing: no CTR / RESTORE in this bitstream\n");
+        return;
+    }
     fill(key, 16); set_key(key);
     fill(in_buf, BUF);
     if (aes_hw_caps() & AES_CAP_CTR) {

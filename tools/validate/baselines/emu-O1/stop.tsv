@@ -3,6 +3,7 @@ blit_capture	InstructionCap
 blit_selftest	Halt
 bst	Halt
 crypto	Halt
+crypto_selftest2	Halt
 crypto_selftest	InstructionCap
 crypto_test	InstructionCap
 dhrystone	Halt
