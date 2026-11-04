@@ -65,9 +65,34 @@ static void set_clk(uint16_t div)
 	REG_SD_CTRL = (REG_SD_CTRL & ~0xFFFFu) | SD_CTRL_CLKDIV(div);
 }
 
+/* Timeouts (SD spec, SPI mode): read access <= 100 ms, write busy <= 250 ms
+ * for SDHC (500 ms for SDXC).  Deadlines are in uptime ms, with margin. */
+#define SD_READY_MS       500u
+#define SD_TOKEN_MS       250u
+#define SD_WBUSY_MS       750u
+#define SD_RETRIES        3
+
+/* Clock the bus until the card releases MISO (0xFF), i.e. it has finished any
+ * previous busy period.  Commands sent while it is busy are not seen. */
+static int sd_wait_ready(uint32_t ms)
+{
+	int64_t end = k_uptime_get() + ms;
+
+	do {
+		if (spi_xfer(0xFF) == 0xFF) {
+			return 0;
+		}
+	} while (k_uptime_get() < end);
+	return -1;
+}
+
 static uint8_t sd_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
 {
-	spi_xfer(0xFF);
+	if (cmd == 0) {
+		spi_xfer(0xFF);	/* card not initialised yet: no ready check */
+	} else if (sd_wait_ready(SD_READY_MS) != 0) {
+		return 0xFF;
+	}
 	spi_xfer(0x40 | (cmd & 0x3F));
 	spi_xfer((uint8_t)(arg >> 24));
 	spi_xfer((uint8_t)(arg >> 16));
@@ -159,23 +184,39 @@ static uint32_t blk_arg(uint32_t lba)
 	return s_blockaddr ? lba : lba * 512u;
 }
 
-static int sd_read_block(uint32_t lba, uint8_t *buf)
+/* Single-block read (CMD17).  Returns 0, or a negative step code:
+ * -1 command rejected (*info = R1), -2 no data token in time,
+ * -3 data error token (*info = token). */
+static int sd_read_block(uint32_t lba, uint8_t *buf, uint8_t *info)
 {
 	cs_assert();
-	if (sd_cmd(17, blk_arg(lba), 0xFF) != 0x00) {
+	uint8_t r1 = sd_cmd(17, blk_arg(lba), 0xFF);
+
+	if (r1 != 0x00) {
+		*info = r1;
 		cs_deassert();
 		return -1;
 	}
 
-	for (int tries = 0; tries < 200000; tries++) {
-		if (spi_xfer(0xFF) == 0xFE) {
-			goto got_token;
+	int64_t end = k_uptime_get() + SD_TOKEN_MS;
+	uint8_t t;
+
+	for (;;) {
+		t = spi_xfer(0xFF);
+		if (t != 0xFF) {
+			break;
+		}
+		if (k_uptime_get() >= end) {
+			cs_deassert();
+			return -2;
 		}
 	}
-	cs_deassert();
-	return -2;
+	if (t != 0xFE) {
+		*info = t;	/* data error token: 000x_xxxx */
+		cs_deassert();
+		return -3;
+	}
 
-got_token:
 	for (int i = 0; i < 512; i++) {
 		buf[i] = spi_xfer(0xFF);
 	}
@@ -185,10 +226,16 @@ got_token:
 	return 0;
 }
 
-static int sd_write_block(uint32_t lba, const uint8_t *buf)
+/* Single-block write (CMD24).  Returns 0, or -1 command rejected (*info =
+ * R1), -3 data rejected (*info = data response), -4 still busy after
+ * SD_WBUSY_MS. */
+static int sd_write_block(uint32_t lba, const uint8_t *buf, uint8_t *info)
 {
 	cs_assert();
-	if (sd_cmd(24, blk_arg(lba), 0xFF) != 0x00) {
+	uint8_t r1 = sd_cmd(24, blk_arg(lba), 0xFF);
+
+	if (r1 != 0x00) {
+		*info = r1;
 		cs_deassert();
 		return -1;
 	}
@@ -205,13 +252,18 @@ static int sd_write_block(uint32_t lba, const uint8_t *buf)
 	uint8_t resp = spi_xfer(0xFF) & 0x1F;
 
 	if (resp != 0x05) {
+		*info = resp;
 		cs_deassert();
 		return -3;
 	}
 
-	for (int tries = 0; tries < 200000; tries++) {
-		if (spi_xfer(0xFF) != 0x00) {
-			break;
+	/* The card holds MISO low while it programs the block. */
+	int64_t end = k_uptime_get() + SD_WBUSY_MS;
+
+	while (spi_xfer(0xFF) == 0x00) {
+		if (k_uptime_get() >= end) {
+			cs_deassert();
+			return -4;
 		}
 	}
 	cs_deassert();
@@ -288,8 +340,23 @@ static int disk_klausscpu_access_read(struct disk_info *disk, uint8_t *buf,
 
 	k_mutex_lock(&sd_mutex, K_FOREVER);
 	for (uint32_t i = 0; i < count; i++) {
-		if (sd_read_block(sector + i, buf + i * 512u) != 0) {
+		int rc;
+		uint8_t info = 0;
+
+		for (int a = 0; a < SD_RETRIES; a++) {
+			rc = sd_read_block(sector + i, buf + i * 512u, &info);
+			if (rc == 0) {
+				if (a > 0) {
+					LOG_WRN("read lba %u ok on try %d",
+						sector + i, a + 1);
+				}
+				break;
+			}
+		}
+		if (rc != 0) {
 			k_mutex_unlock(&sd_mutex);
+			LOG_ERR("read lba %u failed: step %d info 0x%02x",
+				sector + i, rc, info);
 			return -EIO;
 		}
 	}
@@ -308,8 +375,26 @@ static int disk_klausscpu_access_write(struct disk_info *disk,
 
 	k_mutex_lock(&sd_mutex, K_FOREVER);
 	for (uint32_t i = 0; i < count; i++) {
-		if (sd_write_block(sector + i, buf + i * 512u) != 0) {
+		int rc;
+		uint8_t info = 0;
+
+		for (int a = 0; a < SD_RETRIES; a++) {
+			rc = sd_write_block(sector + i, buf + i * 512u, &info);
+			if (rc == 0) {
+				if (a > 0) {
+					LOG_WRN("write lba %u ok on try %d",
+						sector + i, a + 1);
+				}
+				break;
+			}
+			if (rc == -4) {
+				break;	/* card still busy: a retry can't help */
+			}
+		}
+		if (rc != 0) {
 			k_mutex_unlock(&sd_mutex);
+			LOG_ERR("write lba %u failed: step %d info 0x%02x",
+				sector + i, rc, info);
 			return -EIO;
 		}
 	}
