@@ -79,8 +79,8 @@ extern void __stdout_hook_install(int (*hook)(int c));
  * arch_switch() when it leaves an ISR for another thread. */
 volatile uint32_t _klausscpu_in_isr;
 
-/* Set once the first thread exists (APPLICATION, below): until then an ISR
- * must not look at the ready queue (klausscpu_isr.h). */
+/* Set once the scheduler runs (POST_KERNEL, below): until then an ISR must
+ * not look at the ready queue (klausscpu_isr.h). */
 volatile uint32_t _klausscpu_sched_ready;
 
 /* ISR-exit scratch: the interrupted thread's saved SP, kept across the switch
@@ -322,7 +322,12 @@ static int _klausscpu_sched_ready_init(void)
     _klausscpu_sched_ready = 1;
     return 0;
 }
-SYS_INIT(_klausscpu_sched_ready_init, APPLICATION, 99);
+/* POST_KERNEL and later init functions run in the main thread with the
+ * scheduler up, and may block (net_config waits for DHCP at APPLICATION 95).
+ * The flag must be set before any of them: a thread that blocks while it is
+ * clear is never switched back in, because the timer ISR then always
+ * returns to the interrupted (idle) thread. */
+SYS_INIT(_klausscpu_sched_ready_init, POST_KERNEL, 0);
 
 /* sys_rand_get() comes from Zephyr's entropy-device generator on the TRNG
  * driver (drivers/entropy, chosen zephyr,entropy), which checks HEALTH_OK. */
