@@ -39,3 +39,11 @@ manifest:
           - mbedtls
           - tf-psa-crypto
           - tf-psa-crypto-drivers
+
+    # MicroPython (MICROPYTHON_PLAN.md): its ports/zephyr is built as the
+    # application, with the KlaussCPU glue in klausscpu-zephyr/micropython.
+    - name: micropython
+      url: https://github.com/micropython/micropython
+      revision: v1.29.0
+      path: modules/lib/micropython
+      clone-depth: 1

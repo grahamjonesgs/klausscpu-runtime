@@ -1,0 +1,9 @@
+config KLAUSSCPU_LIBC_EXTRAS
+	bool "C library additions for minimal libc (setjmp, C99 math declarations)"
+	depends on MINIMAL_LIBC
+	help
+	  Adds <alloca.h>, <unistd.h> (types only) and <setjmp.h> with setjmp/longjmp (src/setjmp.S, shared with the
+	  bare-metal programs) and extends minimal libc's <math.h> with the C99
+	  function declarations and classification macros.  The math functions
+	  themselves are not provided here; the application links an
+	  implementation (MicroPython: lib/libm_dbl).
