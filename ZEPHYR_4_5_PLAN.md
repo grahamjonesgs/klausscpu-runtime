@@ -1,9 +1,24 @@
 # Zephyr 3.7 → 4.5 migration plan
 
-Status: started 2026-11-03 on branch `zephyr-4.5` (git worktree
-`../klausscpu-runtime-zephyr45`).  Work happens on that branch in a
-second west workspace, so the 3.7 tree keeps building and validating on `main`
-until the branch merges.
+Status: **complete.**  Merged to `main` on 2026-11-04 (0286389).  The
+`zephyr-4.5` branch and its worktree are gone, and main's `zephyr-ws/` is the
+v4.5.0 tree.  Steps 1-6 and 8-10 are done.  Step 7 (SSH and HTTPS on Zephyr's
+mbedTLS stacks) is deferred by decision: ssh_shell stays on wolfSSL/wolfSSH
+(3b).  This file stays as the record of the migration and of what to recheck
+at 4.6.
+
+Later work on main, after the merge:
+- SFTP fixes (6081baa, 7dc64d9): default request sizes, the dropped-session
+  handle leak, and FatFs reentrancy, which Kconfig had silently dropped.
+- Transfer speed on crypto bitstream 1 (f2792c6, 1734066, 8cc033a): the SD
+  driver (multi-block, overlapped byte loop), one-pass GCM, and the network
+  settings (TCP_NODELAY, 64 KiB TCP windows, 128 KiB SSH window, 16 KiB
+  HTTP/TLS chunks).  SFTP uploads are ~6x faster; downloads +35-50%.
+- Crypto bitstream 2 (fused GCM) is parked: it missed timing in CPU-core
+  paths, and one-pass GCM in software gets most of its gain.  Its RTL is on
+  klaussCPU branch `crypto-gcm-fuse` and its driver on runtime branch
+  `gcm-fuse-driver` (untested on hardware; would need rebasing onto the
+  one-pass GCM in src/crypto_hw.c).
 
 Upstream facts below were checked against a v4.5.0 checkout on 2026-11-02/03.
 Recheck them before starting, and rebase onto v4.6.0 (LTS4, due April 2027)
@@ -271,7 +286,8 @@ and on QSPI as klaussCPU 27ff737; the reference is MMIO_MAP.md there.  The
 runtime driver (`src/crypto_hw.c`) and `crypto_selftest2` support it in
 runtime 9a34059.  The step 8 PSA driver builds on `aes_ctr_hw`,
 `sha256_hw_r*` and `hmac_sha256_hw_r*`.  Bitstream 2 (GCM_FUSE, GCM_DEC,
-LEN, writable GCM_TAG) waits until TLS GCM speed matters.
+LEN, writable GCM_TAG) was built as RTL 783cfe8 but missed timing and is
+parked (see Status at the top).
 
 Everything is additive, so the old map and behaviour are unchanged when the new
 registers are at their reset values.
@@ -298,6 +314,7 @@ registers are at their reset values.
 
 - RSA host-key cost on this CPU (step 6 measures it).
 - SFTP loss.  This is a user-visible feature change, not a regression in tooling.
+  (Avoided: ssh_shell stayed on wolfSSH, which has SFTP.)
 - mbedTLS's software AES-CTR + HMAC speed until step 8 lands.
 - LLEXT ABI: ssh_shell's exported symbols change when the SSH layer changes, so
   rebuild the card's extensions (`llext_sd.sh`).
