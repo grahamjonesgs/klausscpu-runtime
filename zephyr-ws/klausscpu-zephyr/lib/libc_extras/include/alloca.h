@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 
-#define alloca(size) __builtin_alloca(size)
+#ifndef alloca			/* zephyr/sys/rb.h defines it too */
+#define alloca __builtin_alloca
+#endif
 
 #endif /* KLAUSSCPU_ALLOCA_H */

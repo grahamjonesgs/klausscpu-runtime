@@ -38,3 +38,21 @@ config KLAUSSCPU_SHELL_CMDS
 	help
 	  Register filesystem and hardware commands with the Zephyr shell.
 	  Available on the UART console independently of the SSH server.
+
+config KLAUSSCPU_PYTHON
+	bool "python shell command (MicroPython)"
+	depends on KLAUSSCPU_SSH_SERVER
+	depends on KLAUSSCPU_SHELL_CMDS
+	depends on FILE_SYSTEM
+	select KLAUSSCPU_LIBC_EXTRAS
+	help
+	  MicroPython (modules/lib/micropython) as the `python` shell command:
+	  a REPL on the session, or `python file.py [args]` from the SD card
+	  (micropython/ssh, MICROPYTHON_PLAN.md).
+
+config KLAUSSCPU_PYTHON_HEAP_SIZE
+	int "MicroPython GC heap size (bytes)"
+	depends on KLAUSSCPU_PYTHON
+	default 1048576
+	help
+	  A static buffer, used by one session at a time.

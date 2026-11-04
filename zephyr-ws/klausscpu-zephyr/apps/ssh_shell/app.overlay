@@ -1,0 +1,21 @@
+/* The SD card's FatFs volume as a devicetree fstab entry.  main.c mounts it
+ * after disk_access_init; being in the fstab also lets MicroPython find it
+ * (zephyr.FileSystem('/SD:'), the `python` command).
+ *
+ * `automount` only sets FS_MOUNT_FLAG_AUTOMOUNT here
+ * (CONFIG_FS_FATFS_FSTAB_AUTOMOUNT=n in prj.conf, so Zephyr doesn't mount it
+ * at boot).  MicroPython's vfs.mount() needs the flag: without it,
+ * ports/zephyr/zephyr_filesystem.c unmounts and remounts a volume that is
+ * already mounted, under every open file in ssh_shell. */
+/ {
+	fstab {
+		compatible = "zephyr,fstab";
+
+		sdfs: sdfs {
+			compatible = "zephyr,fstab,fatfs";
+			mount-point = "/SD:";
+			disk-access;
+			automount;
+		};
+	};
+};

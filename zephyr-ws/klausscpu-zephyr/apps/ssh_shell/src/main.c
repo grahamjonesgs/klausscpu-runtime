@@ -44,13 +44,10 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 /* ── FatFS mount ─────────────────────────────────────────────────────────── */
 
-static FATFS fat_fs;
-
-static struct fs_mount_t fatfs_mnt = {
-	.type = FS_FATFS,
-	.fs_data = &fat_fs,
-	.mnt_point = "/SD:",
-};
+/* The mount (FatFs data, "/SD:") is the devicetree fstab entry (app.overlay),
+ * defined by Zephyr's fat_fs.c. */
+#define SD_FSTAB DT_NODELABEL(sdfs)
+FS_FSTAB_DECLARE_ENTRY(SD_FSTAB);
 
 static int mount_sd(void)
 {
@@ -61,7 +58,7 @@ static int mount_sd(void)
 		return rc;
 	}
 
-	rc = fs_mount(&fatfs_mnt);
+	rc = fs_mount(&FS_FSTAB_ENTRY(SD_FSTAB));
 	if (rc != 0) {
 		LOG_ERR("FatFS mount failed: %d", rc);
 		return rc;

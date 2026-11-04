@@ -1,6 +1,6 @@
 # MicroPython on KlaussCPU / Zephyr 4.5 — plan
 
-**Status: in progress.** Steps 1–4 done (2026-11-04).  The REPL runs on the emulator and on the board, with networking; next is tests (step 5).
+**Status: in progress.** Steps 1–4 and 6 done (2026-11-04).  `python` runs in ssh_shell over SSH (REPL and scripts from the SD card).  Next: tests (step 5) and extras (step 7).
 
 Goal: run Python on the board.  The first target is a MicroPython REPL on the
 UART; the second is `python` inside `ssh_shell`, with a REPL over SSH and
@@ -154,6 +154,83 @@ is `double`.  MicroPython's 64-bit build is the usual Unix one.
      `open('x.txt')` and `import foo` work on SD files.
    - On the serial console `python` runs scripts with output to the UART.  A
      REPL there needs UART input, which the shell owns; leave it for later.
+
+   *Done*, as designed, with these changes:
+   - The heap is a static 1 MiB buffer
+     (`CONFIG_KLAUSSCPU_PYTHON_HEAP_SIZE`), not a k_malloc.
+     `HEAP_MEM_POOL_ADD_SIZE_` only sets a minimum, and a static buffer
+     can't be fragmented.
+   - The transport header forward-declares `WOLFSSH`.  MicroPython's qstr
+     pass preprocesses `python_cmd.c` before the wolfSSH include paths are
+     registered.
+   - The fstab entry has `automount`, with
+     `CONFIG_FS_FATFS_FSTAB_AUTOMOUNT=n`.  Without the flag,
+     `zephyr_filesystem.c`'s `mount()` unmounts and remounts an
+     already-mounted `/SD:`.  That pulled the card out from under ssh_shell:
+     every priority-14 thread starved, and the next boot's SD init failed.
+   - Library gaps: `log2` (exact for powers of two), `mp_machine_idle`, a
+     TRNG seed for `random`, `NET_BUF_POOL_USAGE` for `modsocket.c`, and
+     devicetree.h from the config (for `zephyr_filesystem.c`).
+
+   Board results:
+   - `python file.py args` from the SD card works:
+     - `sys.argv`, and it starts in the shell's cwd;
+     - file writes the shell then sees;
+     - DNS through ssh_shell's network;
+     - `import` of a module from the SD card;
+     - a 20,000-term `sum` in 238 ms.
+   - The REPL over SSH works, and Ctrl-D returns to the shell.
+   - Ctrl-C interrupts a running loop and `time.sleep(30)`.
+   - A second session gets "python is in use".
+   - Dropping the connection mid-loop frees the interpreter for the next
+     session.
+   - `run hello.llext` still works.
+   - ssh_shell grew from about 9.9 MB to 11.4 MB, which includes the 1 MiB
+     heap.
+
+   An independent review of the concurrency code found these, now fixed and
+   re-tested on the board:
+   - **Paste:** the transport's 256-byte RX ring silently dropped pasted
+     input (an existing bug).  The ring is now 4 KB, drops are logged, and
+     the Ctrl-C hook sees every byte even when the ring is full.  A
+     1,500-character line arrives intact.
+   - **Session teardown:** a stale `done` count let `ssh_shell_release`
+     free a slot whose program was still running (an existing bug, also hit
+     `run`).  It's reset in `run_begin`, `shell_stop() == -EBUSY` counts as
+     not drained, and `ssh` is cleared under `io_lock`.
+   - **Nested interpreter:** a recursive `k_mutex` let
+     `zephyr.shell_exec('python')` re-enter the interpreter and wipe its
+     heap.  It's now an atomic flag.
+   - **DNS on the wrong thread:** the callback built Python objects on the
+     resolver's thread.  The `dns_resolve_name` wrapper now collects the
+     answers and replays them on the Python thread.
+   - **Lost output:** big or window-limited output was cut short.
+     `ssh_shell_write` now sends everything, waiting for the peer's window.
+     A 50,000-character print arrives intact.
+   - **stdin:** it could raise outside any nlr frame, which halts the
+     board, and it spun after a close.  Exceptions are now handled only
+     while code runs, and after a close running code gets `EOFError`.
+   - **Smaller fixes:**
+     - `readline_init0()` (stale history);
+     - `chdir` through the C API (a quote in the cwd);
+     - the RX hook is installed after `mp_init` (a lost close);
+     - an 8 KB C-stack margin via `mp_cstack`;
+     - `machine.idle()` through `MICROPY_PY_MACHINE_INCLUDEFILE`.
+
+   Known limitations (follow-ups):
+   - Blocking socket calls (`accept`, `recv`) can't be interrupted by
+     Ctrl-C or a disconnect.  The port's `modsocket.c` has no timeouts or
+     poll support, so the session slot is retired until the call returns.
+   - Upstream bug: `os.rename` in `zephyr_filesystem.c` renames the new
+     path onto itself (`make_path` reuses one buffer).  Worth reporting
+     upstream.
+   - Python can damage the whole system: `vfs.umount('/')` unmounts `/SD:`
+     for everyone, and `zephyr.DiskAccess` writes raw sectors.
+   - An existing issue: wolfSSH's reader thread also sends (window adjusts,
+     keepalive replies) without `io_lock`.  Heavy Python output makes the
+     overlap likelier.
+   - `python` on the serial console can't be interrupted, and blocks SSH
+     sessions from Python while it runs.
 7. **Extras (optional).**  A `klausscpu` module with the blitter, the cycle
    counter and the crypto engine.  Frozen `.mpy` modules.
 

@@ -27,7 +27,8 @@ fresh clone, from `zephyr-ws/`:
 #    venv with Zephyr's Python requirements
 python3 -m venv .venv && . .venv/bin/activate && pip install west
 west init -l klausscpu-zephyr
-west update --narrow -o=--depth=1   # zephyr/ + fatfs, lvgl, mbedtls, tf-psa-crypto(-drivers)
+west update --narrow -o=--depth=1   # zephyr/ + fatfs, lvgl, mbedtls, tf-psa-crypto(-drivers),
+                                    # and modules/lib/micropython (the `python` command)
 pip install -r zephyr/scripts/requirements-base.txt
 # The shallow clone has no tags, so the boot banner would show a hash:
 git -C zephyr fetch --depth=1 https://github.com/zephyrproject-rtos/zephyr tag v4.5.0
@@ -141,6 +142,22 @@ Add a program: drop it in `baremetal/programs/`, add its name to `EXT_DEMOS` in
 `baremetal/Makefile`. It may call any symbol exported in `ssh/llext_exports.c`
 (printf/puts/putchar/getchar, malloc family, mem*/str*, and the `__sync_*_N`
 atomics) plus the `mmio.h` helpers.
+
+## 5. Python (MicroPython) — the `python` command
+
+`ssh_shell` includes MicroPython v1.29 (`CONFIG_KLAUSSCPU_PYTHON`, source in
+`modules/lib/micropython` from west, glue in `micropython/ssh/`).  Over SSH:
+
+```text
+$ python                    # REPL; Ctrl-C interrupts, Ctrl-D exits
+$ python script.py a b      # run a script from the SD card (paths as the shell's)
+```
+
+The SD card is Python's `/`, and Python starts in the shell's cwd, so
+`open()` and `import` see SD files (also `/lib`).  One session can use Python
+at a time.  A standalone MicroPython image (REPL on the UART, for bring-up
+and tests) builds with `../tools/validate/zephyr/build.sh micropython <dir>`.
+Plan, results and caveats: `../MICROPYTHON_PLAN.md`.
 
 ## Gotchas (things that bite)
 
