@@ -23,7 +23,10 @@
 #include <stdint.h>
 
 #include <zephyr/shell/shell.h>
-#include <wolfssh/ssh.h>
+/* Only the type name is needed here (as wolfssh/ssh.h declares it), so
+ * code without the wolfSSH include paths can use this header (the `python`
+ * command's MicroPython build). */
+typedef struct WOLFSSH WOLFSSH;
 
 /* Initialise (shell_init + shell_stop) every per-slot shell instance once.
  * Call from ssh_server_start() before the listener thread is created. */
@@ -53,5 +56,27 @@ WOLFSSH *ssh_shell_ssh(const struct shell *sh);
 /* Blocking single-byte read from `sh`'s RX ring; -1 on EOF/close, or if `sh`
  * is not an SSH shell.  Used by the llext input router during `run`. */
 int ssh_shell_getc(const struct shell *sh);
+
+/* As ssh_shell_getc, but returns -EAGAIN when woken without a byte (the RX
+ * hook consumed it, e.g. Ctrl-C for Python) or when the timeout expires. */
+int ssh_shell_getc_wait(const struct shell *sh, k_timeout_t timeout);
+
+/* Input hook for a program running on a session (the `python` command):
+ * called on the connection thread with each received byte (return true to
+ * consume it, false to queue it for ssh_shell_getc), and with -1 when the
+ * session closes.  Cleared when a session is claimed. */
+typedef bool (*ssh_shell_rx_hook_t)(int c);
+void ssh_shell_set_rx_hook(const struct shell *sh, ssh_shell_rx_hook_t hook);
+
+/* Raw output to the session (no LF->CRLF), serialised with the shell's own
+ * output.  Sends all of it, waiting for the peer's window; returns len, or
+ * -EIO / -ETIMEDOUT (10 s without progress).  Dropped once the session
+ * closes.  -ENOTSUP on a non-SSH shell. */
+int ssh_shell_write(const struct shell *sh, const void *data, size_t len);
+
+/* Bracket a program that runs on the session's shell thread, so that
+ * ssh_shell_release() waits (up to 2 s) for it to unwind. */
+void ssh_shell_run_begin(const struct shell *sh);
+void ssh_shell_run_end(const struct shell *sh);
 
 #endif /* SSH_SHELL_TRANSPORT_H */

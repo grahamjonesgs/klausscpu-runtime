@@ -30,6 +30,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/ring_buffer.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/logging/log.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -44,7 +45,13 @@
 #include "shell_paths.h"
 #endif
 
-#define RX_RING_SIZE 256
+LOG_MODULE_REGISTER(ssh_shell_transport, LOG_LEVEL_INF);
+
+/* Input queued for the shell / a running program.  The reader thread doesn't
+ * block when it is full (it must keep reading for wolfSSH's window updates,
+ * which the writer may be waiting on), so it is sized for a pasted block:
+ * a terminal paste arrives as one SSH packet. */
+#define RX_RING_SIZE 4096
 
 /* ── Per-slot transport context ──────────────────────────────────────────── */
 
@@ -57,8 +64,9 @@ struct ssh_shell_ctx {
 	struct k_sem               rx_sem;   /* wakeup for ssh_shell_getc()    */
 	struct k_mutex             io_lock;  /* serialises wolfSSH_stream_send */
 	atomic_t                   open;
-	atomic_t                   running;  /* a `run` extension is executing */
-	struct k_sem               done;     /* given when that extension ends */
+	atomic_t                   running;  /* `run`/`python` is executing     */
+	struct k_sem               done;     /* given when that program ends    */
+	ssh_shell_rx_hook_t        rx_hook;  /* sees input first while set      */
 };
 
 /* ── Transport API ───────────────────────────────────────────────────────── */
@@ -190,6 +198,7 @@ const struct shell *ssh_shell_claim(int slot, WOLFSSH *ssh)
 	k_sem_reset(&c->rx_sem);
 	k_sem_reset(&c->done);
 	atomic_set(&c->running, 0);
+	c->rx_hook = NULL;
 	c->ssh = ssh;
 	atomic_set(&c->open, 1);
 #if defined(CONFIG_KLAUSSCPU_SHELL_CMDS)
@@ -218,6 +227,12 @@ bool ssh_shell_release(int slot)
 	atomic_set(&c->open, 0);
 	k_sem_give(&c->rx_sem);          /* unblock any getc() in `run` -> EOF */
 
+	ssh_shell_rx_hook_t hook = c->rx_hook;
+
+	if (hook != NULL) {
+		hook(-1);                /* e.g. interrupt running Python code */
+	}
+
 	/* If a `run` extension is still executing on the shell thread, wait for
 	 * it to unwind (it should exit promptly once getchar() returns EOF)
 	 * before the caller frees the session.  A program that ignores EOF and
@@ -226,16 +241,41 @@ bool ssh_shell_release(int slot)
 		drained = (k_sem_take(&c->done, K_SECONDS(2)) == 0);
 	}
 
-	shell_stop(ssh_shells[slot]);
+	/* -EBUSY: a command still holds the shell (a program that ignored EOF
+	 * and didn't finish in time): the session can't be freed. */
+	if (shell_stop(ssh_shells[slot]) == -EBUSY) {
+		drained = false;
+	}
+
+	/* Under io_lock, so a ssh_shell_write() in progress finishes with the
+	 * session before it goes. */
+	k_mutex_lock(&c->io_lock, K_FOREVER);
 	c->ssh = NULL;
+	k_mutex_unlock(&c->io_lock);
 	return drained;
 }
 
 void ssh_shell_feed(int slot, const uint8_t *data, size_t len)
 {
 	struct ssh_shell_ctx *c = ssh_ctxs[slot];
+	ssh_shell_rx_hook_t hook = c->rx_hook;
 
-	ring_buf_put(&c->rx_rb, data, len);
+	size_t lost = 0;
+
+	if (hook == NULL) {
+		lost = len - ring_buf_put(&c->rx_rb, data, len);
+	} else {
+		/* Every byte goes past the hook, even when the ring is full, so
+		 * a Ctrl-C behind a paste still interrupts. */
+		for (size_t i = 0; i < len; i++) {
+			if (!hook(data[i])) {
+				lost += 1 - ring_buf_put(&c->rx_rb, &data[i], 1);
+			}
+		}
+	}
+	if (lost > 0) {
+		LOG_WRN("slot %d: input ring full, %zu bytes dropped", slot, lost);
+	}
 	k_sem_give(&c->rx_sem);
 	if (c->handler != NULL) {
 		c->handler(SHELL_TRANSPORT_EVT_RX_RDY, c->context);
@@ -247,6 +287,101 @@ WOLFSSH *ssh_shell_ssh(const struct shell *sh)
 	struct ssh_shell_ctx *c = ctx_for(sh);
 
 	return c ? c->ssh : NULL;
+}
+
+void ssh_shell_set_rx_hook(const struct shell *sh, ssh_shell_rx_hook_t hook)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+
+	if (c != NULL) {
+		c->rx_hook = hook;
+	}
+}
+
+int ssh_shell_write(const struct shell *sh, const void *data, size_t len)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+
+	if (c == NULL) {
+		return -ENOTSUP;
+	}
+
+	/* wolfSSH_stream_send() sends at most a window/packet's worth and
+	 * returns WS_WINDOW_FULL (or WANT_WRITE, REKEYING) when it can't send
+	 * now; the reader thread processes the peer's window updates, so wait
+	 * and retry.  Give up after 10 s without progress (peer not reading). */
+	const uint8_t *p = data;
+	size_t left = len;
+	int64_t stalled_since = k_uptime_get();
+
+	while (left > 0) {
+		k_mutex_lock(&c->io_lock, K_FOREVER);
+		if (c->ssh == NULL || !atomic_get(&c->open)) {
+			k_mutex_unlock(&c->io_lock);
+			return (int)len;      /* session gone: drop the output */
+		}
+		int n = wolfSSH_stream_send(c->ssh, (uint8_t *)p, (word32)left);
+		int err = (n == WS_ERROR) ? wolfSSH_get_error(c->ssh) : n;
+
+		k_mutex_unlock(&c->io_lock);
+
+		if (n > 0) {
+			p += n;
+			left -= (size_t)n;
+			stalled_since = k_uptime_get();
+			continue;
+		}
+		if (err != WS_WINDOW_FULL && err != WS_WANT_WRITE &&
+		    err != WS_REKEYING && n != 0) {
+			return -EIO;
+		}
+		if (k_uptime_get() - stalled_since > 10000) {
+			return -ETIMEDOUT;
+		}
+		k_msleep(5);
+	}
+	return (int)len;
+}
+
+void ssh_shell_run_begin(const struct shell *sh)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+
+	if (c != NULL) {
+		k_sem_reset(&c->done);   /* no stale count from a previous run */
+		atomic_set(&c->running, 1);
+	}
+}
+
+void ssh_shell_run_end(const struct shell *sh)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+
+	if (c != NULL) {
+		atomic_set(&c->running, 0);
+		k_sem_give(&c->done);
+	}
+}
+
+int ssh_shell_getc_wait(const struct shell *sh, k_timeout_t timeout)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+	uint8_t ch;
+
+	if (c == NULL) {
+		return -1;
+	}
+	if (ring_buf_get(&c->rx_rb, &ch, 1) == 1) {
+		return (int)ch;
+	}
+	if (!atomic_get(&c->open)) {
+		return -1;
+	}
+	(void)k_sem_take(&c->rx_sem, timeout);
+	if (ring_buf_get(&c->rx_rb, &ch, 1) == 1) {
+		return (int)ch;
+	}
+	return atomic_get(&c->open) ? -EAGAIN : -1;
 }
 
 int ssh_shell_getc(const struct shell *sh)
@@ -294,18 +429,10 @@ static int cmd_run(const struct shell *sh, size_t argc, char **argv)
 	/* Mark the slot busy so a concurrent disconnect (ssh_shell_release on
 	 * the connection thread) waits for this program to unwind before the
 	 * session is freed. */
-	struct ssh_shell_ctx *c = ctx_for(sh);
-
-	if (c != NULL) {
-		atomic_set(&c->running, 1);
-	}
-
+	ssh_shell_run_begin(sh);
 	int rc = llext_run_from_sd(filename, sh);
 
-	if (c != NULL) {
-		atomic_set(&c->running, 0);
-		k_sem_give(&c->done);
-	}
+	ssh_shell_run_end(sh);
 
 	if (rc < 0) {
 		shell_print(sh, "Load/run failed (code %d)", rc);
