@@ -1,14 +1,14 @@
 # KlaussCPU Zephyr port
 
-Out-of-tree Zephyr 3.7 LTS port for the KlaussCPU 64-bit FPGA core on the
+Out-of-tree Zephyr 4.5 port (hardware model v2) for the KlaussCPU 64-bit FPGA core on the
 Digilent Nexys A7. Provides arch, SoC, board, drivers (UART + system timer),
 linker script, DTS bindings and toolchain integration for `clang -target klausscpu`.
 
 ## Status — `hello_world` runs end-to-end
 
 ```
-*** Booting Zephyr OS build v3.7.0 ***
-Hello World! nexys_a7
+*** Booting Zephyr OS build v4.5.0 ***
+Hello World! nexys_a7/klausscpu_nexys_a7
 ```
 
 Boots the kernel, runs the timer ISR, dispatches the main thread, and emits
@@ -45,7 +45,7 @@ Gitignored (regenerated, not in the repo):
 | Path | Recreated by |
 |---|---|
 | `zephyr-ws/build_*/` (e.g. `build_ssh`) | `west build` (compiled objects + `zephyr.elf`) |
-| `zephyr-ws/zephyr/` | `west update` (Zephyr 3.7.0 upstream) |
+| `zephyr-ws/zephyr/`, `zephyr-ws/modules/` | `west update` (Zephyr 4.5.0 upstream and its modules) |
 | `zephyr-ws/.west/` | `west init` |
 | `runtime/freertos/wolfssl/{wolfssl-src,wolfssh-src}` | `build-wolfssl.sh` / `build-wolfssh.sh` (cloned at the pinned tags) |
 | `llvm-project/build/` | building the LLVM/clang/lld toolchain |
@@ -54,8 +54,8 @@ To turn a clone into a buildable workspace (one-time, in order):
 
 1. Build the LLVM toolchain (KlaussCPU backend + clang + lld) — see the parent
    `llvm-project` README. → `build/bin/{clang,ld.lld,...}`
-2. `west init -l klausscpu-zephyr` + `west update` (fetches `zephyr/`), then
-   re-apply both patches (see [Loadable extensions](#loadable-extensions-llext--the-ssh-run-command)).
+2. `west init -l klausscpu-zephyr` + `west update` (fetches `zephyr/` and the
+   modules), then apply the vendored patches (CLAUDE.md section 1).
 3. `cd ../freertos/wolfssl && ./build-wolfssl.sh && ./build-wolfssh.sh`
    (clones wolfSSL/wolfSSH sources used as Zephyr modules).
 4. `west build` (below). The `ssh_shell` app additionally needs the wolfSSL +
@@ -68,25 +68,29 @@ at (or recreate) the workspace to compile.
 
 ## One-time setup
 
-```sh
-# From the parent directory (zephyr-ws):
-pip install --user west
-west init -l klausscpu-zephyr        # uses klausscpu-zephyr/west.yml (Zephyr v3.7.0)
-west update                          # pulls zephyr/ + modules/fs/fatfs
-```
+[CLAUDE.md](CLAUDE.md) section 1 has the exact commands: a Python venv with
+west and Zephyr's requirements, `west init -l klausscpu-zephyr`, `west update`,
+the v4.5.0 tag, and the vendored patches.
 
 `west init -l` reads the tracked manifest `klausscpu-zephyr/west.yml`, which pins
-upstream Zephyr to **v3.7.0** and imports only the `fatfs` module (the sole
-external module this minimal-libc port needs; wolfSSL/wolfSSH are supplied at
-build time via `EXTRA_ZEPHYR_MODULES`, not west). Add module names to the
-manifest's `name-allowlist` if a build reports one missing.
+upstream Zephyr to **v4.5.0** and imports only the modules the apps need: `fatfs`,
+`lvgl`, and `mbedtls` / `tf-psa-crypto` / `tf-psa-crypto-drivers` (Zephyr's own
+SSH/TLS, used only by `apps/psa_spike`).  wolfSSL/wolfSSH, which `ssh_shell`
+uses, are supplied at build time via `EXTRA_ZEPHYR_MODULES`, not west.  Add
+module names to the manifest's `name-allowlist` if a build reports one missing.
+
+The arch, SoC and board use hardware model v2 (`arch/archs.yml`,
+`soc/klausscpu/nexys_a7/soc.yml`, `boards/klausscpu/nexys_a7/board.yml`), and
+`zephyr/module.yml` declares the module as an arch/SoC/board/DTS root, so the
+`-D*_ROOT` flags in the commands below are optional.
 
 After `west update` the workspace looks like:
 ```
 zephyr-ws/
 ├── .west/                  ← west state (gitignored)
-├── zephyr/                 ← Zephyr v3.7.0 (gitignored, fetched by west)
-├── modules/                ← west modules e.g. fs/fatfs (gitignored, fetched)
+├── .venv/                  ← west + Zephyr's Python requirements (gitignored)
+├── zephyr/                 ← Zephyr v4.5.0 (gitignored, fetched by west)
+├── modules/                ← west modules: fs/fatfs, lib/gui/lvgl, crypto/* (gitignored)
 └── klausscpu-zephyr/       ← this module + west.yml manifest (tracked in git)
 ```
 
@@ -141,7 +145,7 @@ klausscc -e zephyr.elf --serial /dev/tty.usbserial-... --monitor
 The `--monitor` flag tails the UART after the load finishes; expect:
 ```
 Load Complete OK
-*** Booting Zephyr OS build v3.7.0 ***
+*** Booting Zephyr OS build v4.5.0 ***
 Hello World! nexys_a7
 ```
 
@@ -323,39 +327,38 @@ so concurrent loads are safe.
   or Kconfig aborts (`undefined symbol WOLFSSL`):
   `-DEXTRA_ZEPHYR_MODULES="$MOD;$WOLFSSL;$WOLFSSH"` where `$WOLFSSL` /
   `$WOLFSSH` point at `runtime/freertos/wolfssl/{wolfssl-src,wolfssh-src}`.
-- **Vendored Zephyr patches** (the `zephyr/` tree is git-ignored, fetched by west;
-  baseline is the **v3.7.0** release tag). After every `west update`, re-apply
-  **both** patches from the workspace root:
-  ```sh
-  git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/klausscpu-core.patch
-  git -C zephyr apply ../klausscpu-zephyr/zephyr-patches/llext-klausscpu.patch
-  ```
-  - **`klausscpu-core.patch`** — the minimal core hooks that let vanilla Zephyr
-    recognise the arch (the real arch/SOC/driver code lives in this module, not
-    the core): `include/zephyr/arch/cpu.h` includes the module's
-    `arch/klausscpu/arch.h` for `CONFIG_CPU_KLAUSSCPU`;
-    `include/zephyr/linker/linker-tool-gcc.h` selects `OUTPUT_FORMAT(elf32-klausscpu)`;
-    `include/zephyr/toolchain/common.h` sets `PERFOPT_ALIGN .balign 4`;
-    `include/zephyr/toolchain/gcc.h` defines `GEN_ABSOLUTE_SYM[_KCONFIG]` with
-    `@object` notation; `modules/fatfs/zephyr_fatfs_config.h` sets `FF_FS_NORTC 0`
-    so FatFs timestamps work (backed by the SNTP-set software wall-clock in
-    `ssh/wallclock.c`, giving real `ls` dates).
-  - **`llext-klausscpu.patch`** — LLEXT loadable-extension support:
-    `subsys/llext/Kconfig` adds `LLEXT_ELF_CLASS32`;
-    `include/zephyr/llext/elf.h` parses ELF32 under `CONFIG_64BIT` when that is set;
-    `subsys/llext/llext_link.c` accepts `SHT_RELA` on the generic path;
-    `subsys/llext/llext_load.c` recovers the merged LLVM string table, treats an
-    identical SHSTRTAB/STRTAB alias as non-overlapping, puts LLVM's
-    `SHF_MERGE`/`SHF_STRINGS` sections (`.rodata.str1.1`) in the read-only region
-    with `.rodata`, starts each code/data region's copy at its file offset rounded
-    down to its largest section alignment (and refuses a section that would still
-    be misaligned; `subsys/llext/llext_mem.c` allocates the region at least that
-    aligned), and honours a new
-    `keep_symtab` load-param flag (`include/zephyr/llext/llext.h`) so `main` can be
-    resolved by name after load.  Without the alignment rounding, `.rodata`
-    followed a 1-aligned string section at its file distance: a `.text` 4 bytes
-    shorter left bst.llext's `long long` key table 4 bytes off 8, and the
-    force-aligning 64-bit loads read the wrong doublewords.
+- **Vendored patches** (`zephyr/` and `modules/` are git-ignored, fetched by
+  west; baseline is the **v4.5.0** release tag).  After every `west update`,
+  re-apply them as CLAUDE.md section 1 shows.
+  - **`klausscpu-core.patch`**: the minimal core hooks that let Zephyr
+    recognise the arch (the arch/SoC/driver code itself lives in this module).
+    It adds klausscpu to the per-arch dispatch in `include/zephyr/arch/cpu.h`,
+    `arch_inlines.h` and `exception.h` (4.x `#error`s on an unlisted arch),
+    `linker/linker-tool-gcc.h` (`OUTPUT_FORMAT(elf32-klausscpu)`),
+    `toolchain/common.h` (`ALIGN`, `PERFOPT_ALIGN`) and `toolchain/gcc.h`
+    (`GEN_ABSOLUTE_SYM[_KCONFIG]` with `@object` notation).  FatFs timestamps
+    come from `CONFIG_FS_FATFS_HAS_RTC` now, not a patch.
+  - **`llext-klausscpu.patch`**: what LLEXT still lacks upstream.
+    - `LLEXT_ELF_CLASS32` (ELF32 objects under `CONFIG_64BIT`).
+    - The `keep_symtab` load parameter, so `main` can be resolved by name
+      after load.
+    - The `arch_elf_check_header()` hook, which refuses an extension built
+      for another C ABI.
+    - No alignment pre-padding from a `.bss`'s nominal file offset.  Without
+      it, test_fp.llext's 4-byte aligned `.bss` landed 3 bytes off and
+      trapped.
+    v4.5 already handles RELA, LLVM's shared string table, SHF_MERGE sections
+    and region alignment, which earlier versions of this patch did.
+  - **`cbprintf-klausscpu.patch`**: 8-byte vararg slots for cbprintf
+    packaging (LOG_* / printk with several arguments).
+  - **`minimal-libc-strcasecmp.patch`**: minimal libc has only
+    `strncasecmp`, and the net shell's `dns.c` calls `strcasecmp`.
+  - **`ssh-ecdsa-host-key.patch`**: ECDSA P-256 host keys for Zephyr's own SSH
+    server (`apps/psa_spike` only; `ssh_shell` uses wolfSSH).
+  - **`tf-psa-crypto-klausscpu.patch`** (applied to `modules/crypto/tf-psa-crypto`):
+    - 64-bit bignum limbs (RSA 2.8x faster);
+    - X25519 public keys through Everest;
+    - the dispatch hooks for the KlaussCPU PSA driver (`drivers/crypto`).
 
   Not patched / not needed: `samples/hello_world/{prj.conf,src/main.c}` are
   incidental bring-up scratch — discard with `git -C zephyr checkout samples/hello_world`.

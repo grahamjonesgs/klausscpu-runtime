@@ -66,10 +66,11 @@ cd freertos/wolfssl && ./build-wolfssl.sh && ./build-wolfssh.sh && cd ../..
 
 # 6. Zephyr workspace — for the Zephyr port (see zephyr-ws/klausscpu-zephyr/README.md)
 cd zephyr-ws
-pip install --user west
+python3 -m venv .venv && . .venv/bin/activate && pip install west
 west init -l klausscpu-zephyr
-west update                              # fetches zephyr/ (v3.7.0) + west modules
-# then re-apply the two vendored Zephyr patches (see the Zephyr README)
+west update --narrow -o=--depth=1        # fetches zephyr/ (v4.5.0) + west modules
+pip install -r zephyr/scripts/requirements-base.txt
+# then apply the vendored patches (zephyr-ws/klausscpu-zephyr/CLAUDE.md section 1)
 cd ..
 ```
 
