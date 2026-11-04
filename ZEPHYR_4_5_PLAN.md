@@ -131,7 +131,7 @@ On a throwaway app built from Zephyr's SSH sample with `SHELL_BACKEND_SSH`, meas
 
 Decision gate: continue with step 7, or keep wolfSSL on 4.5 and revisit at 4.6.
 
-### Step 7: move SSH and HTTPS to Zephyr's stacks
+### Step 7: move SSH and HTTPS to Zephyr's stacks (deferred, see 3b)
 - SSH: replace `ssh_server.c`, `ssh_shell_transport.c` and `sshkeys.c` with
   Zephyr's SSH server and `SHELL_BACKEND_SSH`.  Generate the RSA host key once,
   store it on the SD card (PSA export), and load it at boot.  Keep the `admin`
@@ -223,9 +223,20 @@ Reading:
   - the ECDSA signature, 69 ms;
   - X25519, 2 x 13 ms.
 - A Montgomery-multiplier block in hardware would mainly help the signature.
-- **Still to decide (yours):** go ahead with step 7 (Zephyr SSH: ~0.5 s
-  logins, no SFTP, ECDSA or RSA host key persisted on the SD card), or keep
-  wolfSSL on 4.5, which works now and keeps SFTP and 65 ms logins.
+- **Decided (2026-11-04): stay on wolfSSL/wolfSSH on 4.5.**  It is fast
+  (~65 ms logins), works on 4.5 (the compat shims in ssh/compat and
+  user_settings.h), uses the crypto block through ssh/wolfssl_hw.c, and has
+  SFTP.  Zephyr documents wolfSSH as a supported external module.  Steps
+  7-8's mbedTLS work stays on this branch, unused by ssh_shell:
+  apps/psa_spike, drivers/crypto, ssh-ecdsa-host-key.patch and the
+  TF-PSA-Crypto patch.
+- **Revisit the move when Zephyr's SSH has:**
+  - SFTP;
+  - a fast host key (Ed25519 once TF-PSA-Crypto implements EdDSA, or
+    ECDSA upstream, e.g. from ssh-ecdsa-host-key.patch);
+  - logins close to wolfSSH's: the ~70 ms per message after key exchange
+    is not explained yet.
+  Recheck at Zephyr 4.6 (LTS4).
 
 ## 4. Hardware changes for this migration
 
