@@ -165,6 +165,9 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
  * wolfSSH z_fds slot open forever; a few of those and every open fails. */
 #define WOLFSSH_STOREHANDLE
 #define WOLFSSH_MAX_SFTP_RW 8192   /* max SFTP read/write chunk                */
-#define DEFAULT_WINDOW_SZ (128 * 128)  /* 16 KiB SSH window — SFTP throughput  */
+/* SSH channel receive window.  At 16 KiB a client could send only 16 KiB per
+ * WINDOW_ADJUST round trip, so SFTP uploads ran at ~90-170 KiB/s with the
+ * CPU mostly idle.  128 KiB is wolfSSH's own default. */
+#define DEFAULT_WINDOW_SZ (128 * 1024)
 
 #endif /* WOLFSSL_USER_SETTINGS_H */

@@ -19,6 +19,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "wolfssl_hw.h"
+#include <klausscpu_prof.h>
 
 /* ── MMIO register definitions (crypto blocks) ──────────────────────────── */
 
@@ -196,6 +197,8 @@ static void hw_ctr(Aes *aes, uint8_t *out, const uint8_t *in, word32 sz,
 
 /* ── wolfCrypt crypto callback ───────────────────────────────────────────── */
 
+static int hw_cipher(wc_CryptoInfo *info);
+
 static int hw_crypto_cb(int devId, wc_CryptoInfo *info, void *ctx)
 {
 	(void)devId;
@@ -205,6 +208,28 @@ static int hw_crypto_cb(int devId, wc_CryptoInfo *info, void *ctx)
 		return CRYPTOCB_UNAVAILABLE;
 	}
 
+	uint64_t t0 = kprof_now();
+	int rc = hw_cipher(info);
+
+	if (rc != CRYPTOCB_UNAVAILABLE) {
+		uint64_t dt = kprof_now() - t0;
+
+		if (info->cipher.type == WC_CIPHER_AES_GCM) {
+			klausscpu_prof.gcm_cyc += dt;
+			klausscpu_prof.gcm_bytes += info->cipher.enc ?
+				info->cipher.aesgcm_enc.sz : info->cipher.aesgcm_dec.sz;
+			klausscpu_prof.gcm_calls++;
+		} else {
+			klausscpu_prof.ctr_cyc += dt;
+			klausscpu_prof.ctr_bytes += info->cipher.aesctr.sz;
+			klausscpu_prof.ctr_calls++;
+		}
+	}
+	return rc;
+}
+
+static int hw_cipher(wc_CryptoInfo *info)
+{
 	uint64_t key_lo, key_hi;
 
 #ifdef WOLFSSL_AES_COUNTER

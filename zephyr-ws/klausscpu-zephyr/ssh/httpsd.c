@@ -25,6 +25,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+#include "ssh_server.h"
+#endif
 #include <zephyr/net/net_if.h>
 #include <errno.h>
 
@@ -38,7 +41,9 @@
 LOG_MODULE_REGISTER(httpsd, LOG_LEVEL_INF);
 
 #define HTTPS_PORT        443
-#define XFER_SZ           2048
+/* One TLS record per send: 16 KiB is TLS's maximum plaintext record (at
+ * 2 KiB, each record paid its header, tag and GCM setup eight times over). */
+#define XFER_SZ           16384
 
 /* TLS handshakes on KlaussCPU's 64-bit stack frames are heavy — the wolfSSH
  * connection threads use 16 KiB for the same reason (see ssh_server.c). */
@@ -134,6 +139,9 @@ static void httpsd_conn_entry(void *p1, void *p2, void *p3)
 	struct zsock_timeval tv = { .tv_sec = HTTPSD_RECV_TIMEOUT_S, .tv_usec = 0 };
 
 	(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+	klausscpu_set_nodelay(cfd);	/* ssh_server.c: why */
+#endif
 
 	/* Point wolfSSL's I/O at this slot's stable fd storage. */
 	wolfSSL_SetIOReadCtx(ssl, &httpsd_conn_sock[slot]);

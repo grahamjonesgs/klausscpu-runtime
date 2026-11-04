@@ -26,6 +26,9 @@ typedef int (*ssh_auth_cb_t)(const char *user, const char *password,
 int ssh_server_start(void);
 void ssh_server_set_auth_cb(ssh_auth_cb_t cb);
 
+/* TCP_NODELAY on an accepted socket (see ssh_server.c). */
+void klausscpu_set_nodelay(int fd);
+
 #ifdef __cplusplus
 }
 #endif

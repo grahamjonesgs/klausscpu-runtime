@@ -24,6 +24,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/socket.h>
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+#include "ssh_server.h"
+#endif
 #include <zephyr/fs/fs.h>
 #ifdef CONFIG_LLEXT
 #include <zephyr/llext/symbol.h>
@@ -42,7 +45,10 @@ LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 #define DOC_ROOT         "/SD:"
 #define DOC_ROOT_LEN     (sizeof(DOC_ROOT) - 1)
 #define REQ_MAX          1024              /* request line + headers we read */
-#define XFER_SZ          2048              /* file/dir transfer chunk */
+/* File transfer chunk: one fs_read (a multi-block SD read when the clusters
+ * are contiguous) and, over HTTPS, one TLS record (16 KiB is TLS's maximum).
+ * At 2 KiB each read and each record paid its fixed costs eight times over. */
+#define XFER_SZ          16384
 #define URL_MAX          256
 
 #define HTTPD_STACK_SIZE 8192
@@ -458,6 +464,52 @@ bool httpd_serve(struct httpd_conn *c)
 		return c->keepalive;
 	}
 
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+	/* /__prof/start, /__prof/stop: `bench prof` without an SSH login in
+	 * the measured window. */
+	if (strcmp(url, "/__prof/start") == 0 || strcmp(url, "/__prof/stop") == 0) {
+		extern void bench_prof_start(void);
+		extern size_t bench_prof_report(char *out, size_t n);
+		static char rep[1536];
+
+		if (url[8] == 's' && url[9] == 't' && url[10] == 'a') {
+			bench_prof_start();
+			httpd_send(c, "200 OK", "text/plain", "started\n");
+		} else {
+			(void)bench_prof_report(rep, sizeof(rep));
+			httpd_send(c, "200 OK", "text/plain", rep);
+		}
+		return c->keepalive;
+	}
+#endif
+	/* /__zero/<bytes>: that many bytes from RAM, to measure the network
+	 * (and TLS on :443) without the SD card. */
+	if (strncmp(url, "/__zero/", 8) == 0 && !c->head) {
+		unsigned long total = strtoul(url + 8, NULL, 10);
+
+		if (total > 64ul * 1024 * 1024) {
+			total = 64ul * 1024 * 1024;	/* cap: 64 MiB */
+		}
+		char hdr[128];
+
+		(void)snprintk(hdr, sizeof(hdr),
+			       "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+			       "Content-Length: %lu\r\nConnection: %s\r\n\r\n",
+			       total, c->keepalive ? "keep-alive" : "close");
+		if (send_str(c, hdr) == 0) {
+			memset(c->xfer, 0, c->xfer_sz);
+			while (total > 0) {
+				size_t n = total < c->xfer_sz ? total : c->xfer_sz;
+
+				if (send_all(c, c->xfer, n) != 0) {
+					break;
+				}
+				total -= n;
+			}
+		}
+		return c->keepalive;
+	}
+
 	/* Loadable backends: a registered handler may own this URL by prefix
 	 * (e.g. /api/* from apibackend.llext).  If one handles it we're done;
 	 * otherwise fall through to file serving. */
@@ -557,6 +609,9 @@ static void httpd_conn_entry(void *p1, void *p2, void *p3)
 	struct zsock_timeval tv = { .tv_sec = HTTPD_RECV_TIMEOUT_S, .tv_usec = 0 };
 
 	(void)zsock_setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#ifdef CONFIG_KLAUSSCPU_SSH_SERVER
+	klausscpu_set_nodelay(cfd);	/* ssh_server.c: why */
+#endif
 
 	struct httpd_conn conn = {
 		.io_ctx = &httpd_conn_sock[slot],   /* stable per-slot fd storage */

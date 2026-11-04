@@ -291,6 +291,23 @@ cleanup:
 	}
 }
 
+/* Disable Nagle on accepted connections (SSH, HTTP, HTTPS).  An SFTP READ
+ * reply of 32781 bytes leaves as a full SSH packet plus a 13-byte one, and
+ * Nagle holds that small segment until the peer ACKs, which Linux delays by
+ * up to 40 ms: the CPU sat ~30% idle during downloads.  Every write here is
+ * a complete message, so nothing is gained by coalescing.
+ * klausscpu_tcp_nodelay = 0 keeps Nagle (for A/B measurements). */
+int klausscpu_tcp_nodelay = 1;
+
+void klausscpu_set_nodelay(int fd)
+{
+	int one = 1;
+
+	if (klausscpu_tcp_nodelay) {
+		(void)zsock_setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+	}
+}
+
 /* ── Listener thread ──────────────────────────────────────────────────────── */
 
 static WOLFSSH_CTX *s_ctx;
@@ -346,6 +363,7 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 		}
 
 		LOG_INF("SSH connection accepted");
+		klausscpu_set_nodelay(client);
 
 		/* Find a free connection slot */
 		int slot = -1;
