@@ -60,7 +60,12 @@ void aes_gcm_encrypt(const uint8_t *iv,
                      uint8_t tag_out[16]);
 
 /* One-shot GCM decrypt + verify.
- * Returns 0 if tag matches, -1 if authentication failed (output undefined). */
+ * Returns 0 if tag matches, -1 if authentication failed (pt is zeroed).
+ *
+ * With CTR mode (AES_CAP_CTR|INC32) both run in one pass, the GHASH unit
+ * working alongside the AES unit.  Decrypt then writes pt before the tag is
+ * known, so on failure an in-place (pt == ct) buffer has lost its
+ * ciphertext as well. */
 int  aes_gcm_decrypt(const uint8_t *iv,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *ct, uint8_t *pt, size_t len,
@@ -113,6 +118,10 @@ uint32_t sha_hw_caps(void);
  * caller can use its remaining bytes on the next call. */
 void aes_ctr_hw(uint8_t ctr[16], const uint8_t *in, uint8_t *out, size_t len,
                 int inc32, uint8_t ks_tail[16]);
+
+/* 1 (default): aes_gcm_* run CTR and GHASH in one overlapped pass when the
+ * bitstream has CTR mode; 0: the older two-pass path, for comparisons. */
+extern int aes_gcm_single_pass;
 
 /* ── SHA-256 with state save/restore (needs SHA_CAP_RESTORE) ─────────────── */
 

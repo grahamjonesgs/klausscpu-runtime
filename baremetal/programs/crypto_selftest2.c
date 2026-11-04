@@ -122,6 +122,47 @@ static void ctr_case(const char *name, const uint8_t start[16], size_t len, int 
     }
 }
 
+/* AES-GCM known answers (McGrew & Viega test cases 2-4; TC4 has a partial
+ * final block and 20 bytes of AAD), encrypt and decrypt. */
+static void gcm_kat(const char *name, const char *k, const char *ivh,
+                    const char *ah, size_t alen, const char *ph,
+                    const char *ch, size_t n, const char *th) {
+    uint8_t key[16], iv[12], a[20], p[64], c[64], t[16], got[64], gt[16];
+    char nm[64];
+    from_hex(k, key, 16); from_hex(ivh, iv, 12);
+    from_hex(ah, a, alen); from_hex(ph, p, n); from_hex(ch, c, n);
+    from_hex(th, t, 16);
+    set_key(key);
+    aes_gcm_encrypt(iv, alen ? a : NULL, alen, p, got, n, gt);
+    snprintf(nm, sizeof nm, "%s encrypt ciphertext", name);
+    check(nm, got, c, n);
+    snprintf(nm, sizeof nm, "%s encrypt tag", name);
+    check(nm, gt, t, 16);
+    memset(got, 0xA5, sizeof got);
+    int rc = aes_gcm_decrypt(iv, alen ? a : NULL, alen, c, got, n, t);
+    snprintf(nm, sizeof nm, "%s decrypt", name);
+    check_true(nm, rc == 0 && memcmp(got, p, n) == 0);
+}
+
+static void test_gcm_kats(void) {
+    static const char z16[] = "00000000000000000000000000000000";
+    static const char k3[] = "feffe9928665731c6d6a8f9467308308";
+    static const char iv3[] = "cafebabefacedbaddecaf888";
+    static const char p3[] =
+        "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
+        "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255";
+    static const char c3[] =
+        "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e"
+        "21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985";
+    gcm_kat("GCM TC2", z16, "000000000000000000000000", "", 0, z16,
+            "0388dace60b6a392f328c2b971b2fe78", 16,
+            "ab6e47d42cec13bdf53a67b21257bddf");
+    gcm_kat("GCM TC3", k3, iv3, "", 0, p3, c3, 64,
+            "4d5c2af327cd64a62cf35abd2ba6fab4");
+    gcm_kat("GCM TC4", k3, iv3, "feedfacedeadbeeffeedfacedeadbeefabaddad2", 20,
+            p3, c3, 60, "5bc94fbc3221a5db94fae95ae7121a47");
+}
+
 static void test_aes_ctr_mode(void) {
     printf("\n=== AES CTR mode (AES_CAP=0x%x) ===\n", (unsigned)aes_hw_caps());
     if ((aes_hw_caps() & (AES_CAP_CTR | AES_CAP_INC32)) != (AES_CAP_CTR | AES_CAP_INC32)) {
@@ -195,6 +236,8 @@ static void test_aes_ctr_mode(void) {
         if (aes_gcm_decrypt(iv, aad, 20, out_hw, out_ref, n, tag) == 0) ok = 0;
     }
     check_true("GCM round trips and tamper checks, lengths 0..4096", ok);
+    test_gcm_kats();
+    check_true("AES_MODE back to 0 after GCM", REG_AES_MODE == 0);
 }
 
 /* ── SHA RESTORE ─────────────────────────────────────────────────────────── */

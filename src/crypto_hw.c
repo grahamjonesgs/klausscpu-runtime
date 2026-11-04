@@ -299,10 +299,112 @@ static void ghash_block(const uint8_t *data, size_t len) {
     gcm_ghash_block(lo, hi);
 }
 
+/* One pass of GCM on CTR mode with the GHASH unit running alongside: the AES
+ * unit works on block i while GHASH absorbs the ciphertext of block i-1
+ * (encrypt; OUT of the previous block) or of block i itself (decrypt; IN).
+ * The two units are independent, so this overlaps them without the fused
+ * mode of crypto bitstream 2.  On entry H is loaded, the AAD is hashed and the
+ * CTR registers hold J0+1 with MODE = CTR|INC32. */
+static void gcm_ctr_ghash(const uint8_t *in, uint8_t *out, size_t len, int dec) {
+    uint64_t p0 = 0, p1 = 0;      /* the block GHASH still owes (encrypt) */
+    int pending = 0;
+
+    while (len >= 16) {
+        uint64_t i0 = ld64(in), i1 = ld64(in + 8);
+        REG_AES_IN0 = i0;
+        REG_AES_IN1 = i1;                    /* starts the CTR block */
+        if (dec) { p0 = i0; p1 = i1; pending = 1; }
+        if (pending) {
+            gcm_wait_done();
+            REG_GCM_X0 = p0;
+            REG_GCM_X1 = p1;
+            REG_GCM_CTRL = GCM_CTRL_GO;      /* overlaps the AES block */
+        }
+        aes_wait_out();
+        uint64_t o0 = REG_AES_OUT0, o1 = REG_AES_OUT1;
+        st64(out, o0);
+        st64(out + 8, o1);
+        if (!dec) { p0 = o0; p1 = o1; pending = 1; }
+        else pending = 0;
+        in += 16; out += 16; len -= 16;
+    }
+    if (pending) {
+        gcm_wait_done();
+        REG_GCM_X0 = p0;
+        REG_GCM_X1 = p1;
+        REG_GCM_CTRL = GCM_CTRL_GO;
+    }
+    if (len > 0) {
+        uint8_t blk[16] = {0}, o[16];
+        memcpy(blk, in, len);
+        REG_AES_IN0 = ld64(blk);
+        REG_AES_IN1 = ld64(blk + 8);
+        aes_wait_out();
+        st64(o,     REG_AES_OUT0);
+        st64(o + 8, REG_AES_OUT1);
+        memcpy(out, o, len);
+        /* GHASH the partial block zero-padded: ciphertext bytes only. */
+        const uint8_t *c = dec ? blk : o;
+        uint8_t h[16] = {0};
+        memcpy(h, c, len);
+        gcm_wait_done();
+        gcm_ghash_block(ld64(h), ld64(h + 8));
+    }
+    gcm_wait_done();
+    REG_AES_MODE = 0;
+}
+
+int aes_gcm_single_pass = 1;
+
+static int gcm_ctr_caps(void) {
+    return aes_gcm_single_pass && (aes_hw_caps() & (AES_CAP_CTR | AES_CAP_INC32)) == (AES_CAP_CTR | AES_CAP_INC32);
+}
+
+/* H, E_K(J0) and the AAD for a CTR-mode GCM; leaves CTR = J0+1 in CTR mode. */
+static void gcm_ctr_setup(const uint8_t *iv, const uint8_t *aad, size_t aad_len,
+                          uint64_t *m0, uint64_t *m1) {
+    aes_wait();
+    REG_AES_MODE = 0;
+    REG_AES_IN0 = 0; REG_AES_IN1 = 0;
+    REG_AES_CTRL = AES_CTRL_GO | AES_CTRL_ENC;
+    aes_wait();
+    REG_GCM_H0 = REG_AES_OUT0;
+    REG_GCM_H1 = REG_AES_OUT1;
+    REG_GCM_CTRL = GCM_CTRL_RESET;
+    for (size_t off = 0; off < aad_len; off += 16)
+        ghash_block(aad + off, (aad_len - off >= 16) ? 16 : (aad_len - off));
+
+    /* E_K(J0) as a CTR block with IN = 0; CTR is then J0+1. */
+    uint8_t j0[16] = {0};
+    memcpy(j0, iv, 12); j0[15] = 0x01;
+    REG_AES_CTR0 = ld64(j0);
+    REG_AES_CTR1 = ld64(j0 + 8);
+    REG_AES_MODE = AES_MODE_CTR | AES_MODE_INC32;
+    REG_AES_IN0 = 0;
+    REG_AES_IN1 = 0;
+    aes_wait_out();
+    *m0 = REG_AES_OUT0;
+    *m1 = REG_AES_OUT1;
+}
+
+static void gcm_ctr_tag(size_t aad_len, size_t len, uint64_t m0, uint64_t m1,
+                        uint8_t tag[16]) {
+    gcm_ghash_block(bswap64((uint64_t)aad_len * 8), bswap64((uint64_t)len * 8));
+    st64(tag,     REG_GCM_TAG0 ^ m0);
+    st64(tag + 8, REG_GCM_TAG1 ^ m1);
+}
+
 void aes_gcm_encrypt(const uint8_t *iv,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *pt, uint8_t *ct, size_t len,
                      uint8_t tag_out[16]) {
+    if (gcm_ctr_caps()) {
+        uint64_t m0, m1;
+        gcm_ctr_setup(iv, aad, aad_len, &m0, &m1);
+        gcm_ctr_ghash(pt, ct, len, 0);
+        gcm_ctr_tag(aad_len, len, m0, m1, tag_out);
+        return;
+    }
     /* 1. Compute H = AES_K(0^128) and load into GHASH unit. */
     REG_AES_IN0 = 0; REG_AES_IN1 = 0;
     REG_AES_CTRL = AES_CTRL_GO | AES_CTRL_ENC;
@@ -378,6 +480,18 @@ int aes_gcm_decrypt(const uint8_t *iv,
                     const uint8_t *ct, uint8_t *pt, size_t len,
                     const uint8_t tag_in[16]) {
     uint8_t computed_tag[16];
+    if (gcm_ctr_caps()) {
+        /* One pass: pt is written before the tag is known and wiped if it
+         * doesn't match. */
+        uint64_t m0, m1;
+        gcm_ctr_setup(iv, aad, aad_len, &m0, &m1);
+        gcm_ctr_ghash(ct, pt, len, 1);
+        gcm_ctr_tag(aad_len, len, m0, m1, computed_tag);
+        uint8_t diff = 0;
+        for (int i = 0; i < 16; i++) diff |= computed_tag[i] ^ tag_in[i];
+        if (diff) { memset(pt, 0, len); return -1; }
+        return 0;
+    }
     /* GCM decrypt: GHASH over CT, then CTR-decrypt CT→PT. */
     /* 1. H and J0. */
     REG_AES_IN0 = 0; REG_AES_IN1 = 0;

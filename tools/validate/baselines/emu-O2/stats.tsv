@@ -3,8 +3,8 @@ blit_capture	nohalt	10680
 blit_selftest	15025333	20224
 bst	104197	14616
 crypto	127300	15064
-crypto_selftest2	181694	44168
-crypto_selftest	nohalt	31304
+crypto_selftest2	181694	49600
+crypto_selftest	nohalt	33400
 crypto_test	nohalt	16176
 dhrystone	154542970	14520
 eth_test	nohalt	17376
