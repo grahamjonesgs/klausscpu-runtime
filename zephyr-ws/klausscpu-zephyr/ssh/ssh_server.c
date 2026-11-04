@@ -156,6 +156,49 @@ static bool conn_busy[SSH_MAX_CONNS];
 static bool conn_used[SSH_MAX_CONNS];   /* slot's k_thread ever created */
 static struct k_mutex conn_mutex;
 
+#ifdef WOLFSSH_SFTP
+/* Blocking SFTP server loop: serve requests until the peer disconnects.
+ *
+ * wolfSSH_SFTP_read() reports "not finished yet" as WS_FATAL_ERROR, with the
+ * reason in wolfSSH_get_error(), so the return code alone can't tell a retry
+ * from a real error.  The common case is a reply larger than the peer's
+ * maximum channel packet: OpenSSH's default 32 KiB READ gets a 32781-byte DATA
+ * reply against a 32768-byte packet limit, wolfSSH sends it in two pieces and
+ * returns WANT_WRITE after the first.  Treating that as fatal closed every
+ * default-size `sftp get`.  The handling follows wolfSSH's own wolfsshd. */
+static void sftp_serve(WOLFSSH *ssh, int slot)
+{
+	for (;;) {
+		int rc = wolfSSH_SFTP_read(ssh);
+		int err = wolfSSH_get_error(ssh);
+
+		if (rc == WS_SUCCESS || rc == WS_REKEYING ||
+		    err == WS_WANT_READ || err == WS_WANT_WRITE ||
+		    err == WS_CHAN_RXD || err == WS_REKEYING) {
+			continue;   /* a pending reply or request continues */
+		}
+		if (err == WS_WINDOW_FULL) {
+			/* The peer's window is used up: process incoming messages
+			 * (its WINDOW_ADJUST, or more pipelined requests, which
+			 * wolfSSH queues for the next read) and then retry. */
+			rc = wolfSSH_worker(ssh, NULL);
+			err = wolfSSH_get_error(ssh);
+			if (rc == WS_SUCCESS || rc == WS_CHAN_RXD ||
+			    rc == WS_REKEYING || err == WS_WANT_READ ||
+			    err == WS_WANT_WRITE || err == WS_WINDOW_FULL ||
+			    err == WS_CHAN_RXD) {
+				continue;
+			}
+		}
+		if (err != WS_EOF && err != WS_SUCCESS) {
+			LOG_INF("SFTP session ended rc=%d err=%d (slot %d)",
+				rc, err, slot);
+		}
+		return;
+	}
+}
+#endif
+
 static void ssh_conn_entry(void *p1, void *p2, void *p3)
 {
 	struct conn_args *ca = p1;
@@ -185,12 +228,7 @@ static void ssh_conn_entry(void *p1, void *p2, void *p3)
 	if (rc == WS_SFTP_COMPLETE) {
 		LOG_INF("SFTP session established (slot %d)", slot);
 
-		/* Blocking SFTP server loop: process requests until the peer
-		 * disconnects (read returns something other than success/want). */
-		do {
-			rc = wolfSSH_SFTP_read(ssh);
-		} while (rc == WS_SUCCESS || rc == WS_WANT_READ ||
-			 rc == WS_WANT_WRITE);
+		sftp_serve(ssh, slot);
 
 		/* The shell was never claimed, so `safe` stays true and cleanup
 		 * frees the session + closes the socket. */

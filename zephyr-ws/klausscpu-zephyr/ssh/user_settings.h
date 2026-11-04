@@ -160,6 +160,10 @@ int klausscpu_trng_seed(unsigned char *output, unsigned int sz);
  * minimal-libc config doesn't provide (SFTP doesn't need it).  SFTP covers the
  * file-transfer use case (Cyberduck). */
 #define NO_WOLFSSL_DIR             /* use wolfSSH's dir handling, not wolfSSL's */
+/* Track open SFTP file handles so wolfSSH_free() closes them when a peer
+ * drops mid-transfer.  Without it a dropped session keeps its FatFs file and
+ * wolfSSH z_fds slot open forever; a few of those and every open fails. */
+#define WOLFSSH_STOREHANDLE
 #define WOLFSSH_MAX_SFTP_RW 8192   /* max SFTP read/write chunk                */
 #define DEFAULT_WINDOW_SZ (128 * 128)  /* 16 KiB SSH window — SFTP throughput  */
 
