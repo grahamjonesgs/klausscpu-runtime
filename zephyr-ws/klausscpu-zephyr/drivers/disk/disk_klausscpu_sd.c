@@ -12,6 +12,7 @@
 #include <zephyr/device.h>
 #include <zephyr/storage/disk_access.h>
 #include <zephyr/logging/log.h>
+#include <klausscpu_prof.h>
 
 LOG_MODULE_REGISTER(disk_klausscpu_sd, CONFIG_DISK_KLAUSSCPU_SD_LOG_LEVEL);
 
@@ -48,6 +49,73 @@ static uint8_t spi_xfer(uint8_t tx)
 	while (REG_SD_STATUS & SD_STATUS_BUSY) {
 	}
 	return (uint8_t)REG_SD_DATA;
+}
+
+/* Data-block loops.  The controller latches each received byte into DATA
+ * when the byte completes, separately from its shift register, so the read
+ * loop can start byte i+1 before reading byte i: the CPU's per-byte work then
+ * overlaps the 32-cycle transfer instead of following it.  If byte i+1
+ * finished before byte i was read, it would silently replace it (the data
+ * CRC isn't checked).  Interrupts are off for each start+read pair (DI/EI,
+ * ~3 cycles), but an instruction-fetch miss (~54 cycles to DDR) can still
+ * stall the read past the window.  So STATUS is read after DATA: if the bus
+ * is already idle, byte i+1 may have landed first, and the block fails with
+ * -5 to be retried; the last retry uses the plain loop.  A wrong byte always
+ * implies that idle reading, so detection is complete; a false alarm costs
+ * one retry.  Both loops end with the bus idle.  klausscpu_sd_pipeline = 0
+ * selects the plain loops (A/B). */
+int klausscpu_sd_pipeline = 1;
+
+static int sd_rx_block(uint8_t *buf, int pipe)
+{
+	if (!pipe) {
+		for (int i = 0; i < 512; i++) {
+			buf[i] = spi_xfer(0xFF);
+		}
+		return 0;
+	}
+	int late = 0;
+
+	REG_SD_DATA = 0xFF;
+	for (int i = 0; i < 511; i++) {
+		unsigned int key = irq_lock();
+
+		while (REG_SD_STATUS & SD_STATUS_BUSY) {
+		}
+		REG_SD_DATA = 0xFF;			/* start byte i+1 */
+		uint8_t b = (uint8_t)REG_SD_DATA;	/* byte i (latched) */
+		uint32_t st = REG_SD_STATUS;		/* i+1 still shifting? */
+
+		irq_unlock(key);
+		buf[i] = b;
+		late |= !(st & SD_STATUS_BUSY);
+	}
+	while (REG_SD_STATUS & SD_STATUS_BUSY) {
+	}
+	buf[511] = (uint8_t)REG_SD_DATA;
+	if (late) {
+		klausscpu_prof.sd_rd_late++;
+		return -5;
+	}
+	return 0;
+}
+
+static void sd_tx_block(const uint8_t *buf)
+{
+	if (!klausscpu_sd_pipeline) {
+		for (int i = 0; i < 512; i++) {
+			spi_xfer(buf[i]);
+		}
+		return;
+	}
+	/* Nothing to read back: wait for the bus, start the byte, move on. */
+	for (int i = 0; i < 512; i++) {
+		while (REG_SD_STATUS & SD_STATUS_BUSY) {
+		}
+		REG_SD_DATA = buf[i];
+	}
+	while (REG_SD_STATUS & SD_STATUS_BUSY) {
+	}
 }
 
 static void cs_assert(void)
@@ -187,7 +255,7 @@ static uint32_t blk_arg(uint32_t lba)
 /* Single-block read (CMD17).  Returns 0, or a negative step code:
  * -1 command rejected (*info = R1), -2 no data token in time,
  * -3 data error token (*info = token). */
-static int sd_read_block(uint32_t lba, uint8_t *buf, uint8_t *info)
+static int sd_read_block(uint32_t lba, uint8_t *buf, uint8_t *info, int pipe)
 {
 	cs_assert();
 	uint8_t r1 = sd_cmd(17, blk_arg(lba), 0xFF);
@@ -217,13 +285,12 @@ static int sd_read_block(uint32_t lba, uint8_t *buf, uint8_t *info)
 		return -3;
 	}
 
-	for (int i = 0; i < 512; i++) {
-		buf[i] = spi_xfer(0xFF);
-	}
+	int rc = sd_rx_block(buf, pipe);
+
 	spi_xfer(0xFF);
 	spi_xfer(0xFF);
 	cs_deassert();
-	return 0;
+	return rc;
 }
 
 /* Single-block write (CMD24).  Returns 0, or -1 command rejected (*info =
@@ -243,9 +310,7 @@ static int sd_write_block(uint32_t lba, const uint8_t *buf, uint8_t *info)
 	spi_xfer(0xFF);
 	spi_xfer(0xFE);
 
-	for (int i = 0; i < 512; i++) {
-		spi_xfer(buf[i]);
-	}
+	sd_tx_block(buf);
 	spi_xfer(0xFF);
 	spi_xfer(0xFF);
 
@@ -268,6 +333,138 @@ static int sd_write_block(uint32_t lba, const uint8_t *buf, uint8_t *info)
 	}
 	cs_deassert();
 	return 0;
+}
+
+/* ── Multi-block transfers (CMD18 / CMD25) ──────────────────────────────── */
+/*
+ * One command for a run of sectors instead of one per sector: a read pays the
+ * card's access latency once, and a write lets the card program the run as
+ * one sequential operation (ACMD23 pre-erases it).  FatFs hands over runs
+ * whenever a file's clusters are contiguous, e.g. SFTP's 32 KiB requests.
+ */
+
+/* Wait for a data token: 0 = 0xFE, -2 = none in time, -3 = error token. */
+static int sd_wait_token(uint8_t *info)
+{
+	int64_t end = k_uptime_get() + SD_TOKEN_MS;
+	uint8_t t;
+
+	while ((t = spi_xfer(0xFF)) == 0xFF) {
+		if (k_uptime_get() >= end) {
+			return -2;
+		}
+	}
+	if (t != 0xFE) {
+		*info = t;
+		return -3;
+	}
+	return 0;
+}
+
+/* Wait out a busy period (MISO held low): 0, or -4 if still busy. */
+static int sd_wait_not_busy(uint32_t ms)
+{
+	int64_t end = k_uptime_get() + ms;
+
+	while (spi_xfer(0xFF) == 0x00) {
+		if (k_uptime_get() >= end) {
+			return -4;
+		}
+	}
+	return 0;
+}
+
+/* CMD12 ends a multi-block read.  It goes out while the card is still
+ * streaming data, so no ready wait first; the byte after the command is a
+ * stuff byte, then R1, then a busy period (R1b). */
+static void sd_stop_read(void)
+{
+	spi_xfer(0x40 | 12);
+	spi_xfer(0); spi_xfer(0); spi_xfer(0); spi_xfer(0);
+	spi_xfer(0x61);
+	spi_xfer(0xFF);
+	for (int i = 0; i < 8; i++) {
+		if ((spi_xfer(0xFF) & 0x80) == 0) {
+			break;
+		}
+	}
+	(void)sd_wait_not_busy(SD_WBUSY_MS);
+}
+
+static int sd_read_multi(uint32_t lba, uint8_t *buf, uint32_t n, uint8_t *info)
+{
+	cs_assert();
+	uint8_t r1 = sd_cmd(18, blk_arg(lba), 0xFF);
+
+	if (r1 != 0x00) {
+		*info = r1;
+		cs_deassert();
+		return -1;
+	}
+	int rc = 0;
+
+	for (uint32_t b = 0; b < n; b++, buf += 512) {
+		rc = sd_wait_token(info);
+		if (rc != 0) {
+			break;
+		}
+		rc = sd_rx_block(buf, klausscpu_sd_pipeline);
+		if (rc != 0) {
+			break;
+		}
+		spi_xfer(0xFF);
+		spi_xfer(0xFF);
+	}
+	sd_stop_read();
+	cs_deassert();
+	return rc;
+}
+
+static int sd_write_multi(uint32_t lba, const uint8_t *buf, uint32_t n,
+			  uint8_t *info)
+{
+	cs_assert();
+	/* Pre-erase hint; ignored if unsupported.  If the write then fails and
+	 * the per-block fallback fails too, sectors past the failure may be
+	 * left erased rather than holding their old data. */
+	(void)sd_acmd(23, n);
+	uint8_t r1 = sd_cmd(25, blk_arg(lba), 0xFF);
+
+	if (r1 != 0x00) {
+		*info = r1;
+		cs_deassert();
+		return -1;
+	}
+	int rc = 0;
+
+	for (uint32_t b = 0; b < n; b++, buf += 512) {
+		spi_xfer(0xFF);
+		spi_xfer(0xFC);			/* multi-block data token */
+		sd_tx_block(buf);
+		spi_xfer(0xFF);
+		spi_xfer(0xFF);
+		uint8_t resp = spi_xfer(0xFF) & 0x1F;
+
+		if (resp != 0x05) {
+			*info = resp;
+			rc = -3;
+			break;
+		}
+		rc = sd_wait_not_busy(SD_WBUSY_MS);
+		if (rc != 0) {
+			break;
+		}
+	}
+	/* The card ignores the stop token while busy (it would stay in
+	 * receive-data state and refuse every later command), so wait first,
+	 * as ChaN's reference driver does, also after an error response. */
+	(void)sd_wait_not_busy(SD_WBUSY_MS);
+	spi_xfer(0xFD);				/* stop transmission token */
+	spi_xfer(0xFF);
+	int brc = sd_wait_not_busy(SD_WBUSY_MS);
+
+	cs_deassert();
+	return rc != 0 ? rc : brc;
 }
 
 static int sd_read_csd(uint8_t out[16])
@@ -299,6 +496,12 @@ got_csd:
 /* ── Zephyr disk_access API ──────────────────────────────────────────────── */
 
 static struct k_mutex sd_mutex;
+
+struct klausscpu_prof klausscpu_prof;
+
+/* Multi-block CMD18/CMD25 for runs of sectors (1); 0 = one command per
+ * sector, for A/B measurements (`bench opt sd_multi`). */
+int klausscpu_sd_multiblock = 1;
 
 static int disk_klausscpu_init(const struct device *dev)
 {
@@ -338,13 +541,31 @@ static int disk_klausscpu_access_read(struct disk_info *disk, uint8_t *buf,
 		return -ENODEV;
 	}
 
+	uint64_t t0 = kprof_now();
+
 	k_mutex_lock(&sd_mutex, K_FOREVER);
+	if (count > 1 && klausscpu_sd_multiblock) {
+		int rc;
+		uint8_t info = 0;
+
+		for (int a = 0; a < SD_RETRIES; a++) {
+			rc = sd_read_multi(sector, buf, count, &info);
+			if (rc == 0) {
+				goto read_done;
+			}
+		}
+		LOG_WRN("multi-block read lba %u+%u failed (step %d info 0x%02x);"
+			" retrying per block", sector, count, rc, info);
+	}
 	for (uint32_t i = 0; i < count; i++) {
 		int rc;
 		uint8_t info = 0;
 
 		for (int a = 0; a < SD_RETRIES; a++) {
-			rc = sd_read_block(sector + i, buf + i * 512u, &info);
+			/* The last try avoids the pipelined loop (see
+			 * sd_rx_block) in case it keeps reading late. */
+			rc = sd_read_block(sector + i, buf + i * 512u, &info,
+					   klausscpu_sd_pipeline && a < SD_RETRIES - 1);
 			if (rc == 0) {
 				if (a > 0) {
 					LOG_WRN("read lba %u ok on try %d",
@@ -360,7 +581,11 @@ static int disk_klausscpu_access_read(struct disk_info *disk, uint8_t *buf,
 			return -EIO;
 		}
 	}
+read_done:
 	k_mutex_unlock(&sd_mutex);
+	klausscpu_prof.sd_rd_cyc += kprof_now() - t0;
+	klausscpu_prof.sd_rd_sec += count;
+	klausscpu_prof.sd_rd_calls++;
 	return 0;
 }
 
@@ -373,7 +598,22 @@ static int disk_klausscpu_access_write(struct disk_info *disk,
 		return -ENODEV;
 	}
 
+	uint64_t t0 = kprof_now();
+
 	k_mutex_lock(&sd_mutex, K_FOREVER);
+	if (count > 1 && klausscpu_sd_multiblock) {
+		int rc;
+		uint8_t info = 0;
+
+		for (int a = 0; a < SD_RETRIES; a++) {
+			rc = sd_write_multi(sector, buf, count, &info);
+			if (rc == 0) {
+				goto write_done;
+			}
+		}
+		LOG_WRN("multi-block write lba %u+%u failed (step %d info 0x%02x);"
+			" retrying per block", sector, count, rc, info);
+	}
 	for (uint32_t i = 0; i < count; i++) {
 		int rc;
 		uint8_t info = 0;
@@ -398,7 +638,11 @@ static int disk_klausscpu_access_write(struct disk_info *disk,
 			return -EIO;
 		}
 	}
+write_done:
 	k_mutex_unlock(&sd_mutex);
+	klausscpu_prof.sd_wr_cyc += kprof_now() - t0;
+	klausscpu_prof.sd_wr_sec += count;
+	klausscpu_prof.sd_wr_calls++;
 	return 0;
 }
 
