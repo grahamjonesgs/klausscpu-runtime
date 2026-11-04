@@ -42,14 +42,12 @@ static int uart_klausscpu_poll_in(const struct device *dev, unsigned char *c)
     return 0;
 }
 
+/* Bytes go out unchanged, as the UART API expects: uart_console (printk) and
+ * the shell add their own '\r' before '\n', and MicroPython's raw REPL needs
+ * exact bytes. */
 static void uart_klausscpu_poll_out(const struct device *dev, unsigned char c)
 {
     ARG_UNUSED(dev);
-    if (c == '\n') {
-        while (REG_UART_STATUS & UART_STATUS_TX_BUSY) {
-        }
-        REG_UART_TX = '\r';
-    }
     while (REG_UART_STATUS & UART_STATUS_TX_BUSY) {
     }
     REG_UART_TX = c;
