@@ -1,0 +1,44 @@
+ports/zephyr/zephyr_filesystem.c (MicroPython v1.29.0), two fixes.  Applied
+to a copy at configure time by micropython/ssh/CMakeLists.txt.
+
+- os.rename() renamed the new path onto itself.  zephyr_fs_make_path()
+  returns the object's shared buffer, so the second call overwrote the
+  first path.
+- vfs.umount() of a system automount (ssh_shell's /SD:, Python's `/`)
+  called fs_unmount() and pulled the volume from under the system: the
+  log backend's open file went bad, and its retry loop (write_log_to_file
+  returning 0, log_output_write() calling again) spun the log thread
+  forever and starved the shells.  extmod/vfs_basic.py starts with
+  vfs.umount("/").  mount() already leaves such a mount alone; umount()
+  now does too.
+
+--- a/zephyr_filesystem.c
++++ b/zephyr_filesystem.c
+@@ -538,7 +538,10 @@
+ 
+ static mp_obj_t zephyr_fs_rename(mp_obj_t vfs_in, mp_obj_t path_in, mp_obj_t path_out) {
+     zephyr_fs_obj_t *self = MP_OBJ_TO_PTR(vfs_in);
+-    const char *old_path = zephyr_fs_make_path(self, path_in);
++    // zephyr_fs_make_path() returns the object's shared buffer, which the
++    // second call overwrites: copy the first path out before making it.
++    const char *old_path = mp_obj_str_get_str(
++        mp_obj_new_str_from_cstr(zephyr_fs_make_path(self, path_in)));
+     const char *new_path = zephyr_fs_make_path(self, path_out);
+     int err;
+ 
+@@ -645,6 +648,15 @@
+     zephyr_fs_obj_t *self = MP_OBJ_TO_PTR(self_in);
+     int err;
+ 
++    // A system automount (fstab `automount`) belongs to the system, as in
++    // mount() above: unmounting it would pull the volume from under every
++    // other user's open files.  vfs.umount() then only removes it from
++    // Python's mount table.
++    if (sys_dnode_is_linked(&self->mount->node) &&
++        (self->mount->flags & FS_MOUNT_FLAG_AUTOMOUNT) != 0) {
++        return mp_const_none;
++    }
++
+     err = fs_unmount(self->mount);
+     if (err < 0) {
+         mp_raise_msg_varg(&mp_type_OSError,

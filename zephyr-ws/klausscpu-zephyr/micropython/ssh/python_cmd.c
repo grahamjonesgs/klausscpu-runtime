@@ -52,6 +52,9 @@ static volatile bool py_closed;		/* the SSH session went away  */
  * reinitialise the running interpreter's heap. */
 static atomic_t py_busy;
 
+/* The thread running Python, for socket_wrap.c; NULL when none. */
+k_tid_t klausscpu_py_thread;
+
 /* The GC heap: static rather than k_malloc'd, so it is always there and
  * the system heap (wolfSSL, net, FatFs) can't fragment it. */
 static uint8_t py_heap[CONFIG_KLAUSSCPU_PYTHON_HEAP_SIZE] __aligned(16);
@@ -248,24 +251,15 @@ static const char *vfs_path(const char *zephyr_path)
 	return zephyr_path;
 }
 
-static int run_python(const struct shell *sh, size_t argc, char **argv,
-		      uint8_t *heap, size_t heap_size)
+/* One interpreter lifetime: init, run, deinit.  Returns true when it ended
+ * with a soft reset (Ctrl-D in the raw REPL), after which the caller starts
+ * a fresh one, as a MicroPython board does; tools such as run-tests.py and
+ * mpremote rely on that.  Ctrl-D in the normal REPL leaves `python`. */
+static bool py_lifetime(const struct shell *sh, size_t argc, char **argv,
+			uint8_t *heap, size_t heap_size, int *status)
 {
-	int status = 0;
+	bool soft_reset = false;
 	char path[SHELL_PATH_MAX];
-
-	/* Stack: from here down to the bottom of this (shell) thread's stack,
-	 * less MICROPY_STACK_CHECK_MARGIN for the C code Python calls into
-	 * (print -> wolfSSH -> crypto -> sockets).  This frame is also the top
-	 * of the GC's stack scan. */
-	volatile char top;
-	struct k_thread *self = k_current_get();
-	size_t avail = (uintptr_t)&top - self->stack_info.start;
-
-	if (avail <= 2 * MICROPY_STACK_CHECK_MARGIN) {
-		return -ENOMEM;
-	}
-	mp_cstack_init_with_top((void *)&top, avail);
 
 	gc_init(heap, heap + heap_size);
 	mp_init();
@@ -285,7 +279,7 @@ static int run_python(const struct shell *sh, size_t argc, char **argv,
 	 * directory name works). */
 	if (!exec_str("import vfs, zephyr\n"
 		      "vfs.mount(zephyr.FileSystem('" SD_PREFIX "'), '/')\n")) {
-		status = -EIO;
+		*status = -EIO;
 		goto out;
 	}
 	nlr_buf_t nlr;
@@ -308,10 +302,17 @@ static int run_python(const struct shell *sh, size_t argc, char **argv,
 	} else {
 		mp_obj_list_append(mp_sys_argv, MP_OBJ_NEW_QSTR(MP_QSTR_));
 		for (;;) {
-			int r = (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL)
-				? pyexec_raw_repl() : pyexec_friendly_repl();
+			bool raw = (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL);
+			int r = raw ? pyexec_raw_repl() : pyexec_friendly_repl();
 
-			if (r != 0 || py_closed) {
+			if (py_closed) {
+				break;
+			}
+			if (r & PYEXEC_FORCED_EXIT) {
+				soft_reset = raw;	/* raw: reset; friendly: leave */
+				break;
+			}
+			if (r != 0) {
 				break;
 			}
 		}
@@ -323,6 +324,30 @@ out:
 	}
 	gc_sweep_all();
 	mp_deinit();
+	return soft_reset;
+}
+
+static int run_python(const struct shell *sh, size_t argc, char **argv,
+		      uint8_t *heap, size_t heap_size)
+{
+	int status = 0;
+
+	/* Stack: from here down to the bottom of this (shell) thread's stack,
+	 * less MICROPY_STACK_CHECK_MARGIN for the C code Python calls into
+	 * (print -> wolfSSH -> crypto -> sockets).  This frame is also the top
+	 * of the GC's stack scan. */
+	volatile char top;
+	struct k_thread *self = k_current_get();
+	size_t avail = (uintptr_t)&top - self->stack_info.start;
+
+	if (avail <= 2 * MICROPY_STACK_CHECK_MARGIN) {
+		return -ENOMEM;
+	}
+	mp_cstack_init_with_top((void *)&top, avail);
+
+	while (py_lifetime(sh, argc, argv, heap, heap_size, &status)) {
+		mp_hal_stdout_tx_strn("MPY: soft reboot\r\n", 18);
+	}
 	return status;
 }
 
@@ -342,7 +367,10 @@ static int cmd_python(const struct shell *sh, size_t argc, char **argv)
 		ssh_shell_run_begin(sh);
 	}
 
+	klausscpu_py_thread = k_current_get();
 	int rc = run_python(sh, argc, argv, py_heap, sizeof(py_heap));
+
+	klausscpu_py_thread = NULL;
 
 	if (rc == -ENOMEM) {
 		shell_error(sh, "python: not enough stack on this thread");

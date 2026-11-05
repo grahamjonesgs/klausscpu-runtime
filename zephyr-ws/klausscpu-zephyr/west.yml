@@ -47,3 +47,12 @@ manifest:
       revision: v1.29.0
       path: modules/lib/micropython
       clone-depth: 1
+
+    # micropython-lib at the commit MicroPython v1.29.0 pins (its
+    # lib/micropython-lib submodule): frozen modules and the test suite's
+    # unittest (tools/validate/zephyr/mp_tests.sh).
+    - name: micropython-lib
+      url: https://github.com/micropython/micropython-lib
+      revision: ee4bb8ff139e24c42b739935fbd8ec7c4d061e02
+      path: modules/lib/micropython-lib
+      clone-depth: 1

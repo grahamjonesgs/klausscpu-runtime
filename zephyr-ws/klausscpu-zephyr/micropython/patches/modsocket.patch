@@ -1,0 +1,58 @@
+ports/zephyr/modsocket.c (MicroPython v1.29.0):
+- MP_STREAM_POLL in the socket ioctl, so select.poll()/select.select() and
+  asyncio streams work on sockets (they raised EINVAL);
+- the SOCK_RAW constant.
+Applied to a copy at configure time by micropython/ssh/CMakeLists.txt.
+
+--- a/modsocket.c
++++ b/modsocket.c
+@@ -348,6 +348,41 @@
+             }
+             return 0;
+ 
++        case MP_STREAM_POLL: {
++            // select.poll()/select.select() and asyncio streams on sockets.
++            if (socket->ctx == -1) {
++                return MP_STREAM_POLL_NVAL;
++            }
++            struct zsock_pollfd pfd = { .fd = socket->ctx, .events = 0 };
++            if (arg & MP_STREAM_POLL_RD) {
++                pfd.events |= ZSOCK_POLLIN;
++            }
++            if (arg & MP_STREAM_POLL_WR) {
++                pfd.events |= ZSOCK_POLLOUT;
++            }
++            int res = zsock_poll(&pfd, 1, 0);
++            if (res < 0) {
++                *errcode = errno;
++                return MP_STREAM_ERROR;
++            }
++            mp_uint_t ret = 0;
++            if (res > 0) {
++                if (pfd.revents & ZSOCK_POLLIN) {
++                    ret |= MP_STREAM_POLL_RD;
++                }
++                if (pfd.revents & ZSOCK_POLLOUT) {
++                    ret |= MP_STREAM_POLL_WR;
++                }
++                if (pfd.revents & ZSOCK_POLLERR) {
++                    ret |= MP_STREAM_POLL_ERR;
++                }
++                if (pfd.revents & ZSOCK_POLLHUP) {
++                    ret |= MP_STREAM_POLL_HUP;
++                }
++            }
++            return ret;
++        }
++
+         default:
+             *errcode = MP_EINVAL;
+             return MP_STREAM_ERROR;
+@@ -485,6 +520,7 @@
+ 
+     { MP_ROM_QSTR(MP_QSTR_SOCK_STREAM), MP_ROM_INT(SOCK_STREAM) },
+     { MP_ROM_QSTR(MP_QSTR_SOCK_DGRAM), MP_ROM_INT(SOCK_DGRAM) },
++    { MP_ROM_QSTR(MP_QSTR_SOCK_RAW), MP_ROM_INT(SOCK_RAW) },
+ 
+     { MP_ROM_QSTR(MP_QSTR_SOL_SOCKET), MP_ROM_INT(1) },
+     { MP_ROM_QSTR(MP_QSTR_SO_REUSEADDR), MP_ROM_INT(2) },

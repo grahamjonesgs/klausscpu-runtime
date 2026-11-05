@@ -37,7 +37,11 @@
 #define MICROPY_PERSISTENT_CODE_LOAD (1)
 #define MICROPY_LONGINT_IMPL        (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL          (MICROPY_FLOAT_IMPL_DOUBLE)
-#define MICROPY_FLOAT_FORMAT_IMPL   (MICROPY_FLOAT_FORMAT_IMPL_EXACT)
+/* Float <-> string: the default APPROX.  EXACT relies on long double being
+ * wider than double, which it isn't here (LP64, long double = double):
+ * only 66% of repr() strings parsed back to the same float
+ * (tests/float/float_format_accuracy.py). */
+#define MICROPY_FLOAT_FORMAT_IMPL   (MICROPY_FLOAT_FORMAT_IMPL_APPROX)
 #define MICROPY_PY_BUILTINS_COMPLEX (1)
 #define MICROPY_PY_BUILTINS_HELP    (1)
 #define MICROPY_PY_BUILTINS_HELP_TEXT klausscpu_help_text

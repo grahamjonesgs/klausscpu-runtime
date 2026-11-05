@@ -16,8 +16,10 @@
 #undef MICROPY_FLOAT_IMPL
 #define MICROPY_FLOAT_IMPL (MICROPY_FLOAT_IMPL_DOUBLE)
 
-/* Shortest round-trip float repr, as CPython prints (default is "approx"). */
-#define MICROPY_FLOAT_FORMAT_IMPL (MICROPY_FLOAT_FORMAT_IMPL_EXACT)
+/* Float <-> string: the default APPROX.  EXACT relies on long double being
+ * wider than double, which it isn't here (long double = double): only 66% of
+ * repr() strings parsed back to the same float. */
+#define MICROPY_FLOAT_FORMAT_IMPL (MICROPY_FLOAT_FORMAT_IMPL_APPROX)
 
 /* The port assumes 32-bit; this is LP64, so sys.maxsize is 2**63 - 1. */
 #undef MP_SSIZE_MAX
