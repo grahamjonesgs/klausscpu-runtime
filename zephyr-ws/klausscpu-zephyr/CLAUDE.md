@@ -157,6 +157,18 @@ The SD card is Python's `/`, and Python starts in the shell's cwd, so
 `open()` and `import` see SD files (also `/lib`).  One session can use Python
 at a time.  A standalone MicroPython image (REPL on the UART, for bring-up
 and tests) builds with `../tools/validate/zephyr/build.sh micropython <dir>`.
+`asyncio` is frozen in (`micropython/ssh/manifest.py`).  Fixes to upstream
+port files live in `micropython/patches/` and are applied to build-time
+copies; the fetched tree stays clean.
+
+Testing against the board (ssh_shell running):
+
+```sh
+../tools/validate/zephyr/mp_tests.sh <outdir>         # MicroPython's test suite
+python3 modules/lib/micropython/tools/pyboard.py \
+  -d exec:"python3 ../tools/validate/zephyr/ssh_python.py" script.py
+```
+
 Plan, results and caveats: `../MICROPYTHON_PLAN.md`.
 
 ## Gotchas (things that bite)

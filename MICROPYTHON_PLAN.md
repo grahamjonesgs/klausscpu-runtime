@@ -1,6 +1,6 @@
 # MicroPython on KlaussCPU / Zephyr 4.5 — plan
 
-**Status: in progress.** Steps 1–4 and 6 done (2026-11-04).  `python` runs in ssh_shell over SSH (REPL and scripts from the SD card).  Next: tests (step 5) and extras (step 7).
+**Status: steps 1–6 done (2026-11-05).**  `python` runs in ssh_shell over SSH (REPL and scripts from the SD card) and passes MicroPython's test suite (see step 5).  Step 7 (extras) is optional.
 
 Goal: run Python on the board.  The first target is a MicroPython REPL on the
 UART; the second is `python` inside `ssh_shell`, with a REPL over SSH and
@@ -73,10 +73,12 @@ is `double`.  MicroPython's 64-bit build is the usual Unix one.
    - Soft-float `+ - * /` and parsing are bit-exact with CPython.
    - Minimal libc `sqrt` was 1 ulp off; musl's replaces it (`--wrap=sqrt`).
    - musl `exp(1)` is 1 ulp from glibc's.  That's library accuracy, not a bug.
-   - `repr()` can differ from CPython in the last digit (`1/7` prints
-     `0.14285714285714284`).  The string still round-trips to the same bits.
-     It's upstream `py/formatfloat.c` when `long double` is `double`, as on
-     ARM.
+   - `repr()` differed from CPython in the last digit (`1/7` printed
+     `0.14285714285714284`).  That came from `MICROPY_FLOAT_FORMAT_IMPL_EXACT`,
+     which needs a `long double` wider than `double`.  Here they're the same
+     size.  Step 5's `float_format_accuracy` test showed that only 66% of
+     reprs parsed back to the same float.  Both builds now use the default
+     `APPROX`, which passes every float test.
 4. **Board bring-up.**  REPL over the UART: Ctrl-C (also during
    `time.sleep`, which the emulator can't show because it fast-forwards idle
    time), paste mode, `machine.mem32` reads (PERF_CYCLES), sockets over the
@@ -120,6 +122,77 @@ is `double`.  MicroPython's 64-bit build is the usual Unix one.
    through `tests/run-tests.py --target` style raw-REPL execution, and record
    pass/fail.  Add `micropython` to the Zephyr validation suite (build and
    emulator boot).
+
+   *Done.*
+   - **How the tests run:** `tools/validate/zephyr/ssh_python.py` logs in
+     over SSH, starts `python` and relays bytes, so the board's `python`
+     works as a `run-tests.py`/`pyboard.py` target
+     (`-t exec:"python3 ssh_python.py"`).  `python` soft-resets on Ctrl-D in
+     the raw REPL, as a board does; the tools rely on it.
+   - **`mp_tests.sh`** runs the default suite, putting micropython-lib's
+     `unittest` on the SD card first.  It compares the failures with
+     `mp_tests-known-fail.txt`.
+   - **Now: 816 of 816 pass, 195 skipped** (6.5 minutes, one SSH session;
+     `mp_tests-known-fail.txt` is empty).  `validate.sh zephyr` passes.
+   - **First run: 777 of 782 passed, 229 skipped.**
+     - The three float failures were the EXACT formatter (step 3).
+     - `select_poll_basic` failed because the socket stream had no
+       `MP_STREAM_POLL`.
+     - `socket_badconstructor` failed for lack of `SOCK_RAW`.
+   - **Fixes:**
+     - APPROX float formatting;
+     - `micropython/patches/modsocket.patch` (poll, `SOCK_RAW`), applied
+       to a build-time copy with `zephyr_filesystem.patch` (the
+       `os.rename` fix);
+     - `asyncio` frozen in (`micropython/ssh/manifest.py`; micropython-lib
+       is a west project pinned at v1.29.0's commit);
+     - `Q(/lib)`: `sys.path` held `"_slash_lib"`.
+   - **Dropped sessions (an existing ssh_shell bug):** a long run lost its
+     SSH session at a random point, once after ~550 tests.  wolfSSH's
+     `stream_read` sends too (a WINDOW_ADJUST every 64 KB of input, replies
+     to keepalives, a rekey), and the reader thread did so without
+     `io_lock`, racing the shell thread's output on wolfSSH's one output
+     buffer and sequence number.  The reader now holds `io_lock` around
+     `wolfSSH_stream_read` and drops it only in the socket recv callback
+     while it waits for data (`ssh_server.c` `ssh_recv`), keeping its own
+     `ssh->error` across that wait (writers set it, and the KEX code reads
+     it back).  `run` extensions' output goes through the same lock
+     (`ssh_shell_send`), and the shell's own output now waits out a full
+     window or a rekey instead of losing the rest of the message.  An
+     independent review checked the locking against wolfSSH's code.
+   - **Socket wrapper:** `recv()` on an unconnected socket waited forever
+     (poll never reports it ready) where Zephyr raises ENOTCONN.  The
+     wrapper now waits only for a connected stream (`accept`: a listening
+     one).
+   - **Test tooling:** `pyboard`'s `ProcessToSerial` spins forever on a
+     closed pipe, so a dropped session hung the runner, and `mp_tests.sh`
+     then reported a pass.  `ssh_python.py` now logs why a session ended
+     and logs in again; `mp_tests.sh` fails a run that doesn't finish
+     (killing it after 10 minutes without output) and checks that
+     ssh_shell still answers afterwards.
+   - **The board stopped answering after a run.**  New logins got a prompt
+     and nothing more, and the console and `/SD:/log` went silent.
+     `extmod/vfs_basic.py` starts with `vfs.umount("/")`, and Python's `/`
+     is the system's `/SD:`: `zephyr.FileSystem.umount()` called
+     `fs_unmount()` on it, and the next soft reset mounted it again.  The
+     log backend's open file was then invalid.  Its write failed while the
+     file still existed, so `write_log_to_file()` returned 0 and
+     `log_output_write()` called it again, forever.  The log thread spun at
+     priority 14 (the shells' priority, no time slicing) and starved every
+     shell.  `umount()` now leaves a system automount alone, as `mount()`
+     already did (`patches/zephyr_filesystem.patch`).  Two tests in one
+     session reproduce it on a fresh boot: `vfs_basic.py`, then any test.
+     The log backend's retry loop is a Zephyr bug worth reporting: it
+     spins on any persistent write error.  (A first `mp_tests.sh` check
+     reported this hang on every run, even when the board answered:
+     `sshrun.sh` exits 255 when the board closes the connection, which it
+     always does.  The check now reads the output.)
+   - **An existing ssh_shell bug** made the first SSH session after boot
+     get no banner or prompt until the user typed.  The shell thread had
+     auto-started after transport init's `shell_stop()`, so `claim`'s
+     `shell_start()` refused.
+   - **Validation:** `validate.sh zephyr` builds and boots the standalone
+     image and runs `python` in its ssh_shell session.
 6. **`ssh_shell` integration.**  Build the MicroPython core as a library inside
    `ssh_shell`.  Add a `python [file]` shell command that runs a script from
    `/SD:` or a REPL on the SSH channel, with stdio routed through the shell
@@ -218,17 +291,21 @@ is `double`.  MicroPython's 64-bit build is the usual Unix one.
      - `machine.idle()` through `MICROPY_PY_MACHINE_INCLUDEFILE`.
 
    Known limitations (follow-ups):
-   - Blocking socket calls (`accept`, `recv`) can't be interrupted by
-     Ctrl-C or a disconnect.  The port's `modsocket.c` has no timeouts or
-     poll support, so the session slot is retired until the call returns.
-   - Upstream bug: `os.rename` in `zephyr_filesystem.c` renames the new
-     path onto itself (`make_path` reuses one buffer).  Worth reporting
-     upstream.
-   - Python can damage the whole system: `vfs.umount('/')` unmounts `/SD:`
-     for everyone, and `zephyr.DiskAccess` writes raw sectors.
-   - An existing issue: wolfSSH's reader thread also sends (window adjusts,
-     keepalive replies) without `io_lock`.  Heavy Python output makes the
-     overlap likelier.
+   - Fixed in step 5:
+     - Blocking `accept`/`recv`/`send` are now interruptible.
+       `micropython/ssh/socket_wrap.c` wraps the `z_impl_zsock_*` calls:
+       on the Python thread, for blocking sockets, they poll in 100 ms
+       slices and handle Ctrl-C or a close between them.
+     - `os.rename` (upstream bug: `make_path` reuses one buffer) is fixed
+       by `patches/zephyr_filesystem.patch`.  Both upstream bugs, rename
+       and socket poll, are worth reporting to MicroPython.
+   - `connect()` still blocks for the TCP timeout.
+   - Fixed in step 5: `vfs.umount('/')` unmounted `/SD:` for everyone (see
+     step 5).  It now only leaves Python's mount table.
+   - Python can still damage the whole system: `zephyr.DiskAccess` writes
+     raw sectors.
+   - Fixed in step 5: wolfSSH's reader thread also sends (window adjusts,
+     keepalive replies, a rekey) and did so without `io_lock`; see step 5.
    - `python` on the serial console can't be interrupted, and blocks SSH
      sessions from Python while it runs.
 7. **Extras (optional).**  A `klausscpu` module with the blitter, the cycle
