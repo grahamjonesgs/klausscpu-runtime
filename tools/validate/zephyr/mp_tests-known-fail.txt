@@ -1,0 +1,3 @@
+# MicroPython tests (tests/run-tests.py, default set) expected to fail on the
+# board's `python`, one per line: <test path>  <reason>.  mp_tests.sh fails
+# on any other failure and reports listed tests that pass.

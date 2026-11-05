@@ -15,7 +15,9 @@
 # board  run each ELF on the board under flock $BOARD_LOCK (<outdir>/board/):
 #        the plain apps until their timeout; the GUI apps with a VNC grab once
 #        their VNC server is up (<app>.png, needs python3 PIL); ssh_shell with
-#        an SSH session (ssh_session.txt).  Checks expect-board.txt.
+#        an SSH session (ssh_session.txt) that also runs `python`.  Checks
+#        expect-board.txt.  (MicroPython's own test suite is separate:
+#        mp_tests.sh.)
 #        Board address: KLAUSSCPU_BOARD_IP (default 192.168.68.59).
 # Prints PASS/FAIL per check; exits 1 if any failed.
 set -uo pipefail
@@ -24,7 +26,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ $# -ge 1 ] || die "usage: zephyr/suite.sh <outdir> [build] [emu] [board]"
 OUT=$(realpath -m "$1"); shift
 STEPS=${*:-build emu board}
-APPS=${ZEPHYR_APPS:-"hello dbg_synchronization irq_soak irq_dev irq_dev_spurious tick_cost llext_demo mandel gui_demo gui_lvgl doom ssh_shell"}
+APPS=${ZEPHYR_APPS:-"hello dbg_synchronization irq_soak irq_dev irq_dev_spurious tick_cost llext_demo mandel gui_demo gui_lvgl doom micropython ssh_shell"}
 IP=${KLAUSSCPU_BOARD_IP:-192.168.68.59}
 mkdir -p "$OUT/elf" "$OUT/logs"
 fail=0
@@ -111,7 +113,9 @@ for step in $STEPS; do
           board "$t" "$OUT/elf/$a.elf" "$O/$a.out" &
           if waitfor "$O/$a.out" 'SSH listening' $!; then
             sleep 3
-            DELAY=4 "$HERE/sshrun.sh" 'kernel version' 'kernel uptime' >"$O/ssh_session.txt" 2>&1
+            DELAY=4 "$HERE/sshrun.sh" 'kernel version' 'kernel uptime' \
+              'python' 'print("py", 6 * 7, 2 ** 70, 1 / 7)' "$(printf '\x04')" \
+              >"$O/ssh_session.txt" 2>&1
           fi
           wait ;;
         *) board "$t" "$OUT/elf/$a.elf" "$O/$a.out" ;;

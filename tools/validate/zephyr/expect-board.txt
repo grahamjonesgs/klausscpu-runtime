@@ -22,3 +22,5 @@ doom.vnc	saved
 ssh_shell	SSH session established
 ssh_session	Zephyr version 4\.5\.0
 ssh_session	Uptime: [0-9]+ ms
+ssh_session	py 42 1180591620717411303424 0\.1428571428571428
+micropython	MicroPython v1\.29\.0 on [0-9-]+; zephyr-nexys_a7
