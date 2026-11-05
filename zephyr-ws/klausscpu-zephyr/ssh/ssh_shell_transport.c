@@ -10,15 +10,20 @@
  * static — cf. the upstream telnet backend, which supports only one session).
  *
  * ── Concurrency ──────────────────────────────────────────────────────────────
- * Two threads touch one WOLFSSH session, split by direction:
+ * Two threads touch one WOLFSSH session:
  *   reader  = the per-connection thread (ssh_server.c) — the ONLY caller of
  *             wolfSSH_stream_read.  It feeds bytes into rx_rb (ssh_shell_feed).
- *   writer  = the shell core thread — the ONLY caller of wolfSSH_stream_send
- *             (transport write(), guarded by io_lock).
- * Because the directions never share a reader or a writer, the only genuinely
- * shared mutable state is a mid-session KEX/rekey.  wolfSSH is configured
- * without periodic rekey for this server; if that ever changes, the reader and
- * io_lock would need to cooperate around rekey.  Input for a running `run`
+ *   writers = the shell core thread (transport write(), ssh_shell_write) and
+ *             a `run` extension's thread (ssh_shell_send).
+ * The read path SENDS too: wolfSSH_stream_read() answers with a channel
+ * WINDOW_ADJUST once half the receive window is used, replies to the peer's
+ * keepalive requests and runs a peer-initiated rekey.  wolfSSH keeps one
+ * output buffer and one sequence number per session, so every wolfSSH call is
+ * made under the slot's io_lock, the reader's included; the reader drops the
+ * lock only inside the socket recv callback while it waits for bytes
+ * (ssh_server.c ssh_recv), where wolfSSH is not mid-send.  (Before this, a
+ * window adjust racing with output corrupted the stream every few hundred KB
+ * of input and the client dropped the session.)  Input for a running `run`
  * extension is taken from the SAME rx_rb (ssh_shell_getc), so the socket is
  * never read from two threads simultaneously.
  */
@@ -62,7 +67,7 @@ struct ssh_shell_ctx {
 	struct ring_buf            rx_rb;
 	uint8_t                    rx_buf[RX_RING_SIZE];
 	struct k_sem               rx_sem;   /* wakeup for ssh_shell_getc()    */
-	struct k_mutex             io_lock;  /* serialises wolfSSH_stream_send */
+	struct k_mutex             io_lock;  /* serialises every wolfSSH call   */
 	atomic_t                   open;
 	atomic_t                   running;  /* `run`/`python` is executing     */
 	struct k_sem               done;     /* given when that program ends    */
@@ -70,6 +75,8 @@ struct ssh_shell_ctx {
 };
 
 /* ── Transport API ───────────────────────────────────────────────────────── */
+
+static int ctx_write(struct ssh_shell_ctx *c, const void *data, size_t len);
 
 static int t_init(const struct shell_transport *transport, const void *config,
 		  shell_transport_handler_t evt_handler, void *context)
@@ -112,16 +119,15 @@ static int t_write(const struct shell_transport *transport, const void *data,
 		return 0;
 	}
 
-	k_mutex_lock(&c->io_lock, K_FOREVER);
-	int n = wolfSSH_stream_send(c->ssh, (uint8_t *)data, (word32)length);
-
-	k_mutex_unlock(&c->io_lock);
+	/* All of it, waiting out a full window or a rekey: the shell core
+	 * drops the rest of a message on an error. */
+	int n = ctx_write(c, data, length);
 
 	if (n < 0) {
 		*cnt = 0;
-		return -EIO;
+		return n;
 	}
-	*cnt = (size_t)n;
+	*cnt = length;
 	return 0;
 }
 
@@ -205,7 +211,16 @@ const struct shell *ssh_shell_claim(int slot, WOLFSSH *ssh)
 	shell_cwd_reset(ssh_shells[slot]);   /* new session starts at /SD:/ */
 	shell_prompt_sync(ssh_shells[slot]); /* prompt shows cwd from 1st line */
 #endif
-	shell_start(ssh_shells[slot]);
+	/* The first claim of a slot finds its shell already ACTIVE:
+	 * ssh_shell_transport_init()'s shell_stop() ran before the shell thread
+	 * did, and the thread then started itself (CONFIG_SHELL_AUTOSTART),
+	 * printing its prompt to no session.  shell_start() then refuses
+	 * (-ENOTSUP), and the session got no banner or prompt until the user
+	 * typed.  Stop it and start again. */
+	if (shell_start(ssh_shells[slot]) == -ENOTSUP) {
+		(void)shell_stop(ssh_shells[slot]);
+		(void)shell_start(ssh_shells[slot]);
+	}
 
 	/* shell_start() queues the prompt into the shell's transport buffer but
 	 * does not flush it — that only happens at the end of shell_process(),
@@ -298,14 +313,13 @@ void ssh_shell_set_rx_hook(const struct shell *sh, ssh_shell_rx_hook_t hook)
 	}
 }
 
-int ssh_shell_write(const struct shell *sh, const void *data, size_t len)
+struct k_mutex *ssh_shell_io_lock(int slot)
 {
-	struct ssh_shell_ctx *c = ctx_for(sh);
+	return &ssh_ctxs[slot]->io_lock;
+}
 
-	if (c == NULL) {
-		return -ENOTSUP;
-	}
-
+static int ctx_write(struct ssh_shell_ctx *c, const void *data, size_t len)
+{
 	/* wolfSSH_stream_send() sends at most a window/packet's worth and
 	 * returns WS_WINDOW_FULL (or WANT_WRITE, REKEYING) when it can't send
 	 * now; the reader thread processes the peer's window updates, so wait
@@ -341,6 +355,29 @@ int ssh_shell_write(const struct shell *sh, const void *data, size_t len)
 		k_msleep(5);
 	}
 	return (int)len;
+}
+
+int ssh_shell_write(const struct shell *sh, const void *data, size_t len)
+{
+	struct ssh_shell_ctx *c = ctx_for(sh);
+
+	if (c == NULL) {
+		return -ENOTSUP;
+	}
+	return ctx_write(c, data, len);
+}
+
+int ssh_shell_send(WOLFSSH *ssh, const void *data, size_t len)
+{
+	if (ssh == NULL) {
+		return -EINVAL;
+	}
+	for (int i = 0; i < SSH_MAX_CONNS; i++) {
+		if (ssh_ctxs[i]->ssh == ssh) {
+			return ctx_write(ssh_ctxs[i], data, len);
+		}
+	}
+	return (int)len;   /* session gone: drop the output */
 }
 
 void ssh_shell_run_begin(const struct shell *sh)

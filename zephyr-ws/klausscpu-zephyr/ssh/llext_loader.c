@@ -68,6 +68,11 @@ struct ext_ctx {
  * the current thread's SSH session, 0 to let it fall through to the UART. */
 static int route_out(int c)
 {
+	/* An ISR's printk goes to the UART: the SSH send takes a mutex. */
+	if (k_is_in_isr()) {
+		return 0;
+	}
+
 	struct ext_ctx *ctx = k_thread_custom_data_get();
 
 	if (ctx == NULL || ctx->ssh == NULL) {
@@ -79,12 +84,12 @@ static int route_out(int c)
 	if (c == '\n') {
 		uint8_t cr = '\r';
 
-		wolfSSH_stream_send(ssh, &cr, 1);
+		(void)ssh_shell_send(ssh, &cr, 1);
 	}
 
 	uint8_t ch = (uint8_t)c;
 
-	wolfSSH_stream_send(ssh, &ch, 1);
+	(void)ssh_shell_send(ssh, &ch, 1);
 	return 1;
 }
 
@@ -115,7 +120,7 @@ static void loader_printf(WOLFSSH *ssh, const char *fmt, ...)
 	va_end(ap);
 	if (n > 0) {
 		if (ssh != NULL) {
-			wolfSSH_stream_send(ssh, (uint8_t *)buf, (word32)n);
+			(void)ssh_shell_send(ssh, buf, (size_t)n);
 		} else {
 			printk("%s", buf);
 		}

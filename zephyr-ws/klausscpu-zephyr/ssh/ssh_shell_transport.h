@@ -9,8 +9,11 @@
  *   - The per-connection thread (in ssh_server.c) is the SOLE reader of the
  *     socket.  It pushes decrypted bytes into the slot's RX ring via
  *     ssh_shell_feed() and signals the shell core.
- *   - The shell core runs on its own thread (created by SHELL_DEFINE) and is
- *     the SOLE writer: transport write() encrypts+sends via wolfSSH.
+ *   - The shell core runs on its own thread (created by SHELL_DEFINE) and
+ *     writes through transport write() / ssh_shell_write(); a `run`
+ *     extension writes through ssh_shell_send().  The reader's
+ *     wolfSSH_stream_read() also sends (window adjusts), so all of them
+ *     hold the slot's io_lock (ssh_shell_io_lock) around wolfSSH calls.
  *   - A running `run` extension consumes input through ssh_shell_getc(), which
  *     drains the same RX ring, so input is never read from two threads at once.
  */
@@ -73,6 +76,16 @@ void ssh_shell_set_rx_hook(const struct shell *sh, ssh_shell_rx_hook_t hook);
  * -EIO / -ETIMEDOUT (10 s without progress).  Dropped once the session
  * closes.  -ENOTSUP on a non-SSH shell. */
 int ssh_shell_write(const struct shell *sh, const void *data, size_t len);
+
+/* As ssh_shell_write, for code that has the session rather than the shell (a
+ * `run` extension's stdout).  Output for a session that is gone is dropped. */
+int ssh_shell_send(WOLFSSH *ssh, const void *data, size_t len);
+
+/* The lock that serialises every wolfSSH call on slot's session.  The
+ * connection thread holds it around wolfSSH_stream_read() (which may send a
+ * window adjust or a keepalive reply) and drops it only while its socket
+ * recv callback waits for data. */
+struct k_mutex *ssh_shell_io_lock(int slot);
 
 /* Bracket a program that runs on the session's shell thread, so that
  * ssh_shell_release() waits (up to 2 s) for it to unwind. */

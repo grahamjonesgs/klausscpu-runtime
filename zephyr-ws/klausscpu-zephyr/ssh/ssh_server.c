@@ -26,8 +26,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 #include <wolfssh/ssh.h>
+#include <wolfssh/internal.h>   /* ssh->error, see ssh_recv */
 #ifdef WOLFSSH_SFTP
 #include <wolfssh/wolfsftp.h>
 #endif
@@ -103,15 +105,54 @@ static int wolfssh_auth_cb(uint8_t type, WS_UserAuthData *auth, void *ctx)
 
 /* ── Socket I/O callbacks for wolfSSH ─────────────────────────────────────── */
 
+struct conn_args {
+	WOLFSSH *ssh;
+	int sock;
+	/* The slot's io_lock while the connection thread reads a shell session
+	 * (held around wolfSSH_stream_read), else NULL. */
+	struct k_mutex *rx_lock;
+};
+
+/* The I/O context is &conn_args.sock (see ssh_conn_entry). */
 static int ssh_recv(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 {
-	int sock = *(int *)ctx;
+	struct conn_args *ca = CONTAINER_OF(ctx, struct conn_args, sock);
+	int sock = ca->sock;
+	struct k_mutex *lk = ca->rx_lock;
+
+	/* Waiting for the peer: let the writers use the session meanwhile.
+	 * wolfSSH is between packets or mid-way through receiving one here, and
+	 * the writers touch only its output side -- and ssh->error, which they
+	 * set to WS_WINDOW_FULL / WS_REKEYING.  The receive path reads it back
+	 * (DoKexInit returns a nonzero ssh->error, which ends the session), so
+	 * the reader's own value is put back when it has the lock again. */
+	if (lk != NULL) {
+		struct zsock_pollfd pfd = { .fd = sock, .events = ZSOCK_POLLIN };
+		int r;
+
+		while ((r = zsock_poll(&pfd, 1, 0)) == 0) {
+			int saved = ssh->error;
+
+			k_mutex_unlock(lk);
+			(void)zsock_poll(&pfd, 1, -1);
+			k_mutex_lock(lk, K_FOREVER);
+			ssh->error = saved;
+		}
+		if (r < 0) {
+			/* recv below blocks with the lock held, or fails. */
+			LOG_WRN("sock %d: poll failed, errno %d", sock, errno);
+		}
+	}
+
 	int n = zsock_recv(sock, buf, sz, 0);
 
 	if (n == 0) {
 		return WS_CBIO_ERR_CONN_CLOSE;
 	}
 	if (n < 0) {
+		if (lk != NULL) {
+			LOG_INF("sock %d: recv failed, errno %d", sock, errno);
+		}
 		return WS_CBIO_ERR_GENERAL;
 	}
 	return n;
@@ -135,11 +176,6 @@ static int ssh_send(WOLFSSH *ssh, void *buf, word32 sz, void *ctx)
 		    " (built " __DATE__ " " __TIME__ ") — type 'help'\r\n"
 
 /* ── Connection handler thread ────────────────────────────────────────────── */
-
-struct conn_args {
-	WOLFSSH *ssh;
-	int sock;
-};
 
 /* The connection thread runs wolfSSH_accept() + the RX pump (shell) or the
  * SFTP read loop.  SFTP adds the SFTP protocol + FatFs ops + an 8 KiB R/W
@@ -254,11 +290,24 @@ static void ssh_conn_entry(void *p1, void *p2, void *p3)
 	/* Sole reader: drain decrypted bytes into the shell's RX ring until the
 	 * peer closes or errors. */
 	uint8_t buf[64];
-	int n;
+	int n, err;
 
-	while ((n = wolfSSH_stream_read(ssh, buf, sizeof(buf))) > 0) {
+	ca->rx_lock = ssh_shell_io_lock(slot);
+	for (;;) {
+		k_mutex_lock(ca->rx_lock, K_FOREVER);
+		n = wolfSSH_stream_read(ssh, buf, sizeof(buf));
+		err = (n < 0) ? wolfSSH_get_error(ssh) : 0;
+		k_mutex_unlock(ca->rx_lock);
+		if (n == WS_REKEYING || err == WS_REKEYING) {
+			continue;   /* a KEX message was handled: keep reading */
+		}
+		if (n <= 0) {
+			break;
+		}
 		ssh_shell_feed(slot, buf, (size_t)n);
 	}
+	ca->rx_lock = NULL;
+	LOG_INF("slot %d: read ended rc=%d err=%d", slot, n, err);
 
 	safe = ssh_shell_release(slot);
 
@@ -397,6 +446,7 @@ static void ssh_listener_entry(void *p1, void *p2, void *p3)
 
 		conn_args_pool[slot].ssh = ssh;
 		conn_args_pool[slot].sock = client;
+		conn_args_pool[slot].rx_lock = NULL;
 
 		/* conn_busy[slot] is cleared just before the previous worker on
 		 * this slot returns, so the slot can be reselected here while that
