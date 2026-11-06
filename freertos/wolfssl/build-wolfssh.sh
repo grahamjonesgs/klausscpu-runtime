@@ -45,6 +45,14 @@ if [ ! -d "$WOLFSSH_SRC" ]; then
         https://github.com/wolfSSL/wolfssh.git "$WOLFSSH_SRC"
 fi
 
+# Zephyr SFTP fixes (the FreeRTOS build has no SFTP).  wolfssh-src is the Zephyr
+# module too, so ssh_shell builds from this tree.
+WOLFSSH_PATCH="$RUNTIME_DIR/zephyr-ws/klausscpu-zephyr/zephyr-patches/wolfssh-sftp-zephyr.patch"
+if ! git -C "$WOLFSSH_SRC" apply --reverse --check "$WOLFSSH_PATCH" 2>/dev/null; then
+    echo "==> Applying wolfssh-sftp-zephyr.patch..."
+    git -C "$WOLFSSH_SRC" apply "$WOLFSSH_PATCH"
+fi
+
 TRIPLE="klausscpu-unknown-elf"
 
 # Compiler flags — must match the wolfSSL build exactly.

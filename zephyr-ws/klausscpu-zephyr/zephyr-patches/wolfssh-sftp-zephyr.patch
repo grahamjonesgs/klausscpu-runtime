@@ -1,0 +1,836 @@
+wolfSSH v1.4.17: make the Zephyr SFTP server usable for editing files, by
+sshfs or any other client.  Applied by freertos/wolfssl/build-wolfssh.sh.
+
+Protocol:
+- STAT and LSTAT reply NO_SUCH_FILE for a missing file (sshfs creates a file
+  only after hearing that).
+- OPEN honours TRUNC (a shorter upload left the old tail) and EXCL.
+- SETSTAT and FSETSTAT work: size truncates; owner, mode and times are
+  accepted and ignored.  FSTAT works.
+- A stat by name syncs open files first: the directory entry lags behind
+  writes, and sshfs caches what it hears.
+
+File table (see the comment in src/port.c):
+- A real mutex: wc_LockMutex does nothing in a SINGLE_THREADED build, so two
+  sessions could share a descriptor.
+- A file has one writer.  Conflicting operations close and reopen open files,
+  as FatFs has no locking and a second FIL cross-links clusters.
+- Rename no longer deletes the file on a case-only rename, deletes the target
+  when the source is missing, or orphans a directory moved into itself.
+
+Fixes to existing bugs:
+- SFTP_RemoveHandleNode left a dangling list head on removing the newest node.
+- READ, WRITE and FSETSTAT copied up to 256 handle bytes into a 4-byte WFD.
+- A short write (full card) was reported as success.
+- SETSTAT with a bad path replied OK.
+
+diff --git a/src/port.c b/src/port.c
+index f8bd433..f1ace05 100644
+--- a/src/port.c
++++ b/src/port.c
+@@ -478,6 +478,11 @@ int WS_DeleteFileA(const char* fileName, void* heap)
+ 
+ #if defined(WOLFSSH_ZEPHYR) && (defined(WOLFSSH_SFTP) || defined(WOLFSSH_SCP))
+ 
++#include <zephyr/kernel.h>
++#include <wolfssh/ssh.h>   /* WOLFSSH_MAX_FILENAME */
++
++static void wssh_z_sync_all(void);
++
+ int wssh_z_fstat(const char *p, struct fs_dirent *b)
+ {
+     size_t p_len;
+@@ -485,6 +490,11 @@ int wssh_z_fstat(const char *p, struct fs_dirent *b)
+     if (p == NULL || b == NULL)
+         return -1;
+ 
++    /* fs_stat() reads the directory entry, which an open file updates only
++     * when it is synced: a client asking about a file being written would
++     * get (and cache) the old size. */
++    wssh_z_sync_all();
++
+     p_len = WSTRLEN(p);
+     /* Detect if origin directory when it ends in ':' or ':/' */
+     if (p_len >= 3 && (p[p_len-1] == ':' ||
+@@ -511,55 +521,197 @@ int z_fs_chdir(const char *path)
+     return ret;
+ }
+ 
++/* The files SFTP has open, shared by all sessions.  z_fds_lock is a Zephyr
++ * mutex: wolfSSL's wc_LockMutex does nothing in a SINGLE_THREADED build, and
++ * sessions run on their own threads.
++ *
++ * FatFs here has no file locking (FF_FS_LOCK 0), and a FIL keeps the file's
++ * first cluster, size and directory entry.  A second FIL writing to a file, or
++ * a rename or unlink under an open writer, would cross-link clusters or write
++ * to a directory slot that has been reused; a reader whose clusters are freed
++ * would read another file's data.  So a file has at most one writer, and an
++ * operation that conflicts with an open file first closes it (z_park), which
++ * saves its data.  Afterwards the file is reopened where it now is (z_unpark),
++ * or, if it is gone or has been replaced, stays retired: the descriptor is
++ * reserved until the client closes it and any other use fails.  Refusing the
++ * operation instead would fail ordinary saves: sshfs sends CLOSE
++ * asynchronously, so "write, close, rename" can arrive with the rename first.
++ *
++ * This covers SFTP only.  The shell, the HTTP server and Python use the same
++ * files through fs_*, and names that reach one file by different spellings (an
++ * 8.3 alias, non-ASCII case) aren't recognised as the same file. */
++#define Z_PARK_FROM 1
++#define Z_PARK_TO   2
++
+ static struct {
+     byte open:1;
++    byte write:1;
++    byte retired:1;
++    byte closeFailed:1;
++    byte parked:2;
++    int  flags;                         /* for reopening */
++    char path[WOLFSSH_MAX_FILENAME];
+     WFILE zfp;
+ } z_fds[WOLFSSH_MAX_DESCIPRTORS];
+-static wolfSSL_Mutex z_fds_mutex;
++static K_MUTEX_DEFINE(z_fds_lock);
+ static int z_fds_setup = 0;
+ 
++/* The most truncate will grow a file by: fatfs_truncate writes the new bytes
++ * one at a time, holding z_fds_lock. */
++#define WSSH_Z_MAX_GROW (1024 * 1024)
++
+ int wssh_z_fds_init(void)
+ {
+-    int ret = 0;
+     if (!z_fds_setup) {
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
+         WMEMSET(z_fds, 0, sizeof(z_fds));
+-        ret = wc_InitMutex(&z_fds_mutex);
+-        if (ret == 0)
+-            z_fds_setup = 1;
++        k_mutex_unlock(&z_fds_lock);
++        z_fds_setup = 1;
++    }
++    return 0;
++}
++
++static void wssh_z_sync_all(void)
++{
++    if (z_fds_setup) {
++        WFD idx;
++
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
++        for (idx = 0; idx < WOLFSSH_MAX_DESCIPRTORS; idx++) {
++            if (z_fds[idx].open && z_fds[idx].write && !z_fds[idx].retired)
++                (void)fs_sync(&z_fds[idx].zfp);
++        }
++        k_mutex_unlock(&z_fds_lock);
+     }
+-    return ret;
+ }
+ 
+ int wssh_z_fds_cleanup(void)
+ {
+-    int ret = 0;
+     if (z_fds_setup) {
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
+         WMEMSET(z_fds, 0, sizeof(z_fds));
+-        ret = wc_FreeMutex(&z_fds_mutex);
++        k_mutex_unlock(&z_fds_lock);
+         z_fds_setup = 0;
+     }
+-    return ret;
++    return 0;
++}
++
++static int z_lower(int c)
++{
++    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
++}
++
++/* Is `path` the file `p`, or inside the directory `p`?  FAT ignores case. */
++static int z_covers(const char* p, const char* path)
++{
++    while (*p != '\0' && z_lower(*p) == z_lower(*path)) {
++        p++;
++        path++;
++    }
++    return *p == '\0' && (*path == '\0' || *path == '/');
++}
++
++/* Is p exactly the file `path`, ignoring case? */
++static int z_same(const char* p, const char* path)
++{
++    return z_covers(p, path) && WSTRLEN(p) == WSTRLEN(path);
++}
++
++/* Close the writers of p and of anything under it, and with `readers` the
++ * readers too, other than keep.  Holds z_fds_lock. */
++static void z_park(const char* p, int readers, WFD keep, int group)
++{
++    WFD idx;
++
++    for (idx = 0; idx < WOLFSSH_MAX_DESCIPRTORS; idx++) {
++        if (idx != keep && z_fds[idx].open && !z_fds[idx].retired &&
++                (z_fds[idx].write || readers) &&
++                z_covers(p, z_fds[idx].path)) {
++            if (fs_close(&z_fds[idx].zfp) != 0)
++                z_fds[idx].closeFailed = 1;
++            z_fds[idx].retired = 1;
++            z_fds[idx].parked = group;
++        }
++    }
++}
++
++/* Reopen what z_park closed, now at `to` in place of `from`.  What can't be
++ * reopened stays retired.  Holds z_fds_lock. */
++static void z_unpark(int group, const char* from, const char* to)
++{
++    static char path[WOLFSSH_MAX_FILENAME];
++    WFD idx;
++
++    for (idx = 0; idx < WOLFSSH_MAX_DESCIPRTORS; idx++) {
++        if (z_fds[idx].parked == group) {
++            const char* rest = z_fds[idx].path + WSTRLEN(from);
++
++            z_fds[idx].parked = 0;
++            if (WSTRLEN(to) + WSTRLEN(rest) >= sizeof(path))
++                continue;
++            WSTRNCPY(path, to, sizeof(path));
++            WSTRNCPY(path + WSTRLEN(to), rest, sizeof(path) - WSTRLEN(to));
++            fs_file_t_init(&z_fds[idx].zfp);
++            if (fs_open(&z_fds[idx].zfp, path, z_fds[idx].flags) == 0) {
++                z_fds[idx].retired = 0;
++                WSTRNCPY(z_fds[idx].path, path, sizeof(z_fds[idx].path));
++            }
++        }
++    }
++}
++
++/* What z_park closed stays retired: the file is gone.  Holds z_fds_lock. */
++static void z_drop(int group)
++{
++    WFD idx;
++
++    for (idx = 0; idx < WOLFSSH_MAX_DESCIPRTORS; idx++) {
++        if (z_fds[idx].parked == group)
++            z_fds[idx].parked = 0;
++    }
++}
++
++/* Is fd usable?  Holds z_fds_lock. */
++static int z_live(WFD fd)
++{
++    return fd >= 0 && fd < WOLFSSH_MAX_DESCIPRTORS &&
++            z_fds[fd].open && !z_fds[fd].retired;
+ }
+ 
+ WFD wssh_z_open(const char *p, int f)
+ {
+     WFD ret = -1;
+-    if (p != NULL) {
+-        if (wc_LockMutex(&z_fds_mutex) == 0) {
+-            WFD idx = 0;
+-            /* find a free fd */
+-            while(idx < WOLFSSH_MAX_DESCIPRTORS && z_fds[idx].open)
+-                idx++;
+-            if (idx < WOLFSSH_MAX_DESCIPRTORS) {
+-                /* found a free fd */
+-                fs_file_t_init(&z_fds[idx].zfp);
+-                if (fs_open(&z_fds[idx].zfp, p, f) == 0) {
+-                    z_fds[idx].open = 1;
+-                    ret = idx;
+-                }
++    if (p != NULL && WSTRLEN(p) < sizeof(z_fds[0].path)) {
++        WFD idx = 0;
++        /* Creating a file makes the FIL write its directory entry when it
++         * closes, even when opened only for reading. */
++        int writes = (f & (FS_O_WRITE | FS_O_CREATE)) != 0;
++
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
++        /* find a free fd */
++        while(idx < WOLFSSH_MAX_DESCIPRTORS && z_fds[idx].open)
++            idx++;
++        if (idx < WOLFSSH_MAX_DESCIPRTORS) {
++            /* found a free fd */
++            if (f & FS_O_WRITE)
++                z_park(p, (f & FS_O_TRUNC) != 0, -1, Z_PARK_FROM);
++            fs_file_t_init(&z_fds[idx].zfp);
++            if (fs_open(&z_fds[idx].zfp, p, f) == 0) {
++                z_drop(Z_PARK_FROM);
++                z_fds[idx].open = 1;
++                z_fds[idx].write = writes;
++                z_fds[idx].retired = 0;
++                z_fds[idx].closeFailed = 0;
++                z_fds[idx].parked = 0;
++                z_fds[idx].flags = f & ~(FS_O_CREATE | FS_O_TRUNC);
++                WSTRNCPY(z_fds[idx].path, p, sizeof(z_fds[idx].path));
++                ret = idx;
++            }
++            else {
++                z_unpark(Z_PARK_FROM, p, p);
+             }
+-            wc_UnLockMutex(&z_fds_mutex);
+         }
++        k_mutex_unlock(&z_fds_lock);
+     }
+     return ret;
+ }
+@@ -568,15 +720,182 @@ int wssh_z_close(WFD fd)
+ {
+     int ret = -1;
+     if (fd >= 0 && fd < WOLFSSH_MAX_DESCIPRTORS) {
+-        if (wc_LockMutex(&z_fds_mutex) == 0) {
+-            if (z_fds[fd].open) {
+-                z_fds[fd].open = 0;
+-                if (fs_close(&z_fds[fd].zfp) == 0)
+-                    ret = 0;
+-            }
+-            wc_UnLockMutex(&z_fds_mutex);
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
++        if (z_fds[fd].open) {
++            z_fds[fd].open = 0;
++            /* If it was parked, its data was saved, or not, then. */
++            if ((z_fds[fd].retired || fs_close(&z_fds[fd].zfp) == 0) &&
++                    !z_fds[fd].closeFailed)
++                ret = 0;
++        }
++        k_mutex_unlock(&z_fds_lock);
++    }
++    return ret;
++}
++
++/* The size of an open file, leaving its position alone. */
++static int z_size(WFILE* f, off_t* size)
++{
++    off_t pos = fs_tell(f);
++    off_t end;
++
++    if (pos < 0 || fs_seek(f, 0, FS_SEEK_END) != 0)
++        return -1;
++    end = fs_tell(f);
++    if (fs_seek(f, pos, FS_SEEK_SET) != 0 || end < 0)
++        return -1;
++    *size = end;
++    return 0;
++}
++
++/* Truncate or extend, and check that it happened: extending stops silently
++ * when the card is full. */
++static int z_truncate(WFILE* f, off_t size)
++{
++    off_t cur, now;
++
++    if (size < 0 || z_size(f, &cur) != 0)
++        return -1;
++    if (size > cur && size - cur > WSSH_Z_MAX_GROW)
++        return -1;
++    if (fs_truncate(f, size) != 0 || z_size(f, &now) != 0 || now != size)
++        return -1;
++    return 0;
++}
++
++int wssh_z_fsize(WFD fd, off_t* size)
++{
++    int ret = -1;
++    if (size != NULL) {
++        k_mutex_lock(&z_fds_lock, K_FOREVER);
++        if (z_live(fd))
++            ret = z_size(&z_fds[fd].zfp, size);
++        k_mutex_unlock(&z_fds_lock);
++    }
++    return ret;
++}
++
++int wssh_z_ftruncate(WFD fd, off_t size)
++{
++    int ret = -1;
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    if (z_live(fd) && (z_fds[fd].flags & FS_O_WRITE)) {
++        z_park(z_fds[fd].path, 1, fd, Z_PARK_FROM);
++        z_drop(Z_PARK_FROM);
++        ret = z_truncate(&z_fds[fd].zfp, size);
++    }
++    k_mutex_unlock(&z_fds_lock);
++    return ret;
++}
++
++/* Truncate by name: through the file's writer if it has one, as a second FIL
++ * must not write to it. */
++int wssh_z_truncate(const char* p, off_t size)
++{
++    int ret = -1;
++    WFD idx;
++
++    if (p == NULL)
++        return -1;
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    for (idx = 0; idx < WOLFSSH_MAX_DESCIPRTORS; idx++) {
++        if (z_fds[idx].open && (z_fds[idx].flags & FS_O_WRITE) &&
++                !z_fds[idx].retired && z_same(p, z_fds[idx].path))
++            break;
++    }
++    if (idx < WOLFSSH_MAX_DESCIPRTORS) {
++        z_park(p, 1, idx, Z_PARK_FROM);
++        z_drop(Z_PARK_FROM);
++        ret = z_truncate(&z_fds[idx].zfp, size);
++    }
++    else {
++        WFILE f;
++
++        fs_file_t_init(&f);
++        if (fs_open(&f, p, FS_O_WRITE) == 0) {
++            z_park(p, 1, -1, Z_PARK_FROM);
++            z_drop(Z_PARK_FROM);
++            ret = z_truncate(&f, size);
++            if (fs_close(&f) != 0)
++                ret = -1;
++        }
++    }
++    k_mutex_unlock(&z_fds_lock);
++    return ret;
++}
++
++int wssh_z_unlink(const char* p)
++{
++    int ret;
++
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    z_park(p, 1, -1, Z_PARK_FROM);
++    ret = fs_unlink(p);
++    if (ret == 0)
++        z_drop(Z_PARK_FROM);
++    else
++        z_unpark(Z_PARK_FROM, p, p);
++    k_mutex_unlock(&z_fds_lock);
++    return ret;
++}
++
++/* fs_rename on FAT removes `to` first.  So a rename from a name that doesn't
++ * exist would just delete `to`, and one that only changes the case of a name
++ * would delete the file: FAT sees the two names as one.  And FatFs lets a
++ * directory move into itself, which orphans the whole tree. */
++int wssh_z_rename(const char* from, const char* to)
++{
++    static char tmp[WOLFSSH_MAX_FILENAME];
++    struct fs_dirent ent;
++    int same;
++    int ret;
++
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    ret = fs_stat(from, &ent);
++    if (ret != 0 || WSTRCMP(from, to) == 0)
++        goto out;
++
++    same = z_same(from, to);
++    if (!same && z_covers(from, to)) {
++        ret = -EINVAL;
++        goto out;
++    }
++    if (same) {
++        if (WSTRLEN(from) + 6 > sizeof(tmp)) {
++            ret = -ENAMETOOLONG;
++            goto out;
++        }
++        WSTRNCPY(tmp, from, sizeof(tmp));
++        WSTRNCPY(tmp + WSTRLEN(from), ".~ren", sizeof(tmp) - WSTRLEN(from));
++        if (fs_stat(tmp, &ent) == 0) {
++            ret = -EEXIST;
++            goto out;
+         }
+     }
++
++    z_park(from, 1, -1, Z_PARK_FROM);
++    if (same) {
++        ret = fs_rename(from, tmp);
++        if (ret == 0) {
++            ret = fs_rename(tmp, to);
++            if (ret != 0)
++                (void)fs_rename(tmp, from);
++        }
++    }
++    else {
++        z_park(to, 1, -1, Z_PARK_TO);
++        ret = fs_rename(from, to);
++    }
++    if (ret == 0) {
++        z_unpark(Z_PARK_FROM, from, to);
++        z_drop(Z_PARK_TO);
++    }
++    else {
++        z_unpark(Z_PARK_FROM, from, from);
++        z_unpark(Z_PARK_TO, to, to);
++    }
++out:
++    k_mutex_unlock(&z_fds_lock);
+     return ret;
+ }
+ 
+@@ -584,16 +903,17 @@ int wPwrite(WFD fd, unsigned char* buf, unsigned int sz,
+         const unsigned int* shortOffset)
+ {
+     int ret = -1;
+-    if (fd >= 0 && fd < WOLFSSH_MAX_DESCIPRTORS) {
+-        if (wc_LockMutex(&z_fds_mutex) == 0) {
+-            if (z_fds[fd].open) {
+-                const word32* offset = (const word32*)shortOffset;
+-                if (fs_seek(&z_fds[fd].zfp, offset[0], FS_SEEK_SET) == 0)
+-                    ret = fs_write(&z_fds[fd].zfp, buf, sz);
+-            }
+-            wc_UnLockMutex(&z_fds_mutex);
+-        }
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    if (z_live(fd)) {
++        const word32* offset = (const word32*)shortOffset;
++        if (fs_seek(&z_fds[fd].zfp, offset[0], FS_SEEK_SET) == 0)
++            ret = fs_write(&z_fds[fd].zfp, buf, sz);
++        /* A full card gives a short count, not an error, and the caller
++         * only looks for an error. */
++        if (ret >= 0 && (unsigned int)ret != sz)
++            ret = -1;
+     }
++    k_mutex_unlock(&z_fds_lock);
+     return ret;
+ }
+ 
+@@ -601,16 +921,13 @@ int wPread(WFD fd, unsigned char* buf, unsigned int sz,
+         const unsigned int* shortOffset)
+ {
+     int ret = -1;
+-    if (fd >= 0 && fd < WOLFSSH_MAX_DESCIPRTORS) {
+-        if (wc_LockMutex(&z_fds_mutex) == 0) {
+-            if (z_fds[fd].open) {
+-                const word32* offset = (const word32*)shortOffset;
+-                if (fs_seek(&z_fds[fd].zfp, offset[0], FS_SEEK_SET) == 0)
+-                    ret = fs_read(&z_fds[fd].zfp, buf, sz);
+-            }
+-            wc_UnLockMutex(&z_fds_mutex);
+-        }
++    k_mutex_lock(&z_fds_lock, K_FOREVER);
++    if (z_live(fd)) {
++        const word32* offset = (const word32*)shortOffset;
++        if (fs_seek(&z_fds[fd].zfp, offset[0], FS_SEEK_SET) == 0)
++            ret = fs_read(&z_fds[fd].zfp, buf, sz);
+     }
++    k_mutex_unlock(&z_fds_lock);
+     return ret;
+ }
+ 
+diff --git a/src/wolfsftp.c b/src/wolfsftp.c
+index 0a90f10..0889409 100644
+--- a/src/wolfsftp.c
++++ b/src/wolfsftp.c
+@@ -1474,7 +1474,7 @@ int wolfSSH_SFTP_read(WOLFSSH* ssh)
+                             wolfSSH_SFTP_buffer_data(&state->buffer),
+                             wolfSSH_SFTP_buffer_size(&state->buffer));
+                     break;
+-            #if !defined(_WIN32_WCE) && !defined(WOLFSSH_ZEPHYR)
++            #if !defined(_WIN32_WCE)
+                 case WOLFSSH_FTP_SETSTAT:
+                     ret = wolfSSH_SFTP_RecvSetSTAT(ssh, state->reqId,
+                             wolfSSH_SFTP_buffer_data(&state->buffer),
+@@ -2057,6 +2057,19 @@ int wolfSSH_SFTP_RecvOpen(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+                 }
+                 ret = WS_FATAL_ERROR;
+             }
++        #ifdef WOLFSSH_ZEPHYR
++            /* fs_open() has no O_EXCL. */
++            else if ((reason & WOLFSSH_FXF_CREAT) &&
++                     (reason & WOLFSSH_FXF_EXCL)) {
++                WLOG(WS_LOG_SFTP, "File exists");
++                res = oer;
++                if (wolfSSH_SFTP_CreateStatus(ssh, WOLFSSH_FTP_FAILURE, reqId,
++                            res, "English", NULL, &outSz) != WS_SIZE_ONLY) {
++                    return WS_FATAL_ERROR;
++                }
++                ret = WS_BAD_FILE_E;
++            }
++        #endif
+         }
+     }
+ 
+@@ -3432,7 +3445,7 @@ int wolfSSH_SFTP_RecvWrite(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+ 
+     /* get file handle */
+     ato32(data + idx, &sz); idx += UINT32_SZ;
+-    if (sz + idx > maxSz || sz > WOLFSSH_MAX_HANDLE) {
++    if (sz + idx > maxSz || sz > sizeof(WFD)) {
+         WLOG(WS_LOG_SFTP, "Error with file handle size");
+         res  = err;
+         type = WOLFSSH_FTP_FAILURE;
+@@ -3617,7 +3630,7 @@ int wolfSSH_SFTP_RecvRead(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+ 
+     /* get file handle */
+     ato32(data + idx, &sz); idx += UINT32_SZ;
+-    if (sz + idx > maxSz || sz > WOLFSSH_MAX_HANDLE) {
++    if (sz + idx > maxSz || sz > sizeof(WFD)) {
+         return WS_BUFFER_E;
+     }
+     WMEMSET((byte*)&fd, 0, sizeof(WFD));
+@@ -4268,9 +4281,8 @@ int SFTP_RemoveHandleNode(WOLFSSH* ssh, byte* handle, word32 handleSz)
+     if (cur->prev != NULL) {
+         cur->prev->next = cur->next;
+     }
+-
+-    if (cur->next == NULL && cur->prev == NULL) {
+-        ssh->handleList = NULL;
++    else {
++        ssh->handleList = cur->next;
+     }
+ 
+     WFREE(cur, ssh->ctx->heap, DYNTYPE_SFTP);
+@@ -4767,11 +4779,16 @@ int SFTP_GetAttributes(void* fs, const char* fileName, WS_SFTP_FILEATRB* atr,
+         byte noFollow, void* heap)
+ {
+     WSTAT_T stats;
++    int ret;
+ 
+     WOLFSSH_UNUSED(heap);
+     WOLFSSH_UNUSED(noFollow);
+ 
+-    if (WSTAT(fs, fileName, &stats) != 0) {
++    ret = WSTAT(fs, fileName, &stats);
++    if (ret == -ENOENT) {
++        return WS_INVALID_PATH_E;   /* see SFTP_StatFailure */
++    }
++    if (ret != 0) {
+         return WS_BAD_FILE_E;
+     }
+ 
+@@ -4781,13 +4798,27 @@ int SFTP_GetAttributes(void* fs, const char* fileName, WS_SFTP_FILEATRB* atr,
+ int SFTP_GetAttributes_Handle(WOLFSSH* ssh, byte* handle, int handleSz,
+         WS_SFTP_FILEATRB* atr)
+ {
+-    WOLFSSH_UNUSED(ssh);
+-    WOLFSSH_UNUSED(handle);
+-    WOLFSSH_UNUSED(handleSz);
+-    WOLFSSH_UNUSED(atr);
++    WSTAT_T stats;
++    WFD fd;
++    off_t size;
++
++    if (handle == NULL || atr == NULL || handleSz != (int)sizeof(WFD)) {
++        return WS_FATAL_ERROR;
++    }
+ 
+-    WLOG(WS_LOG_SFTP, "SFTP_GetAttributes_Handle() not implemented yet");
+-    return WS_NOT_COMPILED;
++    if (SFTP_GetHandleNode(ssh, handle, handleSz) == NULL) {
++        WLOG(WS_LOG_SFTP, "Unknown handle");
++        return WS_BAD_FILE_E;
++    }
++
++    WMEMCPY((byte*)&fd, handle, sizeof(WFD));
++    if (wssh_z_fsize(fd, &size) != 0) {
++        return WS_BAD_FILE_E;
++    }
++
++    stats.type = FS_DIR_ENTRY_FILE;  /* the handle list holds only files */
++    stats.size = size;
++    return PopulateAttributes(atr, &stats);
+ }
+ 
+ 
+@@ -4965,6 +4996,15 @@ int wolfSSH_SFTP_RecvFSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+ #endif
+ 
+ 
++/* The status for a failed STAT or LSTAT.  A client must be able to tell "no
++ * such file" from a failure: sshfs creates a file only after hearing the
++ * first, and takes the second as an error. */
++static byte SFTP_StatFailure(int err)
++{
++    return (err == WS_INVALID_PATH_E) ? WOLFSSH_FTP_NOFILE
++                                      : WOLFSSH_FTP_FAILURE;
++}
++
+ /* Handles receiving stat packet
+  * returns WS_SUCCESS on success
+  */
+@@ -4973,6 +5013,7 @@ int wolfSSH_SFTP_RecvSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+     WS_SFTP_FILEATRB atr;
+     char  name[WOLFSSH_MAX_FILENAME];
+     int   ret = WS_SUCCESS;
++    byte  status = WOLFSSH_FTP_FAILURE;
+ 
+     word32 sz;
+     word32 idx = 0;
+@@ -5008,10 +5049,11 @@ int wolfSSH_SFTP_RecvSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+ 
+     if (ret == WS_SUCCESS) {
+         WMEMSET((byte*)&atr, 0, sizeof(WS_SFTP_FILEATRB));
+-        if (SFTP_GetAttributes(ssh->fs, name, &atr, 0, ssh->ctx->heap)
++        if ((ret = SFTP_GetAttributes(ssh->fs, name, &atr, 0, ssh->ctx->heap))
+             != WS_SUCCESS) {
+             WLOG(WS_LOG_SFTP, "Unable to get stat of file/directory");
+-            if (wolfSSH_SFTP_CreateStatus(ssh, WOLFSSH_FTP_FAILURE, reqId,
++            status = SFTP_StatFailure(ret);
++            if (wolfSSH_SFTP_CreateStatus(ssh, status, reqId,
+                     "STAT error", "English", NULL, &outSz) != WS_SIZE_ONLY) {
+                 return WS_FATAL_ERROR;
+             }
+@@ -5029,7 +5071,7 @@ int wolfSSH_SFTP_RecvSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+     }
+ 
+     if (ret != WS_SUCCESS) {
+-        if (wolfSSH_SFTP_CreateStatus(ssh, WOLFSSH_FTP_FAILURE, reqId,
++        if (wolfSSH_SFTP_CreateStatus(ssh, status, reqId,
+                 "STAT error", "English", out, &outSz) != WS_SUCCESS) {
+             WFREE(out, ssh->ctx->heap, DYNTYPE_BUFFER);
+             return WS_FATAL_ERROR;
+@@ -5057,6 +5099,7 @@ int wolfSSH_SFTP_RecvLSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+     WS_SFTP_FILEATRB atr;
+     char  name[WOLFSSH_MAX_FILENAME];
+     int   ret = WS_SUCCESS;
++    byte  status = WOLFSSH_FTP_FAILURE;
+ 
+     word32 sz;
+     word32 idx = 0;
+@@ -5097,7 +5140,8 @@ int wolfSSH_SFTP_RecvLSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+                 != WS_SUCCESS) {
+             /* tell peer that was not ok */
+             WLOG(WS_LOG_SFTP, "Unable to get lstat of file/directory");
+-            if (wolfSSH_SFTP_CreateStatus(ssh, WOLFSSH_FTP_FAILURE, reqId,
++            status = SFTP_StatFailure(ret);
++            if (wolfSSH_SFTP_CreateStatus(ssh, status, reqId,
+                     "LSTAT error", "English", NULL, &outSz) != WS_SIZE_ONLY) {
+                 return WS_FATAL_ERROR;
+             }
+@@ -5115,7 +5159,7 @@ int wolfSSH_SFTP_RecvLSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+     }
+ 
+     if (ret != WS_SUCCESS) {
+-        if (wolfSSH_SFTP_CreateStatus(ssh, WOLFSSH_FTP_FAILURE, reqId,
++        if (wolfSSH_SFTP_CreateStatus(ssh, status, reqId,
+                 "LSTAT error", "English", out, &outSz) != WS_SUCCESS) {
+             WFREE(out, ssh->ctx->heap, DYNTYPE_BUFFER);
+             return WS_FATAL_ERROR;
+@@ -5158,7 +5202,7 @@ static int SFTP_SetModeHandle(void* fs, WFD handle, word32 mode) {
+ }
+ #endif
+ 
+-#if !defined(_WIN32_WCE) && !defined(WOLFSSH_ZEPHYR)
++#if !defined(_WIN32_WCE)
+ 
+ /* sets a files attributes
+  * returns WS_SUCCESS on success */
+@@ -5166,9 +5210,29 @@ static int SFTP_SetFileAttributes(WOLFSSH* ssh, char* name, WS_SFTP_FILEATRB* at
+ {
+     int ret = WS_SUCCESS;
+ 
++#ifdef WOLFSSH_ZEPHYR
++    {
++        /* The owner, mode and times below are accepted and ignored, which
++         * mustn't make a file that doesn't exist look as if it does. */
++        WS_SFTP_FILEATRB cur;
++
++        if (SFTP_GetAttributes(ssh->fs, name, &cur, 0, ssh->ctx->heap)
++                != WS_SUCCESS) {
++            return WS_BAD_FILE_E;
++        }
++    }
++#endif
++
+     /* check if size attribute present */
+     if (atr->flags & WOLFSSH_FILEATRB_SIZE) {
++    #ifdef WOLFSSH_ZEPHYR
++        /* FAT files stop at 4 GiB. */
++        if (atr->sz[1] != 0 || wssh_z_truncate(name, atr->sz[0]) != 0) {
++            return WS_BAD_FILE_E;
++        }
++    #else
+         /* @TODO set file size */
++    #endif
+     }
+ 
+     /* check if uid and gid attribute present */
+@@ -5206,9 +5270,22 @@ static int SFTP_SetFileAttributesHandle(WOLFSSH* ssh, WFD handle, WS_SFTP_FILEAT
+ {
+     int ret = WS_SUCCESS;
+ 
++#ifdef WOLFSSH_ZEPHYR
++    if (SFTP_GetHandleNode(ssh, (byte*)&handle, sizeof(WFD)) == NULL) {
++        return WS_BAD_FILE_E;
++    }
++#endif
++
+     /* check if size attribute present */
+     if (atr->flags & WOLFSSH_FILEATRB_SIZE) {
++    #ifdef WOLFSSH_ZEPHYR
++        /* FAT files stop at 4 GiB. */
++        if (atr->sz[1] != 0 || wssh_z_ftruncate(handle, atr->sz[0]) != 0) {
++            return WS_BAD_FILE_E;
++        }
++    #else
+         /* @TODO set file size */
++    #endif
+     }
+ 
+     /* check if uid and gid attribute present */
+@@ -5216,7 +5293,7 @@ static int SFTP_SetFileAttributesHandle(WOLFSSH* ssh, WFD handle, WS_SFTP_FILEAT
+         /* @TODO set group and user id */
+     }
+ 
+-#ifndef USE_WINDOWS_API
++#if !defined(USE_WINDOWS_API) && !defined(WOLFSSH_ZEPHYR)
+     /* check if permissions attribute present */
+     if (atr->flags & WOLFSSH_FILEATRB_PERM) {
+         ret = SFTP_SetModeHandle(ssh->fs, handle, atr->per);
+@@ -5280,7 +5357,9 @@ int wolfSSH_SFTP_RecvSetSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+     /* plus one to make sure is null terminated */
+     if (GetAndCleanPath(ssh->sftpDefaultPath,
+                 data + idx, sz, name, sizeof(name)) < 0) {
+-        ret = WS_BUFFER_E;
++        type = WOLFSSH_FTP_FAILURE;
++        res  = ser;
++        ret  = WS_BUFFER_E;
+     }
+     idx += sz;
+ 
+@@ -5356,7 +5435,7 @@ int wolfSSH_SFTP_RecvFSetSTAT(WOLFSSH* ssh, int reqId, byte* data, word32 maxSz)
+ 
+     /* get file handle */
+     ato32(data + idx, &sz); idx += UINT32_SZ;
+-    if (sz + idx > maxSz || sz > WOLFSSH_MAX_HANDLE) {
++    if (sz + idx > maxSz || sz > sizeof(WFD)) {
+         return WS_BUFFER_E;
+     }
+     WMEMSET((byte*)&fd, 0, sizeof(WFD));
+diff --git a/wolfssh/port.h b/wolfssh/port.h
+index b65d32f..0e6b407 100644
+--- a/wolfssh/port.h
++++ b/wolfssh/port.h
+@@ -1289,8 +1289,10 @@ extern "C" {
+     #define WMKDIR(fs,p,m)    fs_mkdir((p))
+     #define WRMDIR(fs,d)      fs_unlink((d))
+     #define WSTAT(fs,p,b)     wssh_z_fstat((p),(b))
+-    #define WREMOVE(fs,d)     fs_unlink((d))
+-    #define WRENAME(fs,o,n)   fs_rename((o),(n))
++    int wssh_z_unlink(const char* p);
++    int wssh_z_rename(const char* from, const char* to);
++    #define WREMOVE(fs,d)     wssh_z_unlink((d))
++    #define WRENAME(fs,o,n)   wssh_z_rename((o),(n))
+     #define WS_DELIM          '/'
+ 
+     #define WOLFSSH_O_RDWR    FS_O_RDWR
+@@ -1298,8 +1300,8 @@ extern "C" {
+     #define WOLFSSH_O_WRONLY  FS_O_WRITE
+     #define WOLFSSH_O_APPEND  FS_O_APPEND
+     #define WOLFSSH_O_CREAT   FS_O_CREATE
+-    #define WOLFSSH_O_TRUNC   0
+-    #define WOLFSSH_O_EXCL    0
++    #define WOLFSSH_O_TRUNC   FS_O_TRUNC
++    #define WOLFSSH_O_EXCL    0 /* no fs_open() flag: see wolfSSH_SFTP_RecvOpen */
+ 
+     /* Our "file descriptor" wrapper */
+     #ifndef WOLFSSH_MAX_DESCIPRTORS
+@@ -1316,6 +1318,12 @@ extern "C" {
+     int wPread(WFD, unsigned char*, unsigned int, const unsigned int*);
+     #define WPWRITE(fs,fd,b,s,o) wPwrite((fd),(b),(s),(o))
+     #define WPREAD(fs,fd,b,s,o)  wPread((fd),(b),(s),(o))
++    int wssh_z_fsize(WFD fd, off_t* size);
++    int wssh_z_ftruncate(WFD fd, off_t size);
++    int wssh_z_truncate(const char* p, off_t size);
++    /* FAT keeps no owner or mode, and Zephyr's fs API can't set a time. */
++    #define WSETTIME(fs,f,a,m)   (0)
++    #define WFSETTIME(fs,fd,a,m) (0)
+ 
+ #elif defined(WOLFSSH_USER_FILESYSTEM)
+     /* User-defined I/O support */

@@ -35,6 +35,11 @@ case $APP in
   /*) SRC=$APP; MODS="$MOD" ;;
   *) SRC=$MOD/apps/$APP; MODS="$MOD;$WOLF" ;;
 esac
+case $MODS in *wolfssh-src*)
+  git -C "$RT/freertos/wolfssl/wolfssh-src" apply --reverse --check \
+    "$MOD/zephyr-patches/wolfssh-sftp-zephyr.patch" 2>/dev/null ||
+    die "wolfssh-src lacks zephyr-patches/wolfssh-sftp-zephyr.patch (run freertos/wolfssl/build-wolfssh.sh)" ;;
+esac
 if [ -e "$WS/.venv/bin/activate" ]; then
   # shellcheck disable=SC1091
   . "$WS/.venv/bin/activate"
