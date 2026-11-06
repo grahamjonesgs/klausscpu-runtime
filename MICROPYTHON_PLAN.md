@@ -308,6 +308,8 @@ is `double`.  MicroPython's 64-bit build is the usual Unix one.
      keepalive replies, a rekey) and did so without `io_lock`; see step 5.
    - `python` on the serial console can't be interrupted, and blocks SSH
      sessions from Python while it runs.
+   - The SD card can be mounted over SFTP for editing (see
+     `zephyr-ws/klausscpu-zephyr/CLAUDE.md` section 6).
 7. **Extras (optional).**  A `klausscpu` module with the blitter, the cycle
    counter and the crypto engine.  Frozen `.mpy` modules.
 

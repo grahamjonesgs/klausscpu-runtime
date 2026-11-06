@@ -57,6 +57,9 @@ git -C modules/crypto/tf-psa-crypto apply \
 # c) wolfSSL + wolfSSH (only needed for the ssh_shell app) — built from source
 #    as Zephyr modules. build-wolfssl.sh also pins the module name to `wolfssl`
 #    (upstream module.yml has none, which otherwise breaks wolfSSH's dependency).
+#    build-wolfssh.sh applies zephyr-patches/wolfssh-sftp-zephyr.patch (the SFTP
+#    server's Zephyr fixes); tools/validate/zephyr/build.sh refuses a tree
+#    without it.  On an existing tree, run build-wolfssh.sh again.
 ( cd ../freertos/wolfssl && ./build-wolfssl.sh && ./build-wolfssh.sh )
 ```
 
@@ -170,6 +173,22 @@ python3 modules/lib/micropython/tools/pyboard.py \
 ```
 
 Plan, results and caveats: `../MICROPYTHON_PLAN.md`.
+
+## 6. The SD card as a folder (SFTP)
+
+With `sshfs` installed, `../tools/sdcard-mount.sh` mounts the card at
+`~/sdcard` (`-u` unmounts), so an editor can open it; `.vscode/tasks.json` has
+tasks for this and for running the open file on the board.  wolfSSH's Zephyr
+SFTP server needed `zephyr-patches/wolfssh-sftp-zephyr.patch` for this.  To
+check a card and server (a second mount adds two-session tests):
+
+```sh
+../tools/validate/zephyr/sd_mount_test.py ~/sdcard
+```
+
+Limits: the patch protects files only between SFTP sessions.  Don't write one
+file through SFTP and the shell, HTTP or Python at the same time.  A
+file's date and owner can't be set, so all files show as 1970 and owned by you.
 
 ## Gotchas (things that bite)
 

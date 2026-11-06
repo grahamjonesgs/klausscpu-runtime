@@ -5,6 +5,26 @@
   "version": "2.0.0",
   "tasks": [
     {
+      // Run the open .py file on the board (ssh_shell running).  Ctrl+Shift+B.
+      "label": "klausscpu: run on board",
+      "type": "shell",
+      "command": "python3 zephyr-ws/modules/lib/micropython/tools/pyboard.py -d 'exec:python3 tools/validate/zephyr/ssh_python.py' '${file}'",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "klausscpu: mount SD card",
+      "type": "shell",
+      "command": "tools/sdcard-mount.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "klausscpu: unmount SD card",
+      "type": "shell",
+      "command": "tools/sdcard-mount.sh -u",
+      "problemMatcher": []
+    },
+    {
       "label": "klausscpu: emulator gdbserver",
       "detail": "Build the open baremetal/programs/<name>.c as baremetal/<name>.elf with -O1 -g and serve it on the emulator (port 1234)",
       "type": "shell",
