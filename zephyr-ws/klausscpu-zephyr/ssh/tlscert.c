@@ -27,6 +27,7 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 
 #include "tlscert.h"
+#include "keystore.h"
 #include "wallclock.h"
 
 LOG_MODULE_REGISTER(tlscert, LOG_LEVEL_INF);
@@ -53,8 +54,8 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp)
 
 #define KEY_DER_MAX   256
 #define CERT_DER_MAX  1024
-#define KEY_PATH      "/SD:/" TLS_KEY_FILENAME
-#define CERT_PATH     "/SD:/" TLS_CERT_FILENAME
+#define KEY_PATH      KEYSTORE_DIR "/" TLS_KEY_FILENAME
+#define CERT_PATH     KEYSTORE_DIR "/" TLS_CERT_FILENAME
 
 static uint8_t s_key_der[KEY_DER_MAX];
 static int     s_key_der_len;
@@ -245,6 +246,9 @@ int tlscert_init(const uint8_t *ip4)
 		memcpy(s_ip, ip4, 4);
 		s_have_ip = true;
 	}
+
+	(void)keystore_prepare(TLS_KEY_FILENAME);
+	(void)keystore_prepare(TLS_CERT_FILENAME);
 
 	/* Floors below a valid P-256 key (~121 B) / cert (~378 B) so a stale
 	 * truncated blob is rejected and regenerated. */

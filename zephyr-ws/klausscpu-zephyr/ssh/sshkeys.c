@@ -17,11 +17,12 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 
 #include "sshkeys.h"
+#include "keystore.h"
 
 LOG_MODULE_REGISTER(sshkeys, LOG_LEVEL_INF);
 
 #define PRIV_DER_MAX 256
-#define KEY_PATH     "/SD:/" SSH_KEY_FILENAME
+#define KEY_PATH     KEYSTORE_DIR "/" SSH_KEY_FILENAME
 
 static uint8_t s_priv_der[PRIV_DER_MAX];
 static int s_priv_der_len;
@@ -112,6 +113,7 @@ int sshkeys_init(void)
 		return 0;
 	}
 
+	(void)keystore_prepare(SSH_KEY_FILENAME);
 	if (load_from_sd() == 0) {
 		LOG_INF("Loaded host key from SD (%d bytes)", s_priv_der_len);
 		s_initialized = 1;

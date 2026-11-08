@@ -8,7 +8,11 @@
  *
  *   GET  /            -> HTML directory listing of /SD:
  *   GET  /<path>      -> download a file (streamed) or a listing if it's a dir
- *   PUT  /<path>      -> upload (overwrite) a file
+ *   PUT  /<path>      -> upload (overwrite) a file, only with
+ *                        CONFIG_KLAUSSCPU_HTTP_PUT (no login: anyone could
+ *                        replace any file; upload over SFTP instead)
+ *
+ * /sys (KEYSTORE_DIR: the SSH and TLS private keys) is never served.
  *
  * The request dispatch (httpd_serve) is transport-agnostic: it talks through a
  * struct httpd_conn whose recv/send callbacks are bound either to a raw socket
@@ -38,6 +42,7 @@
 
 #include "httpd.h"
 #include "webapi.h"
+#include "keystore.h"
 
 LOG_MODULE_REGISTER(httpd, LOG_LEVEL_INF);
 
@@ -155,6 +160,54 @@ static void url_decode(char *s)
 	*o = '\0';
 }
 
+/* Is the path component p[0..len) the key folder's name?  FAT ignores case,
+ * and FatFs a name's leading spaces and trailing dots and spaces. */
+static bool is_private_name(const char *p, size_t len)
+{
+	static const char name[] = "sys";   /* KEYSTORE_DIR's last part */
+
+	while (len > 0 && p[0] == ' ') {
+		p++;
+		len--;
+	}
+	while (len > 0 && (p[len - 1] == '.' || p[len - 1] == ' ')) {
+		len--;
+	}
+	if (len != sizeof(name) - 1) {
+		return false;
+	}
+	for (size_t i = 0; i < len; i++) {
+		if (tolower((unsigned char)p[i]) != name[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/* Does the decoded URL path lead into the key folder?  Its first component
+ * decides, skipping empty ones and "." (FatFs takes '\' as a separator too;
+ * ".." is refused before this). */
+static bool private_path(const char *url)
+{
+	const char *p = url;
+
+	for (;;) {
+		while (*p == '/' || *p == '\\') {
+			p++;
+		}
+		const char *e = p;
+
+		while (*e != '\0' && *e != '/' && *e != '\\') {
+			e++;
+		}
+		if (e - p == 1 && p[0] == '.') {
+			p = e;
+			continue;
+		}
+		return is_private_name(p, (size_t)(e - p));
+	}
+}
+
 /* ── directory listing ──────────────────────────────────────────────────── */
 
 static void send_listing(struct httpd_conn *c, const char *fs_path,
@@ -194,6 +247,10 @@ static void send_listing(struct httpd_conn *c, const char *fs_path,
 
 	while (fs_readdir(&dir, &ent) == 0 && ent.name[0] != '\0') {
 		bool is_dir = (ent.type == FS_DIR_ENTRY_DIR);
+
+		if (strcmp(url, "/") == 0 && is_private_name(ent.name, strlen(ent.name))) {
+			continue;
+		}
 
 		/* Build href: url + name (+ '/' for dirs).  url ends with '/'. */
 		(void)snprintk(c->xfer, c->xfer_sz,
@@ -463,6 +520,11 @@ bool httpd_serve(struct httpd_conn *c)
 		send_status(c, "403 Forbidden", "bad path\n");
 		return c->keepalive;
 	}
+	if (private_path(url)) {
+		c->keepalive = false;	/* a PUT's body is still unread */
+		send_status(c, "403 Forbidden", "private\n");
+		return c->keepalive;
+	}
 
 #ifdef CONFIG_KLAUSSCPU_SSH_SERVER
 	/* /__prof/start, /__prof/stop: `bench prof` without an SSH login in
@@ -554,6 +616,10 @@ bool httpd_serve(struct httpd_conn *c)
 		} else {
 			send_file(c, fs_path, ent.size);
 		}
+	} else if (strcmp(method, "PUT") == 0 && !IS_ENABLED(CONFIG_KLAUSSCPU_HTTP_PUT)) {
+		c->keepalive = false;	/* the body is still unread */
+		send_status(c, "405 Method Not Allowed",
+			    "uploads are off (CONFIG_KLAUSSCPU_HTTP_PUT): use SFTP\n");
 	} else if (strcmp(method, "PUT") == 0) {
 		/* find Content-Length and the body start (after CRLFCRLF) */
 		long clen = 0;

@@ -30,6 +30,11 @@ if(CONFIG_KLAUSSCPU_HTTP_SERVER OR CONFIG_KLAUSSCPU_HTTPS_SERVER)
   zephyr_library_sources(httpd.c webapi.c)
 endif()
 
+# The private-key folder on the SD card (SSH host key, TLS key and cert).
+if(CONFIG_KLAUSSCPU_SSH_SERVER OR CONFIG_KLAUSSCPU_HTTPS_SERVER)
+  zephyr_library_sources(keystore.c)
+endif()
+
 # HTTPS server (HTTP over TLS via wolfSSL, :443) + its self-signed cert.
 if(CONFIG_KLAUSSCPU_HTTPS_SERVER)
   zephyr_library_sources(httpsd.c tlscert.c)

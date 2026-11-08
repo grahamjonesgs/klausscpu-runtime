@@ -162,8 +162,8 @@ files on the card) — `zephyr/llext_sd.sh <outdir> [build] [backup] [upload]
 [run]` rebuilds the extensions the ssh_shell app loads from the card
 (`make ext-demos` in a staged copy, and ssh_shell's `apibackend.llext` and
 `ctrl.llext`), loads ssh_shell on the board, downloads every `.llext` on the
-card to `<outdir>/backup/`, uploads the new ones (refusing to overwrite a
-file it has not backed up), then `run`s each program over SSH and compares
+card to `<outdir>/backup/`, uploads the new ones to the card's `/llext/`
+(refusing to overwrite a file it has not backed up), then `run`s each program over SSH and compares
 its output with the program's bare-metal baseline (`llext` for a program
 whose extension build differs, such as test_atomic, else `board-O2`, else
 `emu-O1`), and `svc load`s each backend and queries its HTTP route.  The

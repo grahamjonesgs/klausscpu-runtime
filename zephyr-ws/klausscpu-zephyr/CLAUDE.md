@@ -187,6 +187,12 @@ check a card and server (a second mount adds two-session tests):
 ../tools/validate/zephyr/sd_mount_test.py ~/sdcard
 ```
 
+The HTTP (:80) and HTTPS (:443) file servers only read: uploads (`PUT`) are
+off unless `CONFIG_KLAUSSCPU_HTTP_PUT=y`, as they need no login.  The SSH host
+key and the TLS key and certificate live in `/SD:/sys/` (`ssh/keystore.h`),
+which those servers refuse; firmware that kept them at the top of the card
+moves them there at boot, keeping the board's identity.
+
 Limits: the patch protects files only between SFTP sessions.  Don't write one
 file through SFTP and the shell, HTTP or Python at the same time.  A
 file's date and owner can't be set, so all files show as 1970 and owned by you.

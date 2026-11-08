@@ -12,7 +12,7 @@
 #         marked as built for C ABI 1 / 2); everything goes to <outdir>/llext/, the kernel to
 #         <outdir>/elf/.
 # backup  download every *.llext on the card to <outdir>/backup/.
-# upload  PUT <outdir>/llext/*.llext to the card's root.  A file that would
+# upload  copy <outdir>/llext/*.llext over SFTP to the card's /llext/.  A file that would
 #         overwrite one on the card is refused unless the backup step has
 #         saved it (llext_sd.py).
 # run     `run` each program over SSH (adventure with typed commands) and

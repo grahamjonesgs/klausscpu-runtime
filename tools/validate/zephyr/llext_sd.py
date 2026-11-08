@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """llext_sd.py -- talk to the ssh_shell app on the board: the SD card's files
-over HTTP, and the LLEXT `run` / `svc` commands over SSH.
+over HTTP (reading) and SFTP (writing), and the LLEXT `run` / `svc` commands
+over SSH.
 
 The ssh_shell app must already be running on the board (llext_sd.sh loads it
 under the board lock).  Every action prints one line per file or extension
@@ -12,16 +13,16 @@ and exits 1 if anything failed.
       Download every *.llext on the card to <dir>/<path on the card>, and
       check each download's size against the listing.
   llext_sd.py upload <backup-dir> <file>...
-      PUT each file to the card's root under its own name, then read it back
-      and compare.  A file that would overwrite one on the card is refused
+      Upload each file over SFTP to the card's /llext/ (made if missing)
+      under its own name, then read it back over HTTP and compare.  A file that would overwrite one on the card is refused
       unless <backup-dir> holds a copy of the same size (llext_sd.sh backs
       the card up first).
   llext_sd.py run <out-dir> <name>[:<input>,<input>...]...
-      `run <name>` over SSH, typing each <input> line at the program's "> "
+      `run llext/<name>` over SSH, typing each <input> line at the program's "> "
       prompt; the session is saved to <out-dir>/<name>.ssh.  Prints
       "<name> exit <code>" (or "load-failed <code>", "timeout").
   llext_sd.py svc <out-dir> <name> <url-path> <regex>
-      `svc load <name>`, GET <url-path> over HTTP and match <regex> against
+      `svc load llext/<name>`, GET <url-path> over HTTP and match <regex> against
       the body, `svc list`, `svc stop`.  Saved to <out-dir>/<name>.ssh.
 
 Environment: KLAUSSCPU_BOARD_IP (default 192.168.68.59), KLAUSSCPU_SSH_USER
@@ -31,6 +32,7 @@ Environment: KLAUSSCPU_BOARD_IP (default 192.168.68.59), KLAUSSCPU_SSH_USER
 import html
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -40,6 +42,8 @@ USER = os.environ.get("KLAUSSCPU_SSH_USER", "admin")
 PASS = os.environ.get("KLAUSSCPU_SSH_PASS", "klausscpu")
 RUN_TMO = int(os.environ.get("LLEXT_RUN_TIMEOUT", "180"))
 ANSI = re.compile(rb"\x1b\[[0-9;]*[A-Za-z]")
+DIR = "llext"     # the card's folder for extensions
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def http(method, path, data=None, timeout=60):
@@ -98,23 +102,45 @@ def cmd_backup(d):
     return 1 if bad else 0
 
 
+def sftp(lines):
+    """Run SFTP batch lines; returns (status, output)."""
+    env = dict(os.environ, SSH_ASKPASS=os.path.join(HERE, "askpass.sh"),
+               SSH_ASKPASS_REQUIRE="force", DISPLAY=os.environ.get("DISPLAY", ":0"))
+    r = subprocess.run(["sftp", "-o", "BatchMode=no", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null", "-o", "PubkeyAuthentication=no",
+                        "-o", "LogLevel=ERROR", "-b", "-", f"{USER}@{IP}"],
+                       input="".join(line + "\n" for line in lines), text=True,
+                       capture_output=True, env=env, timeout=900)
+    return r.returncode, r.stdout + r.stderr
+
+
 def cmd_upload(backup, files):
+    """The board's HTTP servers don't take uploads (PUT is off): use SFTP."""
     on_card = {p: s for k, p, s in listing() if k == "F"}
     bad = 0
+    todo = []
     for fn in files:
-        name = "/" + os.path.basename(fn)
+        name = f"/{DIR}/" + os.path.basename(fn)
         if name in on_card:
             saved = os.path.join(backup, name.lstrip("/"))
             if not (os.path.isfile(saved) and os.path.getsize(saved) == on_card[name]):
                 print(f"REFUSED {name}: on the card but not backed up in {backup}")
                 bad += 1
                 continue
+        todo.append((fn, name))
+    if todo:
+        st, out = sftp([f"-mkdir {DIR}"] + [f'put "{fn}" "{name.lstrip("/")}"' for fn, name in todo])
+        if st != 0:
+            print(f"sftp exit {st}: {out.strip()[-300:]}")
+    for fn, name in todo:
         data = open(fn, "rb").read()
-        st, _ = http("PUT", name, data)
-        _, back = http("GET", name)
-        ok = st == 201 and back == data
+        try:
+            _, back = http("GET", name)
+        except Exception as e:  # noqa: BLE001 - report any read-back failure
+            back = repr(e).encode()
+        ok = back == data
         bad += not ok
-        print(f"{'ok' if ok else 'FAILED'} {name} {len(data)} (HTTP {st})")
+        print(f"{'ok' if ok else 'FAILED'} {name} {len(data)}")
     return 1 if bad else 0
 
 
@@ -170,7 +196,7 @@ def cmd_run(out, specs):
         inputs = [i for i in inp.split(",") if i] if inp else []
         s = ssh()
         session_log(s, os.path.join(out, name + ".ssh"))
-        s.send(f"run {name}\r")
+        s.send(f"run {DIR}/{name}\r")
         done = [r"Program exited: (-?\d+)", r"Load/run failed \(code (-?\d+)\)", pexpect.EOF]
         res = None
         t0 = time.time()
@@ -207,7 +233,7 @@ def cmd_svc(out, name, url, regex):
     os.makedirs(out, exist_ok=True)
     s = ssh()
     session_log(s, os.path.join(out, name + ".ssh"))
-    s.send(f"svc load {name}\r")
+    s.send(f"svc load {DIR}/{name}\r")
     i = s.expect([r"Service '[^']+' running", r"Load failed \((-?\d+)\)", pexpect.EOF, pexpect.TIMEOUT],
                  timeout=60)
     svc = re.sub(r"\..*", "", os.path.basename(name))
