@@ -15,6 +15,7 @@ add_subdirectory(drivers/timer)
 add_subdirectory_ifdef(CONFIG_NET_L2_ETHERNET drivers/ethernet)
 add_subdirectory_ifdef(CONFIG_DISK_ACCESS drivers/disk)
 add_subdirectory_ifdef(CONFIG_ENTROPY_KLAUSSCPU_TRNG drivers/entropy)
+add_subdirectory_ifdef(CONFIG_FLASH_KLAUSSCPU_QSPI drivers/flash)
 add_subdirectory_ifdef(CONFIG_PSA_CRYPTO_DRIVER_KLAUSSCPU drivers/crypto)
 
 # The AES/GHASH/SHA/TRNG driver shared with the bare-metal programs, for the

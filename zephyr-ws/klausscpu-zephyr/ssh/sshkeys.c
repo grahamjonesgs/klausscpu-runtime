@@ -22,7 +22,6 @@
 LOG_MODULE_REGISTER(sshkeys, LOG_LEVEL_INF);
 
 #define PRIV_DER_MAX 256
-#define KEY_PATH     KEYSTORE_DIR "/" SSH_KEY_FILENAME
 
 static uint8_t s_priv_der[PRIV_DER_MAX];
 static int s_priv_der_len;
@@ -63,48 +62,20 @@ static int generate_keypair(void)
 	return 0;
 }
 
-static int load_from_sd(void)
+static int load_key(void)
 {
-	struct fs_file_t f;
-	ssize_t br;
+	int n = keystore_load(SSH_KEY_FILENAME, s_priv_der, PRIV_DER_MAX);
 
-	fs_file_t_init(&f);
-
-	if (fs_open(&f, KEY_PATH, FS_O_READ) != 0) {
+	if (n < 16 || s_priv_der[0] != 0x30) {
 		return -1;
 	}
-
-	br = fs_read(&f, s_priv_der, PRIV_DER_MAX);
-	fs_close(&f);
-
-	if (br < 16 || s_priv_der[0] != 0x30) {
-		return -1;
-	}
-
-	s_priv_der_len = (int)br;
+	s_priv_der_len = n;
 	return 0;
 }
 
-static int save_to_sd(void)
+static int save_key(void)
 {
-	struct fs_file_t f;
-	ssize_t bw;
-
-	fs_file_t_init(&f);
-
-	if (fs_open(&f, KEY_PATH, FS_O_WRITE | FS_O_CREATE) != 0) {
-		LOG_ERR("Cannot open %s for writing", KEY_PATH);
-		return -1;
-	}
-
-	bw = fs_write(&f, s_priv_der, s_priv_der_len);
-	fs_close(&f);
-
-	if (bw != s_priv_der_len) {
-		LOG_ERR("Write failed: %d/%d bytes", (int)bw, s_priv_der_len);
-		return -1;
-	}
-	return 0;
+	return keystore_save(SSH_KEY_FILENAME, s_priv_der, s_priv_der_len);
 }
 
 int sshkeys_init(void)
@@ -113,9 +84,8 @@ int sshkeys_init(void)
 		return 0;
 	}
 
-	(void)keystore_prepare(SSH_KEY_FILENAME);
-	if (load_from_sd() == 0) {
-		LOG_INF("Loaded host key from SD (%d bytes)", s_priv_der_len);
+	if (load_key() == 0) {
+		LOG_INF("Loaded host key (%d bytes)", s_priv_der_len);
 		s_initialized = 1;
 		return 0;
 	}
@@ -138,13 +108,13 @@ int sshkeys_persist(void)
 		return 0;
 	}
 
-	if (save_to_sd() == 0) {
-		LOG_INF("Host key saved to SD");
+	if (save_key() == 0) {
+		LOG_INF("Host key saved to %s", keystore_backend());
 		s_needs_persist = 0;
 		return 0;
 	}
 
-	LOG_WRN("Could not save host key to SD");
+	LOG_WRN("Could not save host key");
 	return -1;
 }
 

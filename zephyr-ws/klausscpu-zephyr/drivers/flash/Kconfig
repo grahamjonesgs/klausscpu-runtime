@@ -1,0 +1,14 @@
+config FLASH_KLAUSSCPU_QSPI
+	bool "KlaussCPU QSPI configuration-flash driver"
+	default y
+	depends on DT_HAS_KLAUSSCPU_QSPI_FLASH_ENABLED
+	depends on FLASH
+	select FLASH_HAS_DRIVER_ENABLED
+	select FLASH_HAS_PAGE_LAYOUT
+	select FLASH_HAS_EXPLICIT_ERASE
+	help
+	  Flash driver for the board's S25FL128S configuration flash through
+	  klaussCPU's qspi_ctrl (0xF012_0000).  Program and erase are allowed
+	  only at or above the hardware floor (0xF0_0000); the FPGA bitstream
+	  below it is read-only.  On a bitstream without qspi_ctrl the device
+	  fails to initialise (not ready).

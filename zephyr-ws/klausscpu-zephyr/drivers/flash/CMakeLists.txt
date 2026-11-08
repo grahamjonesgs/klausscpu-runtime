@@ -1,0 +1,2 @@
+zephyr_library()
+zephyr_library_sources_ifdef(CONFIG_FLASH_KLAUSSCPU_QSPI flash_klausscpu_qspi.c)
