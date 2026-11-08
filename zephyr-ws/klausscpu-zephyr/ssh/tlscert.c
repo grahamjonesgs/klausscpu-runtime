@@ -54,8 +54,6 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp)
 
 #define KEY_DER_MAX   256
 #define CERT_DER_MAX  1024
-#define KEY_PATH      KEYSTORE_DIR "/" TLS_KEY_FILENAME
-#define CERT_PATH     KEYSTORE_DIR "/" TLS_CERT_FILENAME
 
 static uint8_t s_key_der[KEY_DER_MAX];
 static int     s_key_der_len;
@@ -111,45 +109,28 @@ static void build_san(Cert *cert)
 
 /* ── DER blob persistence (same shape as sshkeys.c) ──────────────────────── */
 
-static int load_blob(const char *path, uint8_t *buf, int cap, int min_len,
+static int load_blob(const char *name, uint8_t *buf, int cap, int min_len,
 		     int *out_len)
 {
-	struct fs_file_t f;
-	ssize_t br;
-
-	fs_file_t_init(&f);
-	if (fs_open(&f, path, FS_O_READ) != 0) {
-		return -1;
-	}
-	br = fs_read(&f, buf, cap);
-	fs_close(&f);
+	int n = keystore_load(name, buf, cap);
 
 	/* Must be a DER SEQUENCE (0x30) of at least min_len bytes.  A real
 	 * P-256 key DER is ~121 B and a cert ~378 B, so a stale truncated blob
 	 * (e.g. a 21-byte key from an earlier export bug) is rejected and
 	 * regenerated rather than served. */
-	if (br < min_len || buf[0] != 0x30) {
+	if (n < min_len || buf[0] != 0x30) {
 		return -1;
 	}
-	*out_len = (int)br;
+	*out_len = n;
 	return 0;
 }
 
-static int save_blob(const char *path, const uint8_t *buf, int len)
+static int save_blob(const char *name, const uint8_t *buf, int len)
 {
-	struct fs_file_t f;
-	ssize_t bw;
+	int rc = keystore_save(name, buf, len);
 
-	fs_file_t_init(&f);
-	if (fs_open(&f, path, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC) != 0) {
-		LOG_ERR("Cannot open %s for writing", path);
-		return -1;
-	}
-	bw = fs_write(&f, buf, len);
-	fs_close(&f);
-
-	if (bw != len) {
-		LOG_ERR("Write %s failed: %d/%d bytes", path, (int)bw, len);
+	if (rc != 0) {
+		LOG_ERR("Cannot save %s: %d", name, rc);
 		return -1;
 	}
 	return 0;
@@ -247,13 +228,10 @@ int tlscert_init(const uint8_t *ip4)
 		s_have_ip = true;
 	}
 
-	(void)keystore_prepare(TLS_KEY_FILENAME);
-	(void)keystore_prepare(TLS_CERT_FILENAME);
-
 	/* Floors below a valid P-256 key (~121 B) / cert (~378 B) so a stale
 	 * truncated blob is rejected and regenerated. */
-	if (load_blob(KEY_PATH, s_key_der, KEY_DER_MAX, 64, &s_key_der_len) == 0 &&
-	    load_blob(CERT_PATH, s_cert_der, CERT_DER_MAX, 100, &s_cert_der_len) == 0) {
+	if (load_blob(TLS_KEY_FILENAME, s_key_der, KEY_DER_MAX, 64, &s_key_der_len) == 0 &&
+	    load_blob(TLS_CERT_FILENAME, s_cert_der, CERT_DER_MAX, 100, &s_cert_der_len) == 0) {
 		/* Reuse the persisted pair only if it still covers our IP — the
 		 * 4 IP bytes appear verbatim in the iPAddress SAN.  If the
 		 * reserved address changed, fall through and regenerate. */
@@ -261,8 +239,8 @@ int tlscert_init(const uint8_t *ip4)
 		    mem_contains(s_cert_der, s_cert_der_len, s_ip, 4)) {
 			/* One value per LOG line: Zephyr's packaged logging
 			 * mis-renders some multi-arg width packing here (CLAUDE.md). */
-			LOG_INF("Loaded TLS cert from SD: %d bytes", s_cert_der_len);
-			LOG_INF("Loaded TLS key from SD: %d bytes", s_key_der_len);
+			LOG_INF("Loaded TLS cert: %d bytes", s_cert_der_len);
+			LOG_INF("Loaded TLS key: %d bytes", s_key_der_len);
 			s_initialized = 1;
 			return 0;
 		}
@@ -279,11 +257,11 @@ int tlscert_init(const uint8_t *ip4)
 	LOG_INF("Generated TLS private key: %d bytes", s_key_der_len);
 
 	/* Best-effort persist; a failed save just means we regenerate next boot. */
-	if (save_blob(KEY_PATH, s_key_der, s_key_der_len) == 0 &&
-	    save_blob(CERT_PATH, s_cert_der, s_cert_der_len) == 0) {
-		LOG_INF("TLS cert + key saved to SD");
+	if (save_blob(TLS_KEY_FILENAME, s_key_der, s_key_der_len) == 0 &&
+	    save_blob(TLS_CERT_FILENAME, s_cert_der, s_cert_der_len) == 0) {
+		LOG_INF("TLS cert + key saved to %s", keystore_backend());
 	} else {
-		LOG_WRN("Could not save TLS cert/key to SD (will regenerate)");
+		LOG_WRN("Could not save TLS cert/key (will regenerate)");
 	}
 
 	s_initialized = 1;

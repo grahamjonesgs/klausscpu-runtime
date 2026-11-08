@@ -1,0 +1,14 @@
+description: |
+  KlaussCPU qspi_ctrl: CPU access to the board's QSPI configuration flash
+  (S25FL128S, 16 MiB).  The child soc-nv-flash node describes the flash
+  (reg = <0 size>, erase-block-size, write-block-size) and its partitions.
+  Offsets are flash byte addresses; program/erase below the hardware floor
+  (0xF0_0000, the FPGA bitstream) are refused.
+
+compatible: "klausscpu,qspi-flash"
+
+include: [flash-controller.yaml]
+
+properties:
+  reg:
+    required: true

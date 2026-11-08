@@ -62,6 +62,48 @@
 		status = "okay";
 	};
 
+	/*
+	 * QSPI configuration flash (S25FL128S, 16 MiB) through qspi_ctrl at
+	 * 0xF012_0000.  The FPGA bitstream is below 0xF0_0000; the hardware
+	 * refuses program/erase there.  Offsets are flash byte addresses.
+	 */
+	qspi0: flash-controller@f0120000 {
+		compatible = "klausscpu,qspi-flash";
+		reg = <0xF0120000 0x200>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		status = "okay";
+
+		flash0: flash@0 {
+			compatible = "soc-nv-flash";
+			reg = <0x0 0x1000000>;
+			erase-block-size = <0x10000>;
+			write-block-size = <1>;
+
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				bitstream_partition: partition@0 {
+					label = "bitstream";
+					reg = <0x0 0xF00000>;
+					read-only;
+				};
+				/* Private keys (ssh/keystore.c, NVS). */
+				storage_partition: partition@f00000 {
+					label = "storage";
+					reg = <0xF00000 0xC0000>;
+				};
+				/* Board tests (klaussCPU tools/board/qspi_test.c). */
+				scratch_partition: partition@fc0000 {
+					label = "scratch";
+					reg = <0xFC0000 0x40000>;
+				};
+			};
+		};
+	};
+
 	/* SD card SPI controller at 0xF000_0000. */
 	sd0: sd@f0000000 {
 		compatible = "klausscpu,sd";
