@@ -294,7 +294,7 @@ its list against klausscpu-llvm's `KlaussCPU.def`.
 Copy the `.llext` to the SD card, then over SSH (`ssh admin@<ip>`, pw `klausscpu`):
 
 ```
-run adventure.llext          # or: run /SD:/adventure.llext
+run adventure.llext          # /SD:/adventure.llext, else /SD:/llext/adventure.llext
 ```
 
 The program's `printf`/`puts`/`putchar` output and `getchar` input flow over the

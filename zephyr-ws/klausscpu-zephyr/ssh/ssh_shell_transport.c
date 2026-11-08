@@ -36,6 +36,7 @@
 #include <zephyr/sys/ring_buffer.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/fs/fs.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -441,6 +442,27 @@ int ssh_shell_getc(const struct shell *sh)
 	}
 }
 
+/* Resolve an extension file argument to an SD path: an absolute path as is,
+ * else /SD:/<arg>, or /SD:/llext/<arg> (where extensions are kept) when only
+ * that exists. */
+static const char *ext_resolve_path(const char *arg, char *buf, size_t buflen)
+{
+	struct fs_dirent ent;
+	char alt[128];
+
+	if (arg[0] == '/') {
+		return arg;
+	}
+	(void)snprintf(buf, buflen, "/SD:/%s", arg);
+	if (fs_stat(buf, &ent) != 0) {
+		(void)snprintf(alt, sizeof(alt), "/SD:/llext/%s", arg);
+		if (fs_stat(alt, &ent) == 0) {
+			(void)snprintf(buf, buflen, "%s", alt);
+		}
+	}
+	return buf;
+}
+
 /* ── `run` command — load & execute an llext extension ───────────────────────
  * Registered here (not shell_cmds.c) because it needs the per-session WOLFSSH*.
  * Available on the serial console too: ssh_shell_ssh() returns NULL there and
@@ -452,11 +474,8 @@ static int cmd_run(const struct shell *sh, size_t argc, char **argv)
 	char pathbuf[128];
 	const char *filename;
 
-	if (arg != NULL && arg[0] == '/') {
-		filename = arg;
-	} else if (arg != NULL) {
-		snprintf(pathbuf, sizeof(pathbuf), "/SD:/%s", arg);
-		filename = pathbuf;
+	if (arg != NULL) {
+		filename = ext_resolve_path(arg, pathbuf, sizeof(pathbuf));
 	} else {
 		filename = "/SD:/PROG.LLEXT";
 	}
@@ -480,7 +499,8 @@ static int cmd_run(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_CMD_ARG_REGISTER(run, NULL,
-		       "Load & run extension [file] (default /SD:/PROG.LLEXT)",
+		       "Load & run extension [file]: /SD:/<file>, else /SD:/llext/<file>"
+		       " (default /SD:/PROG.LLEXT)",
 		       cmd_run, 1, 1);
 
 /* ── `svc` command — manage resident, detached background services ───────────
@@ -488,20 +508,10 @@ SHELL_CMD_ARG_REGISTER(run, NULL,
  * stays loaded and runs on its own thread(s).  See llext_service_* in
  * llext_loader.c.  Registered here next to `run` as it shares that loader. */
 
-/* Resolve a user file argument to an SD path: absolute as-is, else /SD:/<arg>. */
-static const char *svc_resolve_path(const char *arg, char *buf, size_t buflen)
-{
-	if (arg[0] == '/') {
-		return arg;
-	}
-	(void)snprintf(buf, buflen, "/SD:/%s", arg);
-	return buf;
-}
-
 static int cmd_svc_load(const struct shell *sh, size_t argc, char **argv)
 {
 	char pathbuf[128];
-	const char *filename = svc_resolve_path(argv[1], pathbuf, sizeof(pathbuf));
+	const char *filename = ext_resolve_path(argv[1], pathbuf, sizeof(pathbuf));
 	char name[16];
 
 	if (argc > 2) {
@@ -570,7 +580,8 @@ static int cmd_svc_list(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(svc_subcmds,
 	SHELL_CMD_ARG(load, NULL,
-		      "load <file.llext> [name] — load & start a service",
+		      "load <file.llext> [name] — load & start a service"
+		      " (a bare name: /SD:/, else /SD:/llext/)",
 		      cmd_svc_load, 2, 1),
 	SHELL_CMD_ARG(stop, NULL,
 		      "stop <name> — stop & unload a service",

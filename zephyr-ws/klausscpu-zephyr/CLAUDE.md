@@ -126,8 +126,9 @@ klausscc -e build_ssh/zephyr/zephyr.elf --serial /dev/tty.usbserial-... --monito
 ## 4. LLEXT runtime extensions (the SSH `run` command)
 
 `ssh_shell` can load `.llext` ELF objects at runtime. Build them from the
-**bare-metal** Makefile (not west), then copy to the SD card and `run <name>.llext`
-over SSH:
+**bare-metal** Makefile (not west), then copy to the SD card's `llext/` folder
+and `run <name>.llext` over SSH (`run` and `svc load` look for a bare name at
+the top of the card, then in `/SD:/llext/`):
 
 ```sh
 ( cd ../baremetal && make ext-demos )   # builds hello/adventure/expr/... .llext

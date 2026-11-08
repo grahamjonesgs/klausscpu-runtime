@@ -4,7 +4,7 @@
  * The kernel's webapi.c is only a dispatcher; this extension supplies the actual
  * route logic and registers it with webapi_register() at svc_start, removing it
  * at svc_stop.  Built as a single-source ELF-object llext (add_llext_target in
- * apps/ssh_shell/CMakeLists.txt) and loaded with `svc load /SD:/apibackend.llext`.
+ * apps/ssh_shell/CMakeLists.txt) and loaded with `svc load apibackend.llext` (kept in /SD:/llext/).
  *
  * The same handler serves BOTH the :80 (httpd) and :443 (httpsd) servers, so the
  * 7-seg software shadow (s_seg) is a single instance and stays consistent across

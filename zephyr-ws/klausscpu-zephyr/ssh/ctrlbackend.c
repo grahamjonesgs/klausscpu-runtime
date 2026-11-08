@@ -5,7 +5,7 @@
  * coexists with apibackend.llext (which owns "/api/") — load both and each
  * serves its own namespace concurrently on :80 and :443.  Built as ctrl.llext
  * (add_llext_target in apps/ssh_shell/CMakeLists.txt); load with
- * `svc load /SD:/ctrl.llext`, unload with `svc stop ctrl`.
+ * `svc load ctrl.llext` (kept in /SD:/llext/), unload with `svc stop ctrl`.
  *
  *   GET /ctrl/ping          -> {"pong":true,"uptime_ms":N}
  *   GET /ctrl/echo?msg=...   -> {"echo":"..."}   (value reflected verbatim)
