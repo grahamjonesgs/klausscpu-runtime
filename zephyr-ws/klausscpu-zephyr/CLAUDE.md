@@ -188,10 +188,32 @@ check a card and server (a second mount adds two-session tests):
 ```
 
 The HTTP (:80) and HTTPS (:443) file servers only read: uploads (`PUT`) are
-off unless `CONFIG_KLAUSSCPU_HTTP_PUT=y`, as they need no login.  The SSH host
-key and the TLS key and certificate live in `/SD:/sys/` (`ssh/keystore.h`),
-which those servers refuse; firmware that kept them at the top of the card
-moves them there at boot, keeping the board's identity.
+off unless `CONFIG_KLAUSSCPU_HTTP_PUT=y`, as they need no login.
+
+## 7. Private keys: QSPI flash keystore
+
+The SSH host key and the TLS key and certificate (`ssh/keystore.h`) live in
+the board's QSPI configuration flash when the bitstream has klaussCPU's
+`qspi_ctrl` (MMIO 0xF012_0000).  They are stored with NVS on
+`storage_partition` (0xF0_0000, 768 KiB, above the FPGA bitstream; see
+`nexys_a7.dts`), so they survive reboots, SD card swaps and bitstream
+updates (`openFPGALoader -f` only erases the bitstream's sectors).  Driver:
+`drivers/flash/flash_klausscpu_qspi.c`.  The hardware refuses to program or
+erase below 0xF0_0000.
+
+- **First boot on a qspi bitstream:** keys found only on the card
+  (`/SD:/sys/`, or the top of the card from older firmware) are copied into
+  flash, so the board keeps its identity.  The card copies stay in place.
+  `keystore status` shows where each key is.  `keystore purge_sd` deletes
+  card copies that are byte-identical to the flash ones.
+- **Bitstream without `qspi_ctrl`:** the flash device is not ready, and the
+  keys stay in `/SD:/sys/` (which HTTP/HTTPS refuse) as before.  If the card
+  copies have been purged, such a bitstream generates new keys, so the host
+  key changes between the two bitstreams.
+- **NVS on-flash format:** `CONFIG_NVS_DATA_CRC=y`.  Changing it makes the
+  stored keys read as missing.
+- **Full-flash dumps:** a 16 MiB `openFPGALoader --dump-flash` image contains
+  the private keys.  Restoring one with `-o 0` rolls the keys back as well.
 
 Limits: the patch protects files only between SFTP sessions.  Don't write one
 file through SFTP and the shell, HTTP or Python at the same time.  A
