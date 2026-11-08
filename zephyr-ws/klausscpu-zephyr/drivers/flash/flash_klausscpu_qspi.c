@@ -18,6 +18,13 @@
  * Every call takes a mutex: commands are multi-step (WREN, PP, poll RDSR).
  * Erase (~130-650 ms per 64 KiB sector) sleeps between status polls; page
  * program (~0.25 ms) busy-polls.
+ *
+ * S25FL-S error handling: after a failed program or erase, P_ERR / E_ERR is
+ * set and WIP *stays* 1 until CLSR; the flash ignores everything else
+ * meanwhile.  So every poll checks the error bits and clears them at once,
+ * a timeout also sends CLSR, and each program/erase first waits for the
+ * flash to be idle (an earlier timed-out operation may still be running).
+ * Polling overwrites buffer bytes 0..0, so the buffer is filled afterwards.
  */
 
 #define DT_DRV_COMPAT klausscpu_qspi_flash
@@ -116,7 +123,9 @@ static uint8_t q_rdsr1(const struct device *dev)
 	return q_buf_byte(dev, 0);
 }
 
-/* Wait for WIP to clear.  sleep_ms > 0 sleeps between polls (erase). */
+/* Wait for WIP to clear.  sleep_ms > 0 sleeps between polls (erase).
+ * A program/erase error (WIP stuck with P_ERR/E_ERR) is cleared with CLSR
+ * and returns -EIO; a timeout also sends CLSR and returns -ETIMEDOUT. */
 static int q_wait_ready(const struct device *dev, int sleep_ms, uint32_t limit)
 {
 	uint8_t sr;
@@ -124,23 +133,30 @@ static int q_wait_ready(const struct device *dev, int sleep_ms, uint32_t limit)
 
 	for (;;) {
 		sr = q_rdsr1(dev);
+		if (sr & (SR1_E_ERR | SR1_P_ERR)) {
+			LOG_ERR("flash SR1 error 0x%02x", sr);
+			(void)q_cmd(dev, OP_CLSR, 0, 0);
+			(void)q_cmd(dev, OP_WRDI, 0, 0);
+			return -EIO;
+		}
 		if (!(sr & SR1_WIP)) {
-			break;
+			return 0;
 		}
 		if (++n >= limit) {
-			LOG_ERR("flash busy timeout");
+			LOG_ERR("flash busy timeout (SR1 0x%02x)", sr);
+			(void)q_cmd(dev, OP_CLSR, 0, 0);
 			return -ETIMEDOUT;
 		}
 		if (sleep_ms > 0) {
 			k_msleep(sleep_ms);
 		}
 	}
-	if (sr & (SR1_E_ERR | SR1_P_ERR)) {
-		LOG_ERR("flash SR1 error 0x%02x", sr);
-		(void)q_cmd(dev, OP_CLSR, 0, 0);
-		return -EIO;
-	}
-	return 0;
+}
+
+/* Before a program or erase: let any earlier operation finish. */
+static int q_idle(const struct device *dev)
+{
+	return q_wait_ready(dev, 2, ERASE_TIMEOUT_MS / 2);
 }
 
 static bool range_ok(off_t offset, size_t len)
@@ -209,6 +225,10 @@ static int qspi_write(const struct device *dev, off_t offset, const void *data, 
 		uint32_t n = MIN(len, PAGE_SIZE - ((uint32_t)offset & (PAGE_SIZE - 1)));
 		uint32_t i;
 
+		rc = q_idle(dev);         /* polls RDSR: before filling the buffer */
+		if (rc) {
+			break;
+		}
 		for (i = 0; i < n; i += 8) {
 			uint64_t w = ~0ull;
 
@@ -253,7 +273,10 @@ static int qspi_erase(const struct device *dev, off_t offset, size_t size)
 	}
 	k_mutex_lock(&d->lock, K_FOREVER);
 	for (size_t done = 0; done < size; done += ERASE_SIZE) {
-		rc = q_cmd(dev, OP_WREN, 0, 0);
+		rc = q_idle(dev);
+		if (!rc) {
+			rc = q_cmd(dev, OP_WREN, 0, 0);
+		}
 		if (!rc) {
 			rc = q_cmd(dev, OP_SE, 0, (uint32_t)(offset + done));
 		}
@@ -342,6 +365,9 @@ static int qspi_init(const struct device *dev)
 		LOG_ERR("flash has 256 KiB sectors but DT erase-block-size is %u", ERASE_SIZE);
 		return -EINVAL;
 	}
+	/* Clear any error left by an interrupted program/erase (WIP stuck with
+	 * P_ERR/E_ERR survives a CPU reset), and let a running one finish. */
+	(void)q_wait_ready(dev, 0, 5000000);
 	d->floor = (uint32_t)q_rd(dev, Q_FLOOR);
 	d->present = true;
 	LOG_INF("S25FL128S %u MiB, writable from 0x%06x", (unsigned)(FLASH_SIZE >> 20), d->floor);

@@ -10,6 +10,10 @@
  * the top of the card from older firmware), it is copied into flash so the
  * board keeps its identity.  The card copy is left in place; `keystore
  * purge_sd` deletes card copies that flash holds byte-for-byte.
+ *
+ * Booting a bitstream without qspi_ctrl after purge_sd generates new keys on
+ * the card; back on a qspi bitstream the flash keys win again, so the SSH
+ * host key changes between the two (known_hosts warnings).
  */
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -77,14 +81,17 @@ int keystore_prepare(const char *name)
 	return 0;
 }
 
-/* Bytes read, or a negative errno (-ENOENT if there is no file). */
-static int sd_load(const char *name, uint8_t *buf, size_t cap)
+/* Bytes read, or a negative errno (-ENOENT if there is no file).  prepare:
+ * run keystore_prepare (mkdir / move from the top of the card) first. */
+static int sd_read(const char *name, uint8_t *buf, size_t cap, bool prepare)
 {
 	char path[64];
 	struct fs_file_t f;
 	ssize_t br;
 
-	(void)keystore_prepare(name);
+	if (prepare) {
+		(void)keystore_prepare(name);
+	}
 	(void)snprintf(path, sizeof(path), "%s/%s", KEYSTORE_DIR, name);
 	fs_file_t_init(&f);
 	if (fs_open(&f, path, FS_O_READ) != 0) {
@@ -149,16 +156,12 @@ static int flash_mount(void)
 	if (s_flash_state != 0) {
 		return (s_flash_state > 0) ? 0 : s_flash_state;
 	}
+	/* -ENODEV when the flash device is not ready (no qspi_ctrl). */
 	rc = flash_area_open(PARTITION_ID(storage_partition), &fa);
 	if (rc != 0) {
+		LOG_INF("No QSPI flash (%d): keys stay on the SD card", rc);
 		s_flash_state = rc;
 		return rc;
-	}
-	if (!device_is_ready(fa->fa_dev)) {
-		LOG_INF("No QSPI flash in this bitstream: keys stay on the SD card");
-		flash_area_close(fa);
-		s_flash_state = -ENODEV;
-		return -ENODEV;
 	}
 	rc = flash_get_page_info_by_offs(fa->fa_dev, fa->fa_off, &info);
 	if (rc == 0) {
@@ -174,10 +177,12 @@ static int flash_mount(void)
 	}
 
 	rc = nvs_mount(&s_nvs);
-	if (rc != 0) {
-		/* Not an NVS area (never used, or corrupt).  The partition holds
-		 * nothing but keystore entries: start it afresh. */
-		LOG_WRN("Keystore flash area not mountable (%d): erasing it", rc);
+	if (rc == -EDEADLK) {
+		/* Every sector closed: not an NVS area (foreign data).  Only
+		 * then start afresh.  Any other error (an I/O error during
+		 * recovery after a power cut, say) leaves the flash alone, and the
+		 * keys come from the SD card for this boot. */
+		LOG_WRN("Keystore flash area is not NVS: erasing it");
 		rc = flash_erase(s_nvs.flash_device, s_nvs.offset,
 				 (size_t)s_nvs.sector_size * s_nvs.sector_count);
 		if (rc == 0) {
@@ -185,7 +190,7 @@ static int flash_mount(void)
 		}
 	}
 	if (rc != 0) {
-		LOG_ERR("Keystore flash mount failed: %d", rc);
+		LOG_ERR("Keystore flash mount failed (%d): using the SD card", rc);
 		s_flash_state = rc;
 		return rc;
 	}
@@ -255,7 +260,7 @@ int keystore_load(const char *name, uint8_t *buf, size_t cap)
 			return n;
 		}
 		/* Not in flash yet: take the card's copy, if any, and keep it. */
-		n = sd_load(name, buf, cap);
+		n = sd_read(name, buf, cap, true);
 		if (n > 0) {
 			int rc = flash_save(name, buf, n);
 
@@ -269,7 +274,7 @@ int keystore_load(const char *name, uint8_t *buf, size_t cap)
 		return (n > 0) ? n : -ENOENT;
 	}
 #endif
-	n = sd_load(name, buf, cap);
+	n = sd_read(name, buf, cap, true);
 	k_mutex_unlock(&s_lock);
 	return (n > 0) ? n : -ENOENT;
 }
@@ -327,7 +332,7 @@ static int cmd_status(const struct shell *sh, size_t argc, char **argv)
 	for (size_t i = 0; i < ARRAY_SIZE(known_names); i++) {
 		const char *name = known_names[i];
 		int f = -ENODEV;
-		int s = sd_load(name, s_b, sizeof(s_b));
+		int s = sd_read(name, s_b, sizeof(s_b), false);
 		const char *fs_txt;
 		const char *sd_txt;
 
@@ -367,7 +372,7 @@ static int cmd_purge_sd(const struct shell *sh, size_t argc, char **argv)
 		const char *name = known_names[i];
 		char path[64];
 		int f = flash_load(name, s_a, sizeof(s_a));
-		int s = sd_load(name, s_b, sizeof(s_b));
+		int s = sd_read(name, s_b, sizeof(s_b), false);
 
 		if (s <= 0) {
 			continue;
