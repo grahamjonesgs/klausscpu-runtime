@@ -66,6 +66,28 @@ void exc_mpu_reset(void);
 /* Set or clear STATUS.MPU_EN (read-modify-write of STATUS). */
 void exc_mpu_enable(int on);
 
+/* ── Stage 3: TLB and paging (MMU_PLAN.md §11) ────────────────────────── */
+#define SR_TLB_HI     0x30   /* [31:16] VPN, [8] G, [7:0] ASID (auto-loaded on a TLB fault) */
+#define SR_TLB_LO     0x31   /* [26:16] PFN, [3] X, [2] W, [1] R, [0] V */
+#define SR_TLB_INDEX  0x32   /* [4:0] index, [31] P = the last TLBP missed */
+#define SR_ASID       0x33
+#define SR_TLBVEC     0x34   /* TLB-miss vector, 0 = EVEC */
+#define TLB_HI_G      0x100u
+#define TLB_LO_V      0x1u
+#define TLB_LO_R      0x2u
+#define TLB_LO_W      0x4u
+#define TLB_LO_X      0x8u
+#define TLB_INDEX_P   0x80000000u
+#define TLB_PAGE      0x10000u      /* 64 KiB pages */
+#define KSEG_BASE     0x80000000u   /* kseg: PA = VA - KSEG_BASE (TE = 1) */
+#define KMAP_BASE     0xC0000000u
+#define CPU_FEAT_TLB_ENTRIES(f) (((f) >> 8) & 0xFFu)
+
+static inline void klauss_tlbwi(void)  { __asm__ volatile(".long 0x6C090000" ::: "memory"); }
+static inline void klauss_tlbr(void)   { __asm__ volatile(".long 0x6C0A0000" ::: "memory"); }
+static inline void klauss_tlbp(void)   { __asm__ volatile(".long 0x6C0B0000" ::: "memory"); }
+static inline void klauss_tlbinv(void) { __asm__ volatile(".long 0x6C0C0000" ::: "memory"); }
+
 /* ── Causes (ECAUSE[7:0]) ──────────────────────────────────────────────── */
 /* ECAUSE[8] (stage 2): the ACCESS_* fault was a denial by a GUARD region.
  * The handler's `cause` argument is the raw ECAUSE; use EXC_CAUSE(). */
@@ -82,6 +104,9 @@ enum exc_cause {
     EXC_ACCESS_STORE     = 8,
     EXC_ACCESS_FETCH     = 9,
     EXC_MISALIGNED_FETCH = 10,
+    EXC_TLB_MISS_LOAD    = 11,  /* stage 3: EADDR = VA, TLB_HI auto-loaded */
+    EXC_TLB_MISS_STORE   = 12,
+    EXC_TLB_MISS_FETCH   = 13,
 };
 
 /* ── The 64-bit frame (pushed by entry, popped by IRET) ─────────────────── */

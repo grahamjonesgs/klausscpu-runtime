@@ -86,6 +86,9 @@ static const char *cause_name(uint32_t c) {
     case EXC_ACCESS_STORE:     return "ACCESS_STORE";
     case EXC_ACCESS_FETCH:     return "ACCESS_FETCH";
     case EXC_MISALIGNED_FETCH: return "MISALIGNED_FETCH";
+    case EXC_TLB_MISS_LOAD:    return "TLB_MISS_LOAD";
+    case EXC_TLB_MISS_STORE:   return "TLB_MISS_STORE";
+    case EXC_TLB_MISS_FETCH:   return "TLB_MISS_FETCH";
     default:                   return "?";
     }
 }
