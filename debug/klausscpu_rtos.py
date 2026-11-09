@@ -14,8 +14,11 @@ port saved when they were switched out.  Both the FreeRTOS port
 frame at the task's saved stack pointer:
 
     [+0]   R15 ... [+120] R0    (16 x 64-bit)
-    [+128] IRET word: [31:0] PC, [38] Z, [36] C, [35] V, [34] S, [42:39] INT_MASK, [43] interrupts disabled (DI; 0 in a saved frame)
-    SP after the IRET = saved SP + 136
+    [+128] IRET word: [31:0] PC, [38] Z, [36] C, [35] V, [34] S, [42:39] INT_MASK, [43] interrupts disabled (DI; 0 in a saved frame),
+           [44] PM, previous mode (MMU stage 1, klaussCPU MMU_PLAN.md §3.2; 1 = the task was in user mode)
+    SP after the IRET = saved SP + 136 (PM = 0).  With PM = 1 the IRET switches to the
+    user SP (SR USP / debugger reg 20) instead; no port runs user tasks yet, so this
+    script does not handle that case.
 
 Requirements: FreeRTOS works as built.  Zephyr needs CONFIG_THREAD_MONITOR=y
 (the kernel's thread list) and, for names, CONFIG_THREAD_NAME=y.  Before the

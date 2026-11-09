@@ -1,6 +1,7 @@
 // atomic.c — the __sync_* libcalls behind C/C++ atomics on KlaussCPU.
 //
-// The ISA has no atomic read-modify-write, compare-and-swap or LL/SC.  The
+// The ISA has no atomic read-modify-write or compare-and-swap; cores with MMU
+// stage 1 (CPU_FEATURES bit 3, klaussCPU MMU_PLAN.md §5.1) add LR/SC.  The
 // backend uses the "forced atomics" model (as RISC-V +forced-atomics does):
 //  - naturally aligned atomic loads and stores of 1/2/4/8 bytes are plain
 //    loads and stores (the in-order core makes every access visible in
@@ -23,6 +24,17 @@
 // as it found them.  DI;EI is about 3 cycles; the INT_MASK save / zero /
 // restore it replaces was about 16.5.
 //
+// User mode (MMU stage 1): DI/EI are privileged there, so code running in
+// user mode on a core with LR/SC uses an LR/SC retry loop instead (any
+// interrupt or exception entry clears the reservation, so the loop is atomic
+// against this core's handlers and the kernel's DI/EI sections).  Supervisor
+// code keeps DI/EI, which is cheaper.  1- and 2-byte objects use LR.W/SC.W
+// on the aligned word that contains them.  The choice needs
+// __klauss_cpu_features, set by exc_init() (src/exc.c) in supervisor mode,
+// because user mode cannot read CPU_FEATURES (MMIO).  It is a weak
+// reference: a program without exc.c (FreeRTOS, Zephyr today) always takes
+// the DI/EI path, and only programs that reach user mode pay for the check.
+//
 // This excludes the core's own interrupt handlers and (through them) RTOS
 // preemption.  The CPU is single-core; DMA masters are not covered.
 //
@@ -42,6 +54,49 @@
 
 #include <stdint.h>
 
+#include "../exc.h"
+
+extern uint32_t __klauss_cpu_features __attribute__((weak));
+
+// Nonzero when this call must not use DI/EI: user mode on an LR/SC core.
+// STATUS (MFSR) is only read once the feature bit says it exists.
+static inline int use_lrsc(void) {
+    if (&__klauss_cpu_features == 0 ||
+        !(__klauss_cpu_features & CPU_FEAT_LRSC))
+        return 0;
+    return (exc_mfsr(SR_STATUS) & STATUS_UM) != 0;
+}
+
+// old = *p; *p = NEWEXPR (a function of old), atomically, with LR/SC.
+// NEWEXPR is evaluated inside the loop and must not itself use LR/SC.
+#define LRSC_RMW(N, T, p, old, NEWEXPR)                                      \
+    do {                                                                     \
+        if ((N) == 8) {                                                      \
+            uint64_t _n;                                                     \
+            do {                                                             \
+                old = (T)klauss_lr_d(p);                                     \
+                _n = (uint64_t)(T)(NEWEXPR);                                 \
+            } while (klauss_sc_d(p, _n));                                    \
+        } else if ((N) == 4) {                                               \
+            uint64_t _n;                                                     \
+            do {                                                             \
+                old = (T)klauss_lr_w(p);                                     \
+                _n = (uint64_t)(uint32_t)(T)(NEWEXPR);                       \
+            } while (klauss_sc_w(p, _n));                                    \
+        } else {                                                             \
+            uintptr_t _a = (uintptr_t)(p);                                   \
+            volatile void *_w = (volatile void *)(_a & ~(uintptr_t)3);       \
+            unsigned _sh = (unsigned)(_a & 3u) * 8u;                         \
+            uint32_t _m = (uint32_t)(T)~(T)0 << _sh;                         \
+            uint32_t _wv, _nw;                                               \
+            do {                                                             \
+                _wv = (uint32_t)klauss_lr_w(_w);                             \
+                old = (T)(_wv >> _sh);                                       \
+                _nw = (_wv & ~_m) | ((uint32_t)(T)(NEWEXPR) << _sh);         \
+            } while (klauss_sc_w(_w, _nw));                                  \
+        }                                                                    \
+    } while (0)
+
 // The builtins are compiler barriers for memory (llvm.klausscpu.di / .ei read
 // and write memory), so the accesses between them stay between them.
 static inline uint32_t irq_save(void) {
@@ -60,8 +115,13 @@ static inline void irq_restore(uint32_t key) {
     uint64_t sync_fetch_and_##OP##_##N(volatile void *ptr, uint64_t arg) {   \
         volatile T *p = (volatile T *)ptr;                                   \
         T val = (T)arg;                                                      \
+        T old;                                                               \
+        if (use_lrsc()) {                                                    \
+            LRSC_RMW(N, T, p, old, NEW);                                     \
+            return (uint64_t)old;                                            \
+        }                                                                    \
         uint32_t key = irq_save();                                           \
-        T old = *p;                                                          \
+        old = *p;                                                            \
         *p = (T)(NEW);                                                       \
         irq_restore(key);                                                    \
         return (uint64_t)old;                                                \
@@ -84,8 +144,13 @@ static inline void irq_restore(uint32_t key) {
         __asm__("__sync_lock_test_and_set_" #N);                             \
     uint64_t sync_lock_test_and_set_##N(volatile void *ptr, uint64_t arg) {  \
         volatile T *p = (volatile T *)ptr;                                   \
+        T old;                                                               \
+        if (use_lrsc()) {                                                    \
+            LRSC_RMW(N, T, p, old, arg);                                     \
+            return (uint64_t)old;                                            \
+        }                                                                    \
         uint32_t key = irq_save();                                           \
-        T old = *p;                                                          \
+        old = *p;                                                            \
         *p = (T)arg;                                                         \
         irq_restore(key);                                                    \
         return (uint64_t)old;                                                \
@@ -100,8 +165,14 @@ static inline void irq_restore(uint32_t key) {
                                            uint64_t expected,                \
                                            uint64_t desired) {               \
         volatile T *p = (volatile T *)ptr;                                   \
+        T old;                                                               \
+        if (use_lrsc()) {                                                    \
+            /* stores old back on a mismatch: still one atomic step */      \
+            LRSC_RMW(N, T, p, old, old == (T)expected ? (T)desired : old);   \
+            return (uint64_t)old;                                            \
+        }                                                                    \
         uint32_t key = irq_save();                                           \
-        T old = *p;                                                          \
+        old = *p;                                                            \
         if (old == (T)expected)                                              \
             *p = (T)desired;                                                 \
         irq_restore(key);                                                    \

@@ -20,6 +20,7 @@
 #   make test_hwcg      — compiler-emitted FBR W / imm32 (incl. range limits), CMPRVW.S, MULV.S
 #   make test_leapc     — LEAPC.S around the +-32 KiB boundary
 #   make test_misalign  — the misaligned 16/32-bit access trap (tools/validate/misalign.sh)
+#   make test_exc       — MMU stage 1: exceptions, user mode, SYSCALL, SRs, LR/SC (exc.h)
 #   make test_setjmp    — setjmp / longjmp (SP, callee-saved registers, stack args after longjmp)
 #   make test_task_exit — RTOS tasks that return or call rtos_task_exit
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
@@ -183,7 +184,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_selftest2 crypto_test dhrystone blit_selftest blit_capture \
-           test_unaligned test_misalign test_hwcg test_leapc vga_off test_setjmp test_task_exit
+           test_unaligned test_misalign test_exc test_hwcg test_leapc vga_off test_setjmp test_task_exit
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -213,6 +214,10 @@ stdio_handles.o: $(ROOT)/src/stdio_handles.c ; $(CC) $(CFLAGS) -c -o $@ $<
 uart_stubs.o:  $(ROOT)/src/uart_stubs.c  ; $(CC) $(CFLAGS) -I$(ROOT) -c -o $@ $<
 crt0.o:        $(ROOT)/src/crt0.c        ; $(CC) $(CFLAGS) -c -o $@ $<
 atomic.o:      $(ROOT)/src/atomic.c      ; $(CC) $(CFLAGS) -fno-lto -c -o $@ $<
+# Exceptions and user mode (MMU stage 1): only programs that use exc.h link these.
+EXC_OBJS = exc.o exc_vector.o
+exc.o:         $(ROOT)/src/exc.c         ; $(CC) $(CFLAGS) -I$(ROOT) -c -o $@ $<
+exc_vector.o:  $(ROOT)/src/exc_vector.S  ; $(CC) $(CFLAGS) -c -o $@ $<
 
 
 # compiler-rt builtins compiled from in-tree source
@@ -324,6 +329,9 @@ test_leapc.elf: test_leapc.o test_leapc_cases.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 # built by tools/validate/misalign.sh with CASEFLAGS=-DCASE=<n>.
 test_misalign.elf: test_misalign.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_misalign.o)
+
+test_exc.elf: test_exc.o $(EXC_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_exc.o $(EXC_OBJS))
 
 # test_flags: one generated assembly function per instruction
 # (programs/gen_test_flags.py writes test_flags_cases.S / .h).
@@ -612,6 +620,7 @@ test_unaligned:    test_unaligned.elf
 test_atomic:       test_atomic.elf
 test_diei:         test_diei.elf
 test_misalign:     test_misalign.elf
+test_exc:          test_exc.elf
 test_hwcg:         test_hwcg.elf
 test_leapc:        test_leapc.elf
 vga_off:           vga_off.elf
