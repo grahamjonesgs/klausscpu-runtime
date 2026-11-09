@@ -16,6 +16,11 @@ extern void ret_from_fork(void);
 /* Every frame enables all four sources (enable lives in INT_VECn). */
 #define USER_FRAME_BITS	((0xfUL << FRAME_INT_MASK_SHIFT) | FRAME_PM)
 
+/*
+ * WAIT with interrupts enabled.  The RTL does not take a pending interrupt
+ * in a one-instruction EI -> DI window (the emulator does), so idle must
+ * never be "ei; di; wait".
+ */
 void arch_cpu_idle(void)
 {
 	raw_local_irq_enable();
