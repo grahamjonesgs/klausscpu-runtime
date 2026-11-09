@@ -42,10 +42,35 @@ extern uint32_t __klauss_cpu_features;
 #define SR_TP        7   /* user read/write */
 #define SR_CYCLE     8   /* read-only, user-readable */
 
-#define STATUS_UM    0x1u
-#define STATUS_DI    0x2u
+#define STATUS_UM     0x1u
+#define STATUS_DI     0x2u
+#define STATUS_MPU_EN 0x100u   /* stage 2 */
+#define STATUS_TE     0x200u   /* stage 3 */
 
-/* ── Causes (ECAUSE) ───────────────────────────────────────────────────── */
+/* ── Stage 2: MPU (MMU_PLAN.md §10) ────────────────────────────────────── */
+#define SR_MPU_BASE(n)  (0x10 + 2 * (n))   /* [31:5] base granule, attrs below */
+#define SR_MPU_LIMIT(n) (0x11 + 2 * (n))   /* [31:5] LAST granule (inclusive) */
+#define MPU_EN      0x01u
+#define MPU_R       0x02u
+#define MPU_W       0x04u
+#define MPU_X       0x08u
+#define MPU_GUARD   0x10u                  /* deny region, either mode */
+#define MPU_GRANULE 32u
+#define CPU_FEAT_MPU_REGIONS(f) ((((f) >> 4) & 0xFu) + 1u)
+
+/* Program region n: [base, last] (both inclusive, 32-byte granules), attrs
+ * = MPU_EN | MPU_R/W/X or MPU_EN | MPU_GUARD.  0 attrs disables it. */
+void exc_mpu_set(unsigned n, uint32_t base, uint32_t last, uint32_t attrs);
+/* Disable all regions and clear STATUS.MPU_EN. */
+void exc_mpu_reset(void);
+/* Set or clear STATUS.MPU_EN (read-modify-write of STATUS). */
+void exc_mpu_enable(int on);
+
+/* ── Causes (ECAUSE[7:0]) ──────────────────────────────────────────────── */
+/* ECAUSE[8] (stage 2): the ACCESS_* fault was a denial by a GUARD region.
+ * The handler's `cause` argument is the raw ECAUSE; use EXC_CAUSE(). */
+#define ECAUSE_GUARD   0x100u
+#define EXC_CAUSE(c)   ((c) & 0xFFu)
 enum exc_cause {
     EXC_ILLEGAL          = 1,   /* EADDR = instruction word 0 */
     EXC_PRIVILEGED       = 2,   /* EADDR = instruction word 0 */
@@ -74,7 +99,15 @@ struct exc_regs {
     uint64_t frame;
 };
 
-/* Handler: return nonzero if handled (exc_vector then IRETs with the
+/* GUARD faults (MPU_PLAN §10.2): the vector touches no memory until it has
+ * read ECAUSE.  On a GUARD denial the faulting SP may lie inside a guard
+ * region, so it clears STATUS.MPU_EN (the frame, pushed into the guard
+ * unchecked, is then readable), moves to an emergency stack, and calls the
+ * handler there with a copy of the frame; the (possibly edited) frame is
+ * written back before IRET.  The MPU stays disabled: the handler re-enables
+ * it with exc_mpu_enable(1) when it has fixed the cause.
+ *
+ * Handler: return nonzero if handled (exc_vector then IRETs with the
  * possibly edited registers and frame); 0 to fall into the default report,
  * which prints the state and halts. */
 typedef int (*exc_handler_t)(struct exc_regs *regs, uint32_t cause, uint32_t eaddr);

@@ -45,8 +45,37 @@ void exc_disable(void) {
         exc_mtsr(SR_EVEC, 0);
 }
 
+// Region n's SR numbers must be literals for the .long encodings.
+#define MPU_CASE(n)                                                         \
+    case n:                                                                 \
+        exc_mtsr(0x10 + 2 * n, (base & ~0x1Fu) | (attrs & 0x1Fu));         \
+        exc_mtsr(0x11 + 2 * n, last & ~0x1Fu);                             \
+        break;
+
+void exc_mpu_set(unsigned n, uint32_t base, uint32_t last, uint32_t attrs) {
+    switch (n) {
+    MPU_CASE(0) MPU_CASE(1) MPU_CASE(2) MPU_CASE(3)
+    MPU_CASE(4) MPU_CASE(5) MPU_CASE(6) MPU_CASE(7)
+    MPU_CASE(8) MPU_CASE(9) MPU_CASE(10) MPU_CASE(11)
+    MPU_CASE(12) MPU_CASE(13) MPU_CASE(14) MPU_CASE(15)
+    default: break;
+    }
+}
+
+void exc_mpu_enable(int on) {
+    uint64_t st = exc_mfsr(SR_STATUS);
+    st = on ? (st | STATUS_MPU_EN) : (st & ~(uint64_t)STATUS_MPU_EN);
+    exc_mtsr(SR_STATUS, st);
+}
+
+void exc_mpu_reset(void) {
+    exc_mpu_enable(0);
+    for (unsigned n = 0; n < 16; n++)
+        exc_mpu_set(n, 0, 0, 0);
+}
+
 static const char *cause_name(uint32_t c) {
-    switch (c) {
+    switch (EXC_CAUSE(c)) {
     case EXC_ILLEGAL:          return "ILLEGAL";
     case EXC_PRIVILEGED:       return "PRIVILEGED";
     case EXC_TRAP:             return "TRAP";
@@ -64,8 +93,8 @@ static const char *cause_name(uint32_t c) {
 __attribute__((noreturn)) static void exc_report(struct exc_regs *r, uint32_t c,
                                                  uint32_t eaddr) {
     int user = (r->frame & FRAME_PM) != 0;
-    printf("\n*** exception %u %s in %s mode: PC=%08lx EADDR=%08lx\n", c,
-           cause_name(c), user ? "user" : "supervisor",
+    printf("\n*** exception %u %s%s in %s mode: PC=%08lx EADDR=%08lx\n", EXC_CAUSE(c),
+           cause_name(c), (c & ECAUSE_GUARD) ? " (GUARD)" : "", user ? "user" : "supervisor",
            (unsigned long)(r->frame & FRAME_PC_MASK), (unsigned long)eaddr);
     printf("    frame=%016llx", (unsigned long long)r->frame);
     if (user)
@@ -74,7 +103,7 @@ __attribute__((noreturn)) static void exc_report(struct exc_regs *r, uint32_t c,
     for (int i = 0; i < 16; i++)
         printf("    r%-2d=%016llx%s", i, (unsigned long long)r->r[i],
                (i & 1) ? "\n" : "");
-    register long rc __asm__("r12") = 0x100 | c;
+    register long rc __asm__("r12") = 0x100 | EXC_CAUSE(c);
     __asm__ volatile("halt" : : "r"(rc));
     __builtin_unreachable();
 }

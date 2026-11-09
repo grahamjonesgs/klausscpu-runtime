@@ -21,6 +21,7 @@
 #   make test_leapc     — LEAPC.S around the +-32 KiB boundary
 #   make test_misalign  — the misaligned 16/32-bit access trap (tools/validate/misalign.sh)
 #   make test_exc       — MMU stage 1: exceptions, user mode, SYSCALL, SRs, LR/SC (exc.h)
+#   make test_mpu       — MMU stage 2: the MPU (regions, GUARD, user permissions, stack guard)
 #   make test_setjmp    — setjmp / longjmp (SP, callee-saved registers, stack args after longjmp)
 #   make test_task_exit — RTOS tasks that return or call rtos_task_exit
 #   make fs_demo        — FatFs + SD card demo (mount/list/read/write)
@@ -184,7 +185,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_selftest2 crypto_test dhrystone blit_selftest blit_capture \
-           test_unaligned test_misalign test_exc test_hwcg test_leapc vga_off test_setjmp test_task_exit
+           test_unaligned test_misalign test_exc test_mpu test_hwcg test_leapc vga_off test_setjmp test_task_exit
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -332,6 +333,9 @@ test_misalign.elf: test_misalign.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 
 test_exc.elf: test_exc.o $(EXC_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_exc.o $(EXC_OBJS))
+
+test_mpu.elf: test_mpu.o $(EXC_OBJS) $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_mpu.o $(EXC_OBJS))
 
 # test_flags: one generated assembly function per instruction
 # (programs/gen_test_flags.py writes test_flags_cases.S / .h).
@@ -621,6 +625,7 @@ test_atomic:       test_atomic.elf
 test_diei:         test_diei.elf
 test_misalign:     test_misalign.elf
 test_exc:          test_exc.elf
+test_mpu:          test_mpu.elf
 test_hwcg:         test_hwcg.elf
 test_leapc:        test_leapc.elf
 vga_off:           vga_off.elf

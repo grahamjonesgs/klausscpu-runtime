@@ -234,6 +234,13 @@ t('DELAYV', '', 'delayv\t2')
 # the LCD.  IRET restores all four flags (pipeline_core.sv: fmask '1).
 SKIP = {'HALT_I': '', 'WAIT_I': '', 'TRAP_I': '', 'IRET_I': 'ZSCV',
         'LCD': '', 'LCDCMDV': '', 'LCDDATAR': '', 'LCDDATAV': ''}
+# MMU stages 1-3 (klaussCPU MMU_PLAN.md): none writes flags.  Not run here
+# because they are illegal on bitstreams without CPU_FEATURES (test_flags
+# runs on every bitstream), and SYSCALL/TLB ops need a handler or a TLB
+# setup; test_exc / test_mpu (and the emulator's unit tests) cover them.
+SKIP.update({n: '' for n in (
+    'SYSCALL_I', 'MFSR_I', 'MTSR_I', 'LR_D', 'LR_W', 'LR_W_S', 'SC_D', 'SC_W',
+    'TLBWI_I', 'TLBR_I', 'TLBP_I', 'TLBINV_I')})
 # The ABI says a callee may change the flags, so a call clobbers FLAGS
 # although the CALL itself writes none.
 ABI_CLOBBER = {'CALL_I', 'CALLREL', 'CALL_SH', 'CALLR_R', 'CALLZ', 'CALLNZ',
