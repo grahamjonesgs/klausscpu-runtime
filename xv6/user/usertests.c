@@ -2409,7 +2409,9 @@ bigargtest(char *s)
   if (pid == 0) {
     static char *args[MAXARG];
     int i;
-    char big[400];
+    // klausscpu: 400 bytes overflowed a 4 KiB stack page; size the
+    // arguments so MAXARG - 1 of them overflow USERSTACK 64 KiB pages.
+    static char big[(USERSTACK * PGSIZE) / (MAXARG - 1) + 400];
     memset(big, ' ', sizeof(big));
     big[sizeof(big) - 1] = '\0';
     for (i = 0; i < MAXARG - 1; i++)
@@ -2687,7 +2689,9 @@ badarg(char *s)
   exit(0);
 }
 
-#define REGION_SZ (1024 * 1024 * 1024)
+// klausscpu: user memory ends at MAXVA = 512 MiB, so not 1 GiB.
+#define REGION_SZ ((int)(MAXVA / 4))
+#define LAZY_UNMAP_STEP (16 * 1024 * 1024)
 
 // Touch a page every 64 pages, which with lazy allocation
 // causes one page to be allocated.
@@ -2732,10 +2736,12 @@ lazy_unmap(char *s)
   }
   new_end = prev_end + REGION_SZ;
 
-  for (i = prev_end + PGSIZE; i < new_end; i += PGSIZE * PGSIZE)
+  // klausscpu: PGSIZE * PGSIZE (16 MiB with 4 KiB pages) overflows int with
+  // 64 KiB pages; keep the 16 MiB step.
+  for (i = prev_end + PGSIZE; i < new_end; i += LAZY_UNMAP_STEP)
     *(char **)i = i;
 
-  for (i = prev_end + PGSIZE; i < new_end; i += PGSIZE * PGSIZE) {
+  for (i = prev_end + PGSIZE; i < new_end; i += LAZY_UNMAP_STEP) {
     pid = fork();
     if (pid < 0) {
       printf("error forking\n");

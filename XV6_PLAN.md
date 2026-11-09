@@ -1,6 +1,9 @@
 # xv6 on KlaussCPU — plan
 
-**Status: started 2026-11-09, on branch `mmu`.**
+**Status (2026-11-09, branch `mmu`): milestones 0–2 done on the emulator.**
+xv6 boots, init starts sh, the user programs run, and `forktest` and
+`usertests -q` pass (`tools/validate/xv6.sh full`). Milestone 3 (board) is
+next. See *As built* below for where the port differs from the design.
 
 Goal: run xv6, MIT's teaching Unix, on the board as the first protected OS
 on KlaussCPU. User programs run in user mode, each in its own address space
@@ -136,6 +139,67 @@ compiler-rt builtins if any are needed. `mkfs` is built with the host cc.
 User programs use `user.ld` linked at VA 0x0 (page 0 is valid in useg; xv6
 keeps its text there).
 
+## As built (milestones 0–2)
+
+- **TLB refill.** `trapvec.S` `tlbrefill` saves the caller-saved registers
+  on the stack and calls `tlbrefill_c()` (trap.c). It doesn't use
+  SCRATCH0/1 with no stack: a miss from user mode has already switched to
+  the process's kernel stack, which is in kseg, and the kernel itself
+  never touches useg. `cmprv` sets the flags before the POPs (POP leaves
+  them alone); 0 means not mapped, and it jumps to `excvec`. ECAUSE is still
+  the TLB_MISS. The refill only loads PTEs with V and PTE_U (bit 4);
+  `uvmclear` clears PTE_U for the stack guard page.
+- **Trapframe.** `struct trapframe { usp; r[16]; frame; }` (144 bytes) sits
+  at the top of the kernel stack (`p->trapframe = kstack + 64K - 144`)
+  because every trap from user mode arrives with SP = SP_ALT = the top.
+  `trapret(tf)` does SETSP/POP/IRET. A new process's stack holds
+  `forkret`'s address just below the trapframe, for `swtch`'s RET.
+- **Interrupts.** A taken interrupt doesn't set DI (it clears its
+  INT_MASK bit), so `trap()` calls `intr_off()` first. `clockintr()` sets
+  INT_MASK again, or the scheduler's `wait` could never wake; IRET
+  restores the frame's mask anyway. User frames built by the kernel
+  (`trapframe_setpc`) have INT_MASK = timer and PM = 1. Tick: 10 ms
+  (1,000,000 cycles). The timer tick polls UART RX.
+- **TLB flushing.** `tlbactivate()` (scheduler before `swtch`, `exec` after
+  the switch) sets the refill's page table and runs TLBINV. `uvmunmap` and
+  `uvmclear` flush too. ASID stays 0.
+- **exec.** ELF32 headers (`elf.h`). `r0` = argc and `r1` = argv for
+  `ulib.c` `start()`. `CACHE_CTRL.ICACHE_INV` runs after the new image is
+  loaded through kseg, as `test_tlb` T5 does. User programs are linked by
+  `user.ld` with PHDRS: text R-X at 0 and data RW at the next 64 KiB page.
+  `--nmagic` keeps the files small.
+- **Boot.** `jmp kentry` was relaxed to a PC-relative `jmprel`, which
+  would have stayed at the PA alias. `boot.S` uses `setr` + `jmpr`. BSS,
+  including the 16 KiB boot stack, is zeroed in assembly before the stack
+  is used.
+- **Small things.** `memset`/`memmove` move 8 bytes at a time (64 KiB
+  pages). `katomic.c` provides `__sync_lock_test_and_set_{4,8}` (DI/EI),
+  which clang calls for `__atomic_exchange_n`. `push_off` uses DI's
+  result for the old enable bit.
+- **usertests at 64 KiB pages.** `bigargtest` sizes its arguments to
+  overflow a 64 KiB stack. `lazy_sbrk` climbs to `MAXVA` (512 MiB) in
+  64 MiB steps, and `lazy_alloc`/`lazy_unmap` use a 128 MiB region with
+  16 MiB steps (`PGSIZE * PGSIZE` overflows `int`). The `usertrap(): unexpected ecause …`
+  lines in `kernmem`, `MAXVAplus`, `stacktest`, `nowrite`, `sbrkbugs`
+  and `lazy_unmap` are the faults those tests provoke on purpose. Each
+  prints OK.
+- **klausscc (milestone 0).**
+  - `--uart-in FILE` types a file into the UART RX FIFO, one byte per
+    2,000 instructions while the FIFO has room.
+  - `--uart-prompt TEXT` types each line only after TEXT (`$ `) is
+    printed, and stops the run (`stop = InputDone`) when the prompt comes
+    back after the last line.
+  - Interactive stdin isn't fed under `--emulate`, because its UART
+    output is only printed at the end.
+  - On the board, `-s -m` already forwards keystrokes in raw mode (not
+    Ctrl+C, which stops the monitor). It reads terminal key events, so
+    piped input isn't forwarded yet.
+- **Validation.** `tools/validate/xv6.sh <out> quick|full` needs a
+  klausscc with `--uart-prompt` (mmu d0035b2+).
+  - quick: a scripted session with ordered expected lines, about 160M
+    instructions, 2 s.
+  - full: adds `usertests -q`, about 12.9G instructions, 2 min.
+
 ## Milestones
 
 0. **klausscc input.**
@@ -171,3 +235,6 @@ keeps its text there).
 - **Compiler gaps.** xv6 uses little inline assembly. Anything that needs a
   klausscpu-llvm fix is noted here and raised with the session that owns
   klausscpu-llvm before anyone edits it.
+  - Milestones 0–2 found no compiler bug.
+  - Gotcha: the assembler relaxes `jmp label` to a PC-relative `jmprel`.
+    Code that runs at one alias and must jump to another needs `jmpr`.
