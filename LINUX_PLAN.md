@@ -1,16 +1,22 @@
 # Linux on KlaussCPU — plan
 
-**Status (2026-11-09): milestones 0–3 done on the klausscc emulator.**
-v7.3.3 builds with klausscpu-llvm (`linux/build.sh`). It boots to the
-banner, finishes `start_kernel` (timer ticks, slab, VFS, initramfs) and
-runs a libc-free `/init` in user mode. That exercises SYSCALL, TLB
-refill, demand-zero and copy-on-write faults, `fork`, `exit` and
-`wait4`. The console is `hvc0` on the polled UART.
+**Status (2026-11-09): milestones 0–3 are done on the klausscc emulator,
+and milestone 4 is done except for busybox.**
+- v7.3.3 builds with klausscpu-llvm (`linux/build.sh`) and boots through
+  `start_kernel` to user space. The console is `hvc0` on the polled UART.
+- musl 1.2.5 is ported (`linux/musl/`). klausscpu-llvm `fc94ed9f` adds the
+  `klausscpu-unknown-linux-musl` triple and its static link.
+- `minish` (`linux/userland/minish.c`), a small musl shell, runs as
+  `/init` with typed input (`klausscc --uart-in`). It forks and execs
+  programs; `/proc` and tmpfs work.
+- `tools/validate/linux.sh` checks this (`shell` mode) and milestone 3
+  (`m3` mode).
 
-Next is milestone 4 (musl and busybox). It needs klausscpu-llvm changes
-(a Linux triple defining `__linux__`, a static-link driver, TLS for
-`__thread`) and klausscc `--uart-in` for scripted shell input. The xv6
-port (`XV6_PLAN.md`) runs in parallel on the same hardware features.
+Busybox (`linux/userland/busybox.sh`, `busybox.config`, initramfs profile
+`busybox`) is written but has not been run: building it compiles and runs
+busybox's host tools, which this session's permission classifier refused.
+Next after busybox: milestone 5 (the board; a milestone-3 `vmlinux` is
+waiting for its first try).
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
@@ -244,6 +250,14 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
   `EM_KLAUSSCPU` = 0x4B43.
 - **The fused branch conditions** (`fbr`/`fbri`) are EQ 0, LT 1, LE 2,
   ULT 3, ULE 4, and +8 inverts them (NE 8, GE 9, GT 10, UGE 11, UGT 12).
+- **ELF32 files with an LP64 ABI:** the user stack's argc/argv/envp/auxv
+  must be longs. Patch 0002 lets the arch set `elf_addr_t` (ARCH_ELF_ADDR_T
+  = `unsigned long`); with 32-bit words, musl read argv[0] as NULL.
+- **EI takes effect at WB, about 3 cycles later, on the stage 3 bitstream**
+  (98fe470). An `ei; di` window never takes a pending interrupt, so the
+  idle loop is `ei; wait`.
+- **`fbr`/`fbri` can't branch to a global symbol** (no relocation for
+  them), so asm uses a local label.
 - **`INT_MASK` stays 0xF**, and a source is enabled by setting its
   `INT_VECn` (as in the Zephyr port). That way IRET never restores a
   stale mask from an old frame.
@@ -269,7 +283,7 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
    - A static libc-less `/init` in the initramfs (`write`, `getpid`,
      `fork`, `wait4`, `exit`) prints and loops.
    - Checkpoint: its output, and `fork` working.
-4. **busybox.**
+4. **busybox.** *(musl and a shell done; busybox not yet built)*
    - musl and the clang Linux toolchain.
    - Checkpoint: a busybox shell on the emulator, scripted with `--uart-in`.
 5. **Board.**

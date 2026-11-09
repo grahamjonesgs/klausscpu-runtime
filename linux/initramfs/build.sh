@@ -3,6 +3,8 @@
 # CONFIG_INITRAMFS_SOURCE ("initramfs.list", relative to the build dir).
 #   INITRAMFS_PROFILE  m3 (default): the libc-free milestone-3 /init
 #                      musltest: /init = linux/userland/musltest.c (musl)
+#                      minish: /init = linux/userland/minish.c, a small
+#                              musl shell, with /bin/musltest
 #                      busybox: /init and /bin/sh from busybox (musl)
 # The musl profiles need linux/musl/build.sh's sysroot (linux-ws/sysroot),
 # busybox also linux/userland/busybox.sh's binary.
@@ -35,6 +37,18 @@ musltest)
   "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
     "$RT/linux/userland/musltest.c" -o "$OUT/initramfs/musltest"
   echo "file /init $OUT/initramfs/musltest 0755 0 0" >>"$LIST"
+  ;;
+minish)
+  for p in minish musltest; do
+    "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
+      "$RT/linux/userland/$p.c" -o "$OUT/initramfs/$p"
+  done
+  cat >>"$LIST" <<LIST
+dir /bin 0755 0 0
+file /init $OUT/initramfs/minish 0755 0 0
+file /bin/minish $OUT/initramfs/minish 0755 0 0
+file /bin/musltest $OUT/initramfs/musltest 0755 0 0
+LIST
   ;;
 busybox)
   BB=$WS/busybox-build/busybox
