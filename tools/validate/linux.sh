@@ -107,6 +107,7 @@ musltest: malloc+memset ok, strlen=99999
 musltest: signal handler ran: yes
 musltest: setjmp/longjmp ok
 musltest: child exited with 5
+musltest: 300 forks, 0 bad
 musltest: PASS
 mkdir /tmp/d
 ls /tmp

@@ -57,6 +57,24 @@ int main(int argc, char **argv)
 	printf("musltest: child exited with %d\n", WEXITSTATUS(status));
 	fails += WEXITSTATUS(status) != 5;
 
+	/* 300 short-lived address spaces: ASID generations roll over. */
+	{
+		static volatile long cell = 7;
+		int i, bad = 0;
+
+		for (i = 0; i < 300; i++) {
+			pid = fork();
+			if (pid == 0) {
+				cell = 1000 + i;
+				_exit(cell == 1000 + i ? 0 : 1);
+			}
+			waitpid(pid, &status, 0);
+			bad += WEXITSTATUS(status) != 0 || cell != 7;
+		}
+		printf("musltest: 300 forks, %d bad\n", bad);
+		fails += bad != 0;
+	}
+
 	printf("musltest: %s\n", fails ? "FAIL" : "PASS");
 	if (getpid() == 1)
 		for (;;)

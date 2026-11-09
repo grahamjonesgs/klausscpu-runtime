@@ -40,7 +40,13 @@ ENTRY(klausscpu_tlb_refill)
 	bextr	r2, r1, 0x104		/* PTE[4] PRESENT */
 	fbri	r2, 0, 0, 9f
 	mtsr	tlb_lo, r1
-	setru	r1, klausscpu_tlb_rr
+	/* kmap entries are global (G): they serve every ASID. */
+	setru	r2, KMAP_BASE
+	fbr	r0, r2, 3, 2f		/* ULT: useg, per ASID */
+	mfsr	r2, tlb_hi
+	bset	r2, r2, 8
+	mtsr	tlb_hi, r2
+2:	setru	r1, klausscpu_tlb_rr
 	ldidx64	r2, r1, 0
 	addi	r2, r2, 1
 	setru	r0, klausscpu_tlb_mask
