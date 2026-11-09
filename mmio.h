@@ -190,6 +190,10 @@ static inline void icache_invalidate(void) { REG_CACHE_CTRL = CACHE_CTRL_ICACHE_
 #define REG_TIMER_PER   (*(volatile uint32_t *)(INTC_BASE + 0x0030u))
 #define REG_TIMER_CNT   (*(volatile uint32_t *)(INTC_BASE + 0x0038u))
 #define REG_CLOCK_MS    (*(volatile uint64_t *)(INTC_BASE + 0x0040u))  /* atomic 64-bit */
+#define REG_CPU_FEATURES (*(volatile uint32_t *)(INTC_BASE + 0x0048u)) /* RO; 0 before `mmu` */
+
+/* CPU_FEATURES[20:16] say which crypto blocks the bitstream has: see
+ * CPU_FEAT_CRYPTO_* and crypto_hw_present() in crypto_hw.h. */
 
 #define INT_SRC_TIMER   0u
 #define INT_SRC_BLIT    1u   /* 2D blitter DONE (level; ISR W1Cs BLIT_STATUS.DONE) */

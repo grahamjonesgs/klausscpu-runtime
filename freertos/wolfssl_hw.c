@@ -35,8 +35,10 @@ static inline void aes_unlock(void) { xSemaphoreGive(s_aes_mtx); }
 /* wolfSSL calls this via the CUSTOM_RAND_GENERATE_SEED macro defined in
  * user_settings.h.  That macro prevents wolfSSL from compiling its own
  * wc_GenerateSeed (which tries /dev/urandom), so there is no duplicate symbol. */
+static int s_trng_ok;   /* trng_init() succeeded (wolfssl_hw_init) */
+
 int klausscpu_trng_seed(unsigned char *output, unsigned int sz) {
-    if (!trng_health_ok()) return -1; /* RNG_FAILURE_E = -129 in wolfSSL */
+    if (!s_trng_ok || !trng_health_ok()) return -1; /* RNG_FAILURE_E = -129 in wolfSSL */
     trng_read(output, (size_t)sz);
     return 0;
 }
@@ -64,6 +66,9 @@ static int hw_crypto_cb(int devId, wc_CryptoInfo *info, void *ctx) {
     (void)devId; (void)ctx;
 
     if (info->algo_type != WC_ALGO_TYPE_CIPHER)
+        return CRYPTOCB_UNAVAILABLE;
+    /* Bitstreams without the AES core (CPU_FEATURES[16]) use wolfCrypt. */
+    if (!crypto_hw_present(CPU_FEAT_CRYPTO_AES))
         return CRYPTOCB_UNAVAILABLE;
 
 #ifdef WOLFSSL_AES_COUNTER
@@ -114,7 +119,8 @@ static int hw_crypto_cb(int devId, wc_CryptoInfo *info, void *ctx) {
 #endif /* WOLFSSL_AES_COUNTER */
 
 #ifdef HAVE_AESGCM
-    if (info->cipher.type == WC_CIPHER_AES_GCM) {
+    if (info->cipher.type == WC_CIPHER_AES_GCM &&
+        crypto_hw_present(CPU_FEAT_CRYPTO_GCM)) {
         if (info->cipher.enc) {
             /* Encrypt */
             Aes           *aes      = info->cipher.aesgcm_enc.aes;
@@ -166,7 +172,7 @@ static int hw_crypto_cb(int devId, wc_CryptoInfo *info, void *ctx) {
 #endif /* HAVE_AESGCM */
 
     if (info->algo_type == WC_ALGO_TYPE_SEED) {
-        if (!trng_health_ok()) return RNG_FAILURE_E;
+        if (!s_trng_ok || !trng_health_ok()) return RNG_FAILURE_E;
         trng_read(info->seed.seed, (size_t)info->seed.sz);
         return 0;
     }
@@ -180,8 +186,9 @@ int wolfssl_hw_init(void) {
     s_aes_mtx = xSemaphoreCreateMutex();
     if (!s_aes_mtx) return -1;
 
-    /* Ensure TRNG is running. */
-    trng_init();
+    /* Ensure TRNG is running.  Without it the seed fails (RNG_FAILURE_E)
+     * rather than waiting forever. */
+    s_trng_ok = trng_init() == 0;
 
     /* Register hardware device with wolfCrypt. */
     int rc = wc_CryptoCb_RegisterDevice(KLAUSSCPU_CRYPTO_DEV_ID,

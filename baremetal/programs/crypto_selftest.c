@@ -9,7 +9,8 @@
  *   TRNG         — health check + basic sanity (non-zero, not all-same)
  *
  * Each test prints PASS or FAIL over UART.  Run once after new hardware is
- * programmed; any FAIL means the HDL has a bug.
+ * programmed; any FAIL means the HDL has a bug.  Blocks the bitstream was
+ * built without (CPU_FEATURES[20:16], crypto_hw_present) print SKIP.
  *
  * Interop note: encrypt with this program, decrypt with OpenSSL on the host:
  *   openssl enc -d -aes-128-ecb -nosalt -K <key-hex> -in cipher.bin
@@ -393,6 +394,14 @@ static void test_trng(void) {
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
+/* Whether the bitstream has the blocks `need` (crypto_hw_present); if not,
+ * say the tests are skipped. */
+static int have(uint32_t need, const char *name) {
+    if (crypto_hw_present(need)) return 1;
+    printf("\n=== %s ===\nSKIP  not in this bitstream (CPU_FEATURES[20:16])\n", name);
+    return 0;
+}
+
 int main(void) {
     REG_LEDS = 0x01;
     printf("=== KlaussCPU Hardware Crypto Self-Test ===\n");
@@ -400,15 +409,29 @@ int main(void) {
     pass_count = fail_count = 0;
 
     /* Initialize TRNG first (needed by some later tests indirectly). */
-    trng_init();
+    int trng_rc = trng_init();
     REG_LEDS = 0x03;
+    if (crypto_hw_present(CPU_FEAT_CRYPTO_TRNG) && trng_rc != 0) {
+        /* A TRNG that never delivers (or no crypto hardware at all: the
+         * emulator models none and reads as a bitstream older than the
+         * probe): nothing here can be trusted. */
+        printf("FAIL  TRNG never became ready: no usable crypto hardware\n");
+        return 1;
+    }
 
-    test_aes_ecb();   REG_LEDS = 0x07;
-    test_aes_ctr();   REG_LEDS = 0x0F;
-    test_aes_gcm();   REG_LEDS = 0x1F;
-    test_sha256();    REG_LEDS = 0x3F;
-    test_hmac();      REG_LEDS = 0x7F;
-    test_trng();      REG_LEDS = 0xFF;
+    if (have(CPU_FEAT_CRYPTO_AES, "AES-128 ECB/CTR")) {
+        test_aes_ecb();
+        test_aes_ctr();
+    }
+    REG_LEDS = 0x0F;
+    if (have(CPU_FEAT_CRYPTO_AES | CPU_FEAT_CRYPTO_GCM, "AES-128-GCM")) test_aes_gcm();
+    REG_LEDS = 0x1F;
+    if (have(CPU_FEAT_CRYPTO_SHA, "SHA-256")) test_sha256();
+    REG_LEDS = 0x3F;
+    if (have(CPU_FEAT_CRYPTO_SHA | CPU_FEAT_CRYPTO_HMAC, "HMAC-SHA-256")) test_hmac();
+    REG_LEDS = 0x7F;
+    if (have(CPU_FEAT_CRYPTO_TRNG, "TRNG")) test_trng();
+    REG_LEDS = 0xFF;
 
     printf("\n=== Results: %d passed, %d failed ===\n", pass_count, fail_count);
     if (fail_count == 0) {

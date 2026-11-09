@@ -55,6 +55,23 @@ static inline void st64(uint8_t *p, uint64_t v) {
 /* ── Capabilities ────────────────────────────────────────────────────────── */
 
 /* The bitstream cannot change under a running program, so read each once. */
+uint32_t crypto_hw_blocks(void) {
+    static int read;
+    static uint32_t blocks;
+    if (!read) {
+        uint32_t f = REG_CPU_FEATURES;
+        if (!(f & CPU_FEAT_CRYPTO_TRNG)) {
+            blocks = CPU_FEAT_CRYPTO_ALL;   /* older than the probe */
+        } else {
+            blocks = f & CPU_FEAT_CRYPTO_ALL;
+            if (!(blocks & CPU_FEAT_CRYPTO_AES)) blocks &= ~CPU_FEAT_CRYPTO_GCM;
+            if (!(blocks & CPU_FEAT_CRYPTO_SHA)) blocks &= ~CPU_FEAT_CRYPTO_HMAC;
+        }
+        read = 1;
+    }
+    return blocks;
+}
+
 uint32_t aes_hw_caps(void) {
     static int read;
     static uint32_t caps;
@@ -868,7 +885,13 @@ void hmac_sha256_sw(const uint8_t *key, size_t key_len,
 
 /* ── TRNG ────────────────────────────────────────────────────────────────── */
 
-void trng_init(void) {
+/* Polls for the first word after a reseed (each is an MMIO read, about
+ * 10 cycles: well over 10 ms at 100 MHz). */
+#define TRNG_INIT_POLLS 2000000u
+
+int trng_init(void) {
+    if (!crypto_hw_present(CPU_FEAT_CRYPTO_TRNG))
+        return -1;
     REG_TRNG_CTRL = TRNG_CTRL_ENABLE;
 
     /* Drain any stale FIFO entries from before init. */
@@ -881,7 +904,10 @@ void trng_init(void) {
     REG_TRNG_CTRL = TRNG_CTRL_ENABLE | TRNG_CTRL_RESEED;
 
     /* Wait for the first fresh conditioned word to appear. */
-    while (!(REG_TRNG_STATUS & TRNG_STATUS_READY)) {}
+    for (uint32_t i = 0; i < TRNG_INIT_POLLS; i++)
+        if (REG_TRNG_STATUS & TRNG_STATUS_READY)
+            return 0;
+    return -1;
 }
 
 int trng_ready(void) {

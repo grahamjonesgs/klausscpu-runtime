@@ -26,7 +26,8 @@ static K_MUTEX_DEFINE(aes_lock);
 
 static bool sha_hw(psa_algorithm_t alg)
 {
-	return alg == PSA_ALG_SHA_256 && (sha_hw_caps() & SHA_CAP_RESTORE_BIT);
+	return alg == PSA_ALG_SHA_256 && crypto_hw_present(CPU_FEAT_CRYPTO_SHA) &&
+	       (sha_hw_caps() & SHA_CAP_RESTORE_BIT);
 }
 
 psa_status_t klausscpu_psa_hash_setup(klausscpu_psa_hash_ctx_t *ctx, psa_algorithm_t alg)
@@ -95,7 +96,8 @@ static psa_status_t ctr_setup(klausscpu_psa_cipher_ctx_t *ctx,
 			      size_t key_size, psa_algorithm_t alg)
 {
 	if (alg != PSA_ALG_CTR || psa_get_key_type(attributes) != PSA_KEY_TYPE_AES ||
-	    key_size != 16 || !(aes_hw_caps() & AES_CAP_CTR_BIT)) {
+	    key_size != 16 || !crypto_hw_present(CPU_FEAT_CRYPTO_AES) ||
+	    !(aes_hw_caps() & AES_CAP_CTR_BIT)) {
 		return PSA_ERROR_NOT_SUPPORTED;
 	}
 	memset(ctx, 0, sizeof(*ctx));

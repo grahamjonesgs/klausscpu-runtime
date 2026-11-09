@@ -395,6 +395,12 @@ static void timing(void) {
     uint64_t t0, t1, t2;
 
     printf("\n=== Timing (100 MHz) ===\n");
+    if (!crypto_hw_present(CPU_FEAT_CRYPTO_AES | CPU_FEAT_CRYPTO_GCM |
+                           CPU_FEAT_CRYPTO_SHA | CPU_FEAT_CRYPTO_HMAC)) {
+        /* A bitstream built without some of the blocks (CPU_FEATURES[20:16]). */
+        printf("SKIP  timing: not every crypto block is in this bitstream\n");
+        return;
+    }
     if (!(aes_hw_caps() & AES_CAP_CTR) && !(sha_hw_caps() & SHA_CAP_RESTORE)) {
         /* An older bitstream, or the emulator, which has no crypto blocks
          * at all: their status polls would never finish there. */
@@ -458,8 +464,16 @@ static void timing(void) {
 
 int main(void) {
     printf("KlaussCPU crypto self-test 2 (CTR mode, SHA save/restore)\n");
-    test_aes_ctr_mode();
-    test_sha_restore();
+    /* An absent block's capability register reads 0, so these SKIP there
+     * too; the presence bits make that explicit. */
+    if (crypto_hw_present(CPU_FEAT_CRYPTO_AES | CPU_FEAT_CRYPTO_GCM))
+        test_aes_ctr_mode();
+    else
+        printf("SKIP  AES CTR mode: no AES/GCM block in this bitstream\n");
+    if (crypto_hw_present(CPU_FEAT_CRYPTO_SHA | CPU_FEAT_CRYPTO_HMAC))
+        test_sha_restore();
+    else
+        printf("SKIP  SHA restore: no SHA/HMAC block in this bitstream\n");
     timing();
     printf("\n%d passed, %d failed\n", pass_count, fail_count);
     if (fail_count == 0)

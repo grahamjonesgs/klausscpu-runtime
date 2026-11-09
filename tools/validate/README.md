@@ -407,7 +407,8 @@ change in any of it is a regression like any other.
 - Emulator (no model of these peripherals): `test_sd`, `fs_demo`, `loader`
   and the FatFs part of `test_big` (no SD card: `f_mount` fails with 3);
   `blit_selftest` and `blit_capture` (no blitter); `crypto_test` (no
-  AES engine: the result reads 0); `test_eth` (`[FAIL] scratch`: the
+  AES engine: the result reads 0); `crypto_selftest` (`FAIL  TRNG never
+  became ready`: the TRNG's STATUS reads 0, and the test stops there); `test_eth` (`[FAIL] scratch`: the
   Ethernet controller's scratch register reads 0, and the test stops
   there); `test_cache` (`Geometry check: FAIL`: the cache-info register
   reads 0).

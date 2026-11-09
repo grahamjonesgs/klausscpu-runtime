@@ -1,3 +1,4 @@
 --- Captured UART output ---
 === KlaussCPU Hardware Crypto Self-Test ===
+FAIL  TRNG never became ready: no usable crypto hardware
 --- end UART ---

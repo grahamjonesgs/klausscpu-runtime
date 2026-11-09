@@ -4,7 +4,8 @@
  * (src/crypto_hw.c); the TRNG seeds wolfSSL's DRBG.  A find callback routes
  * every cipher operation here, since neither wolfSSH (devId 0) nor the TLS
  * server (INVALID_DEVID) names this device.  Other key sizes and algorithms
- * fall back to wolfCrypt software.
+ * fall back to wolfCrypt software, as do AES and GCM on a bitstream built
+ * without them (CPU_FEATURES[17:16], crypto_hw_present()).
  */
 
 #define WOLFSSL_USER_SETTINGS
@@ -37,35 +38,41 @@
 #define TRNG_STATUS_READY      (1u << 0)
 #define TRNG_STATUS_HEALTH_OK  (1u << 1)
 
-/* AES-128, CTR and GCM from the shared driver (src/crypto_hw.c). */
-void aes_hw_set_key(uint64_t key_lo, uint64_t key_hi);
-void aes_hw_encrypt(uint64_t in_lo, uint64_t in_hi, uint64_t *out_lo, uint64_t *out_hi);
-void aes_ctr(uint64_t nonce_lo, uint64_t nonce_hi, const uint8_t *in, uint8_t *out,
-	     size_t len);
-void aes_gcm_encrypt(const uint8_t *iv, const uint8_t *aad, size_t aad_len,
-		     const uint8_t *pt, uint8_t *ct, size_t len, uint8_t tag_out[16]);
-int aes_gcm_decrypt(const uint8_t *iv, const uint8_t *aad, size_t aad_len,
-		    const uint8_t *ct, uint8_t *pt, size_t len, const uint8_t tag_in[16]);
+/* AES-128, CTR and GCM from the shared driver (src/crypto_hw.c), and
+ * crypto_hw_present(): every block but the TRNG is a bitstream option. */
+#include "../../../crypto_hw.h"
 
 /* ── Hardware helpers ────────────────────────────────────────────────────── */
 
-static void trng_init_hw(void)
+static int glue_trng_init(void)
 {
+	if (!crypto_hw_present(CPU_FEAT_CRYPTO_TRNG)) {
+		return -1;
+	}
 	REG_TRNG_CTRL = TRNG_CTRL_ENABLE;
-	while (!(REG_TRNG_STATUS & TRNG_STATUS_READY)) {}
+	/* The first word: bounded, so a missing or dead TRNG fails the seed
+	 * instead of hanging the SSH server's start. */
+	uint32_t polls = 2000000u;
+
+	while (!(REG_TRNG_STATUS & TRNG_STATUS_READY)) {
+		if (--polls == 0) {
+			return -1;
+		}
+	}
 	/* Wait for health monitor to pass — may take a few more cycles */
 	for (int i = 0; i < 1000; i++) {
 		if (REG_TRNG_STATUS & TRNG_STATUS_HEALTH_OK) {
-			return;
+			return 0;
 		}
 		for (volatile int d = 0; d < 100; d++) {}
 	}
 	/* If health never asserts, continue anyway — the TRNG data
 	 * is still valid on KlaussCPU, the health monitor may not
 	 * be implemented in all FPGA builds. */
+	return 0;
 }
 
-static int trng_health_ok(void)
+static int glue_trng_health_ok(void)
 {
 	/* Accept if either HEALTH_OK is set OR if READY is set
 	 * (some FPGA builds don't implement the health monitor) */
@@ -73,7 +80,7 @@ static int trng_health_ok(void)
 	return (st & (TRNG_STATUS_HEALTH_OK | TRNG_STATUS_READY)) != 0;
 }
 
-static void trng_read(uint8_t *buf, size_t len)
+static void glue_trng_read(uint8_t *buf, size_t len)
 {
 	size_t done = 0;
 
@@ -99,12 +106,24 @@ static inline void aes_unlock(void) { k_mutex_unlock(&aes_mtx); }
 
 /* ── TRNG seed function ──────────────────────────────────────────────────── */
 
+/* glue_trng_init(): 0 not run yet, 1 succeeded, -1 failed.  Whoever seeds
+ * first (the HTTPS server may, before wolfssl_hw_init) runs it. */
+static int glue_trng_state;
+
+static int glue_trng_ok(void)
+{
+	if (glue_trng_state == 0) {
+		glue_trng_state = glue_trng_init() == 0 ? 1 : -1;
+	}
+	return glue_trng_state > 0;
+}
+
 int klausscpu_trng_seed(unsigned char *output, unsigned int sz)
 {
-	if (!trng_health_ok()) {
+	if (!glue_trng_ok() || !glue_trng_health_ok()) {
 		return -1;
 	}
-	trng_read(output, (size_t)sz);
+	glue_trng_read(output, (size_t)sz);
 	return 0;
 }
 
@@ -246,7 +265,7 @@ static int hw_cipher(wc_CryptoInfo *info)
 #endif
 
 #ifdef HAVE_AESGCM
-	if (info->cipher.type == WC_CIPHER_AES_GCM) {
+	if (info->cipher.type == WC_CIPHER_AES_GCM && crypto_hw_present(CPU_FEAT_CRYPTO_GCM)) {
 		if (info->cipher.enc) {
 			Aes *aes = info->cipher.aesgcm_enc.aes;
 			word32 sz = info->cipher.aesgcm_enc.sz;
@@ -312,10 +331,22 @@ static int hw_find_cb(int devId, int algoType)
 int wolfssl_hw_init(void)
 {
 	k_mutex_init(&aes_mtx);
-	trng_init_hw();
-	wc_CryptoCb_SetDeviceFindCb(hw_find_cb);
-	return wc_CryptoCb_RegisterDevice(KLAUSSCPU_CRYPTO_DEV_ID,
-					   hw_crypto_cb, NULL);
+	/* Without a TRNG the DRBG seed fails (klausscpu_trng_seed) instead of
+	 * waiting forever. */
+	int trng_ok = glue_trng_ok();
+
+	/* Bitstreams without the AES core (CPU_FEATURES[16]) keep wolfCrypt's
+	 * software AES: the callback is not registered at all.  Without GCM
+	 * ([17]) hw_cipher leaves GCM to software. */
+	if (crypto_hw_present(CPU_FEAT_CRYPTO_AES)) {
+		wc_CryptoCb_SetDeviceFindCb(hw_find_cb);
+		int rc = wc_CryptoCb_RegisterDevice(KLAUSSCPU_CRYPTO_DEV_ID,
+						    hw_crypto_cb, NULL);
+		if (rc != 0) {
+			return rc;
+		}
+	}
+	return trng_ok ? 0 : -1;
 }
 
 void wolfssl_hw_cleanup(void)

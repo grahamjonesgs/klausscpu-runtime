@@ -4,7 +4,7 @@ blit_selftest	16944236	13808
 bst	105536	13552
 crypto	134796	15648
 crypto_selftest2	230987	35376
-crypto_selftest	nohalt	28528
+crypto_selftest	14043226	29328
 crypto_test	nohalt	14608
 dhrystone	156576737	14552
 eth_test	nohalt	14192

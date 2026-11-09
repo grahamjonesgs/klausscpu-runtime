@@ -101,6 +101,31 @@ void hmac_sha256_sw(const uint8_t *key, size_t key_len,
                     const uint8_t *msg, size_t msg_len,
                     uint8_t out[32]);
 
+/* ── Which blocks the bitstream has ──────────────────────────────────────── */
+
+/* CPU_FEATURES[20:16] (MMIO 0xF00F_0048; klaussCPU MMU_PLAN §6.3,
+ * MMIO_MAP.md), 1 = present.  GCM needs AES, HMAC needs SHA.  [20] TRNG is
+ * set on every bitstream that has the probe, so [20] = 0 means a bitstream
+ * older than the probe, which has every block.  An absent block reads 0
+ * and ignores writes: never infer absence from its registers. */
+#define CPU_FEAT_CRYPTO_AES   (1u << 16)
+#define CPU_FEAT_CRYPTO_GCM   (1u << 17)
+#define CPU_FEAT_CRYPTO_SHA   (1u << 18)
+#define CPU_FEAT_CRYPTO_HMAC  (1u << 19)
+#define CPU_FEAT_CRYPTO_TRNG  (1u << 20)
+#define CPU_FEAT_CRYPTO_ALL   (0x1Fu << 16)
+
+/* Every block but the TRNG is a build option of the bitstream.  These
+ * return the CPU_FEAT_CRYPTO_* mask (mmio.h) of the blocks present: all of
+ * them on a bitstream older than the probe (CPU_FEATURES[20] = 0).  Call
+ * the AES/GCM/SHA/HMAC/TRNG functions only for blocks that are present: an
+ * absent block reads 0, so AES and HMAC would return zeros (AES-CTR output
+ * = plaintext) and SHA and the TRNG would wait forever. */
+uint32_t crypto_hw_blocks(void);
+static inline int crypto_hw_present(uint32_t blocks) {
+    return (crypto_hw_blocks() & blocks) == blocks;
+}
+
 /* ── Capabilities ────────────────────────────────────────────────────────── */
 
 /* Feature bits of the loaded bitstream (AES_CAP_* / SHA_CAP_* in mmio.h).
@@ -156,8 +181,10 @@ void hmac_sha256_hw_rmac(const hmac_sha256_hw_key_t *k, const uint8_t *msg,
 /* ── TRNG ────────────────────────────────────────────────────────────────── */
 
 /* Enable the TRNG and wait until the first conditioned output is ready.
- * Call once at startup before any trng_read(). */
-void trng_init(void);
+ * Call once at startup before any trng_read().  Returns 0, or -1 if the
+ * bitstream has no TRNG or no output arrived in time (then do not call
+ * trng_read(): it would wait forever). */
+int trng_init(void);
 
 /* Returns non-zero if ≥1 word is buffered in the TRNG FIFO. */
 int trng_ready(void);

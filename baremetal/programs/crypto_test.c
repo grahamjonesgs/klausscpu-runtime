@@ -186,6 +186,20 @@ int main(void) {
 
     printf("=== KlaussCPU crypto hardware self-test ===\n");
 
+    /* Every block must be there (CPU_FEATURES[20:16]; [20] = 0 is a
+     * bitstream older than the probe, which has them all).
+     * crypto_selftest tests a partial set block by block. */
+    {
+        /* CPU_FEAT_CRYPTO_TRNG / _ALL (crypto_hw.h, whose names this
+         * program's own helpers clash with). */
+        uint32_t f = REG_CPU_FEATURES;
+        if ((f & (1u << 20)) && (f & (0x1Fu << 16)) != (0x1Fu << 16)) {
+            printf("SKIP  this bitstream lacks some crypto blocks (CPU_FEATURES %08lx);"
+                   " run crypto_selftest\n", (unsigned long)f);
+            return 0;
+        }
+    }
+
     /* ===== Stage 1: AES-128 FIPS-197 §B vector ===== */
     show(0x00010000u);
     printf("\n[1] AES-128 ECB (FIPS-197 Appendix B)\n");

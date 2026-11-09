@@ -4,7 +4,7 @@ blit_selftest	Halt
 bst	Halt
 crypto	Halt
 crypto_selftest2	Halt
-crypto_selftest	InstructionCap
+crypto_selftest	Halt
 crypto_test	InstructionCap
 dhrystone	Halt
 eth_test	InstructionCap
