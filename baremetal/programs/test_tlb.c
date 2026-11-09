@@ -49,7 +49,7 @@ static struct pte pt[] = {
 };
 #define NPT (sizeof pt / sizeof pt[0])
 
-static unsigned n_wired, rr;
+static unsigned n_wired, rr, n_tlb = 32;
 static volatile uint32_t n_miss, n_access, n_other, last_cause, last_eaddr, last_tlb_hi;
 static volatile uint32_t last_pm;
 
@@ -81,7 +81,7 @@ static int handler(struct exc_regs *r, uint32_t ecause, uint32_t eaddr) {
             uint32_t lo = (p->pa & 0x07FF0000u) | TLB_LO_V | p->perms;
             if (p->dirty_track && !p->dirty) lo &= ~TLB_LO_W;   // first write faults
             if (p->asid < 0) hi |= TLB_HI_G;
-            tlb_write(n_wired + (rr++ % (32 - n_wired)), hi, lo);
+            tlb_write(n_wired + (rr++ % (n_tlb - n_wired)), hi, lo);
             return 1;                  // retry the instruction
         }
         exc_skip(r);                   // not mapped: give up on the access
@@ -166,7 +166,7 @@ static void setup_te(void) {
         tlb_write(n_wired++, va | TLB_HI_G, va | TLB_LO_V | TLB_LO_R | TLB_LO_W | TLB_LO_X);
     tlb_write(n_wired++, 0x07FF0000u | TLB_HI_G,
               0x07FF0000u | TLB_LO_V | TLB_LO_R | TLB_LO_W | TLB_LO_X);
-    for (unsigned i = n_wired; i < 32; i++) tlb_write(i, 0, 0);
+    for (unsigned i = n_wired; i < n_tlb; i++) tlb_write(i, 0, 0);
     printf("  %u wired identity entries (program ends at %08lx)\n", n_wired,
            (unsigned long)(uintptr_t)_end);
     exc_mtsr(SR_TLB_INDEX, 0);
@@ -289,7 +289,7 @@ static void teardown_te(void) {
     check("T10 TE off: physical again", gword == 0x5151 && !(exc_mfsr(SR_STATUS) & STATUS_TE));
     klauss_tlbinv();
     int any = 0;
-    for (unsigned i = 0; i < 32; i++) {
+    for (unsigned i = 0; i < n_tlb; i++) {
         exc_mtsr(SR_TLB_INDEX, i);
         klauss_tlbr();
         any |= (int)(exc_mfsr(SR_TLB_LO) & TLB_LO_V);
@@ -307,7 +307,15 @@ int main(void) {
         printf("test_tlb PASSED\n");
         return 0;
     }
-    check("T0 32 TLB entries", CPU_FEAT_TLB_ENTRIES(feat) == 32);
+    n_tlb = CPU_FEAT_TLB_ENTRIES(feat);
+    printf("  %u TLB entries\n", n_tlb);
+    // Any count the INDEX field [4:0] can address, with room to refill.
+    check("T0 TLB entry count", n_tlb >= 8 && n_tlb <= 32);
+    if (n_tlb < 8 || n_tlb > 32) {
+        printf("Results: %d pass, %d fail\n", pass, fail);
+        printf("test_tlb FAILED\n");
+        return 1;
+    }
     setup_te();
     run_on_stack(body, KSEG_BASE + (uintptr_t)&kstack[2048], feat);
     teardown_te();
