@@ -135,6 +135,10 @@ static uint64_t ustack[2048] __attribute__((aligned(16)));
 #define USTACK_TOP (&ustack[2048])
 static uint64_t ustack2[256] __attribute__((aligned(16)));
 
+static int in_ustack(uint64_t a) {
+    return a >= (uintptr_t)ustack && a <= (uintptr_t)USTACK_TOP;
+}
+
 static uint64_t u_double(uint64_t x) { return x * 2; }
 static uint64_t u_status(uint64_t x) { (void)x; return exc_mfsr(SR_STATUS); }
 static uint64_t u_tp(uint64_t x) {
@@ -168,7 +172,8 @@ static uint64_t u_sp(uint64_t x) {
 
 // Interrupt in user mode: spin until the timer ISR has run N times.
 static volatile uint32_t ticks;
-static volatile uint64_t isr_frame, isr_sp;
+static volatile uint32_t isr_user_ok, isr_user_bad;   // frames with PM = 1
+static volatile uint32_t isr_count_atomics;
 static uint64_t u_wait_ticks(uint64_t n) {
     uint32_t t0 = ticks;
     for (uint32_t i = 0; i < 5000000 && ticks - t0 < n; i++) {}
@@ -201,8 +206,12 @@ static uint64_t u_atomics(uint64_t x) {
 
 void timer_isr_c(uint64_t *sp_at) {
     ticks++;
-    isr_sp = (uintptr_t)sp_at;
-    isr_frame = sp_at[11];                 // above the 11 pushed registers
+    uint64_t frame = sp_at[11];             // above the 11 pushed registers
+    if (frame & FRAME_PM) {
+        // Taken in user mode: this must be the kernel stack, not the user's.
+        if (in_ustack((uintptr_t)sp_at)) isr_user_bad++; else isr_user_ok++;
+    }
+    if (!isr_count_atomics) return;
     atomic_fetch_add(&a64, 1);              // supervisor: DI/EI path
     atomic_fetch_add(&a32, 1);
     atomic_fetch_add(&a16[1], 1);
@@ -225,9 +234,6 @@ static uint64_t run_user(uint64_t (*fn)(uint64_t), uint64_t arg) {
     return exc_run_user(fn, arg, USTACK_TOP);
 }
 
-static int in_ustack(uint64_t a) {
-    return a >= (uintptr_t)ustack && a <= (uintptr_t)USTACK_TOP;
-}
 
 int main(void) {
     printf("\n=== test_exc: MMU stage 1 ===\n");
@@ -289,9 +295,13 @@ int main(void) {
           h_eaddr == (uint32_t)(uintptr_t)(buf + 2));
     h_count = 0;
     *mis = 0xAABBCCDD;
+    // Read memory back through a volatile pointer: the compiler assumes the
+    // faulting volatile store happened and would forward its value.
+    volatile uint8_t *vb = buf;
     check("S7 misaligned 32-bit store: MISALIGNED_STORE, nothing written",
           h_count == 1 && h_cause == EXC_MISALIGNED_STORE &&
-          h_eaddr == (uint32_t)(uintptr_t)(buf + 2) && buf[2] == 0 && buf[5] == 0);
+          h_eaddr == (uint32_t)(uintptr_t)(buf + 2) &&
+          (vb[2] | vb[3] | vb[4] | vb[5]) == 0);
     h_count = 0;
 
     (void)klauss_lr_d(buf + 4);
@@ -395,13 +405,13 @@ int main(void) {
     REG_INT_VEC(INT_SRC_TIMER) = (uint32_t)(uintptr_t)exc_timer_isr;
     REG_TIMER_PER = 3000;
     REG_INT_MASK = 1u << INT_SRC_TIMER;
-    isr_frame = 0;
     uint64_t got = run_user(u_wait_ticks, 3);
     check("U11 timer interrupts are taken in user mode", got >= 3);
-    check("U11 interrupt frame has PM = 1, ISR ran on the kernel stack",
-          (isr_frame & FRAME_PM) && !in_ustack(isr_sp));
+    check("U11 interrupt frames have PM = 1, ISR ran on the kernel stack",
+          isr_user_ok >= 3 && isr_user_bad == 0);
 
     isr_adds = 0;
+    isr_count_atomics = 1;                  // the ISR races the user loop from here
     uint64_t bad = run_user(u_atomics, 0);
     REG_INT_MASK = 0;
     REG_INT_VEC(INT_SRC_TIMER) = 0;
