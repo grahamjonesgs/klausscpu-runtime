@@ -21,6 +21,9 @@
 //  T8  LR/SC: TLBWI clears the reservation
 //  T9  user mode with TE = 1: TLB use, a user miss, kseg denied, non-X fetch
 //  T10 TE off, TLBINV
+//  T11 LEAVERET whose two doublewords cross a page, right behind a
+//      cache-missing load: in kseg with decoys on the following pages, and
+//      through the TLB with no miss allowed (the stage 3 review bug)
 #include <stdint.h>
 #include <stdio.h>
 
@@ -46,6 +49,8 @@ static struct pte pt[] = {
     {VA0 + 0x30000, PA0 + 0x30000, TLB_LO_R | TLB_LO_W, 5, 0, 0},    // T6 ASID 5 only
     {VA0 + 0x40000, PA0 + 0x40000, TLB_LO_R | TLB_LO_W, -1, 0, 0},   // T9 user data
     {VA0 + 0x50000, PA0 + 0x20000, TLB_LO_R, -1, 0, 0},              // T9 code, not X
+    {VA0 + 0x60000, PA0 + 0x80000, TLB_LO_R | TLB_LO_W, -1, 0, 0},   // T11 frame, page 1
+    {VA0 + 0x70000, PA0 + 0xA0000, TLB_LO_R | TLB_LO_W, -1, 0, 0},   // T11 frame, page 2
 };
 #define NPT (sizeof pt / sizeof pt[0])
 
@@ -123,7 +128,36 @@ static void reset_counts(void) { n_miss = n_access = n_other = 0; last_cause = 0
 // tlb_code_tmpl..tlb_code_end: position-independent `return 0x77`.
 extern uint64_t run_on_stack(uint64_t (*fn)(uint64_t), uint64_t sp, uint64_t arg);
 extern char tlb_code_tmpl[], tlb_code_end[];
+// straddle_leaveret(frame, miss): P = frame, a load from miss (meant to
+// miss the D-cache), then LEAVERET at once: SP = P, pop P, pop PC.  The
+// frame's return slot holds straddle_good (returns 1) or, in the decoys,
+// straddle_bad (returns 2).  SP and P are restored from r4/r5 either way.
+extern uint64_t straddle_leaveret(uint64_t frame, uint64_t miss);
+extern char straddle_good[], straddle_bad[];
 __asm__(
+    "  .text\n"
+    "  .globl straddle_leaveret\n"
+    "straddle_leaveret:\n"
+    "  push r4\n"
+    "  push r5\n"
+    "  getsp r4\n"
+    "  copy r5, r15\n"
+    "  copy r15, r0\n"
+    "  ldidx64 r3, r1, 0\n"
+    "  leaveret\n"
+    "  .globl straddle_good\n"
+    "straddle_good:\n"
+    "  setr r12, 1\n"
+    "  jmp .Lstraddle_out\n"
+    "  .globl straddle_bad\n"
+    "straddle_bad:\n"
+    "  setr r12, 2\n"
+    ".Lstraddle_out:\n"
+    "  copy r15, r5\n"
+    "  setsp r4\n"
+    "  pop r5\n"
+    "  pop r4\n"
+    "  ret\n"
     "  .text\n"
     "  .globl run_on_stack\n"
     "run_on_stack:\n"
@@ -278,6 +312,51 @@ static uint64_t body(uint64_t feat) {
     uint64_t rv = exc_run_user(u_call, VA0 + 0x50000, &ustack[1024]);
     check("T9 user call into a page without X: miss, then ACCESS_FETCH",
           n_miss == 1 && n_access == 1 && last_cause == EXC_ACCESS_FETCH && rv == 0xFE);
+
+    // T11: LEAVERET's two doublewords cross a 64 KiB page, right behind a
+    // load that misses the D-cache (a fresh line each time).  The stage 3
+    // review bug: while the load waits, the page-crossing logic stepped its
+    // VA one page per stalled cycle, so the LEAVERET read pages k and k+1
+    // further on (k = the miss latency).
+    // T11a, in kseg (every page valid, so the bug is silent): decoys on the
+    // 64 pages that follow, a wrong saved P at offset 0xFFF8 and
+    // straddle_bad at offset 0 of each.
+    {
+        const uint32_t p = 0x06400000u;          // PA; kseg P = p + KSEG_BASE
+        for (unsigned k = 1; k <= 64; k++) {
+            *kseg((void *)(uintptr_t)(p + k * 0x10000u + 0xFFF8u)) = 0xBAD0BAD0u;
+            *kseg((void *)(uintptr_t)(p + (k + 1) * 0x10000u)) = (uintptr_t)straddle_bad;
+        }
+        uint32_t frame = KSEG_BASE + p + 0x10000u - 8;
+        *(volatile uint64_t *)(uintptr_t)frame = 0;
+        *(volatile uint64_t *)(uintptr_t)(frame + 8) = (uintptr_t)straddle_good;
+        int good = 0, bad = 0;
+        for (unsigned k = 1; k <= 8; k++) {
+            uint64_t miss = (uintptr_t)kseg((void *)(uintptr_t)(0x06900000u + 0x1000u * k));
+            uint64_t r = straddle_leaveret(frame, miss);
+            good += r == 1;
+            bad += r == 2;
+        }
+        printf("  T11a kseg: %d of 8 returned correctly, %d to a decoy\n", good, bad);
+        check("T11a kseg LEAVERET across a page behind a load miss", good == 8);
+    }
+    // T11b, through the TLB (VA pages 0x4006/0x4007, frames not adjacent):
+    // the bug turns into a TLB miss on the LEAVERET that the refill then
+    // hides, so no miss may happen once both pages are in the TLB.
+    {
+        uint32_t frame = VA0 + 0x70000 - 8;
+        *(volatile uint64_t *)(uintptr_t)frame = 0;           // refills both pages
+        *(volatile uint64_t *)(uintptr_t)(frame + 8) = (uintptr_t)straddle_good;
+        reset_counts();
+        int good = 0;
+        for (unsigned k = 1; k <= 8; k++) {
+            uint64_t miss = (uintptr_t)kseg((void *)(uintptr_t)(PA0 + 0xB0000 + 0x1000 * k));
+            good += straddle_leaveret(frame, miss) == 1;
+        }
+        printf("  T11b TLB: %d of 8 returned correctly, %u TLB misses\n", good,
+               (unsigned)n_miss);
+        check("T11b TLB-mapped LEAVERET across a page: no TLB miss", good == 8 && n_miss == 0);
+    }
 
     return 0;
 }
