@@ -47,3 +47,8 @@ baremetal/benchmarks/coremark/
 baremetal/benchmarks/embench-iot/
 baremetal/bench-build/
 baremetal/bench-results/
+
+# Linux port: upstream kernel checkout (linux/fetch.sh), not part of this repo
+linux-ws/
+# The toolchain survey keeps its assembly inputs
+!linux/toolchain-tests/*.s

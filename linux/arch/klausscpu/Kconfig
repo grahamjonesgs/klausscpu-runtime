@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# KlaussCPU: 64-bit registers, 32-bit addresses, software-refilled TLB with
+# 64 KiB pages (klaussCPU MMU_PLAN.md §11).  See LINUX_PLAN.md.
+#
+
+config KLAUSSCPU
+	def_bool y
+	select ARCH_HAS_DMA_PREP_COHERENT
+	select ARCH_HAS_PTE_SPECIAL
+	select ARCH_WANT_FRAME_POINTERS
+	select GENERIC_ENTRY
+	select HAVE_GENERIC_TIF_BITS
+	select GENERIC_CLOCKEVENTS
+	select GENERIC_CPU_DEVICES
+	select GENERIC_IOREMAP
+	select GENERIC_IRQ_MULTI_HANDLER
+	select GENERIC_IRQ_PROBE
+	select GENERIC_IRQ_SHOW
+	select GENERIC_LIB_ASHLDI3
+	select GENERIC_LIB_ASHRDI3
+	select GENERIC_LIB_LSHRDI3
+	select GENERIC_SMP_IDLE_THREAD
+	select GENERIC_STRNCPY_FROM_USER
+	select GENERIC_STRNLEN_USER
+	select HAVE_PAGE_SIZE_64KB
+	select HAVE_ARCH_TRACEHOOK
+	select HAVE_REGS_AND_STACK_ACCESS_API
+	select IRQ_DOMAIN
+	select MMU_GATHER_NO_RANGE
+	select MODULES_USE_ELF_RELA
+	select SPARSE_IRQ
+	select THREAD_INFO_IN_TASK
+	select TRACE_IRQFLAGS_SUPPORT
+
+config 64BIT
+	def_bool y
+
+config MMU
+	def_bool y
+
+config NR_CPUS
+	int
+	default 1
+
+config PGTABLE_LEVELS
+	int
+	default 2
+
+config GENERIC_HWEIGHT
+	def_bool y
+
+config GENERIC_CALIBRATE_DELAY
+	def_bool y
+
+config GENERIC_CSUM
+	def_bool y
+
+config GENERIC_BUG
+	def_bool y
+	depends on BUG
+
+config NO_IOPORT_MAP
+	def_bool y
+
+config STACKTRACE_SUPPORT
+	def_bool y
+
+config LOCKDEP_SUPPORT
+	def_bool y
+
+config ARCH_MMAP_RND_BITS_MIN
+	default 8
+
+config ARCH_MMAP_RND_BITS_MAX
+	default 12
+
+menu "KlaussCPU platform"
+
+config KLAUSSCPU_DDR_SIZE
+	hex "DDR size"
+	default 0x08000000
+	help
+	  Physical memory at PA 0 (128 MiB on the Nexys A7).  All of it is
+	  lowmem in kseg (0x8000_0000 + PA).
+
+config KLAUSSCPU_CPU_HZ
+	int "Core clock in Hz"
+	default 100000000
+	help
+	  The CYCLE system register counts at this rate; it is the
+	  clocksource and sched_clock.
+
+config KLAUSSCPU_TIMER_HZ
+	int "Interval timer input clock in Hz"
+	default 100000000
+
+config CMDLINE
+	string "Built-in kernel command line"
+	default "earlycon console=ttyKL0"
+	help
+	  The klausscc loader passes no command line; this is it.
+
+config KLAUSSCPU_EARLY_UART
+	bool "Early console on the polled UART"
+	default y
+
+endmenu
+
+source "kernel/Kconfig.hz"
