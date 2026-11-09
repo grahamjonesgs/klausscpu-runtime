@@ -1,9 +1,16 @@
 # Linux on KlaussCPU — plan
 
-**Status: started 2026-11-09, branch `mmu`. Groundwork in progress: workspace,
-toolchain survey (`linux/toolchain-tests/RESULTS.md`), arch skeleton.** The
-xv6 port (`XV6_PLAN.md`) goes first. Linux reuses its trap, refill and
-context-switch design, and xv6 shakes out the hardware in a smaller kernel.
+**Status (2026-11-09): milestones 0–3 done on the klausscc emulator.**
+v7.3.3 builds with klausscpu-llvm (`linux/build.sh`). It boots to the
+banner, finishes `start_kernel` (timer ticks, slab, VFS, initramfs) and
+runs a libc-free `/init` in user mode. That exercises SYSCALL, TLB
+refill, demand-zero and copy-on-write faults, `fork`, `exit` and
+`wait4`. The console is `hvc0` on the polled UART.
+
+Next is milestone 4 (musl and busybox). It needs klausscpu-llvm changes
+(a Linux triple defining `__linux__`, a static-link driver, TLS for
+`__thread`) and klausscc `--uart-in` for scripted shell input. The xv6
+port (`XV6_PLAN.md`) runs in parallel on the same hardware features.
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
@@ -221,23 +228,43 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
   5. The Linux triple doesn't define `__linux__` and has no Linux driver
      toolchain (user space only).
 
+## Findings while porting
+
+- **ECAUSE numbering:** ILLEGAL 1, PRIVILEGED 2, TRAP 3, SYSCALL 4,
+  MISALIGNED_LOAD/STORE 5/6, ACCESS_LOAD/STORE/FETCH 7/8/9,
+  MISALIGNED_FETCH 10, TLB_MISS 11–13. `asm/klausscpu.h` uses these.
+- **`bextr` only reaches bits below 32.** The compiler never uses it for
+  higher bits, so the entry code tests frame[44] PM with `shrv`/`andi`.
+- **`setr` sign-extends a 32-bit immediate; `setru` zero-extends.**
+  Kernel addresses (0x8000_0000+) must use `setru`, as the compiler does
+  for symbols.
+- **klausscc loads by VMA, relative to the first segment**, at PA 0x20,
+  and ignores `p_paddr`. So the kernel links at kseg `0x8000_0020`.
+- **User binaries are ELF32**; `ELF_CLASS` = ELFCLASS32 with an LP64 ABI.
+  `EM_KLAUSSCPU` = 0x4B43.
+- **The fused branch conditions** (`fbr`/`fbri`) are EQ 0, LT 1, LE 2,
+  ULT 3, ULE 4, and +8 inverts them (NE 8, GE 9, GT 10, UGE 11, UGT 12).
+- **`INT_MASK` stays 0xF**, and a source is enabled by setting its
+  `INT_VECn` (as in the Zephyr port). That way IRET never restores a
+  stale mask from an old frame.
+
 ## Milestones
 
-0. **Groundwork.**
+0. **Groundwork.** *(done)*
    - Workspace, patches and kconfig without bison/flex.
    - `make ARCH=klausscpu defconfig` succeeds.
    - Arch skeleton; record how far the build gets.
-1. **Banner.**
+1. **Banner.** *(done)*
    - `head.S`, `setup_arch` (memblock, `paging_init`) and earlycon on the
      emulator.
    - Checkpoint: `Linux version 7.3.3 ... klausscpu` printed by the
      klausscc emulator.
-2. **`start_kernel` completes.**
+2. **`start_kernel` completes.** *(done)*
    - Traps, IRQs, timer, scheduler, idle, slab, VFS and the initramfs
      unpacked.
    - Checkpoint: `Kernel panic - not syncing: No working init found` (or
      `Run /init`), with timer ticks advancing jiffies.
-3. **First user process.**
+3. **First user process.** *(done on the emulator)*
    - User mode, SYSCALL, TLB refill, page faults, ELF exec.
    - A static libc-less `/init` in the initramfs (`write`, `getpid`,
      `fork`, `wait4`, `exit`) prints and loops.

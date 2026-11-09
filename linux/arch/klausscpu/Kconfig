@@ -23,6 +23,7 @@ config KLAUSSCPU
 	select GENERIC_STRNCPY_FROM_USER
 	select GENERIC_STRNLEN_USER
 	select HAVE_PAGE_SIZE_64KB
+	select HVC_DRIVER
 	select IRQ_DOMAIN
 	select LOCK_MM_AND_FIND_VMA
 	select MMU_GATHER_NO_RANGE
@@ -85,7 +86,7 @@ config KLAUSSCPU_TIMER_HZ
 
 config CMDLINE
 	string "Built-in kernel command line"
-	default "earlycon console=ttyKL0"
+	default "console=hvc0"
 	help
 	  The klausscc loader passes no command line; this is it.
 
