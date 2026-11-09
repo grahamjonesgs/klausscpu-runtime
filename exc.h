@@ -69,7 +69,7 @@ void exc_mpu_enable(int on);
 /* ── Stage 3: TLB and paging (MMU_PLAN.md §11) ────────────────────────── */
 #define SR_TLB_HI     0x30   /* [31:16] VPN, [8] G, [7:0] ASID (auto-loaded on a TLB fault) */
 #define SR_TLB_LO     0x31   /* [26:16] PFN, [3] X, [2] W, [1] R, [0] V */
-#define SR_TLB_INDEX  0x32   /* [4:0] index, [31] P = the last TLBP missed */
+#define SR_TLB_INDEX  0x32   /* index (entries from CPU_FEATURES[15:8]), [31] P = the last TLBP missed */
 #define SR_ASID       0x33
 #define SR_TLBVEC     0x34   /* TLB-miss vector, 0 = EVEC */
 #define TLB_HI_G      0x100u
