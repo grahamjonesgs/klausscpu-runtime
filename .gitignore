@@ -53,3 +53,5 @@ baremetal/bench-results/
 linux-ws/
 # The toolchain survey keeps its assembly inputs
 !linux/toolchain-tests/*.s
+# The musl port's hand-written assembly
+!linux/musl/src/*/klausscpu/*.s
