@@ -9,15 +9,17 @@
 #   shell (default)  initramfs "minish": a scripted session at the "$ "
 #                    prompt (klausscc --uart-in/--uart-prompt): built-ins,
 #                    /proc, tmpfs, and fork+execve of the musl test program
+#   busybox          initramfs "busybox": busybox init and ash (musl,
+#                    linux/userland/busybox.sh), a scripted session
 #   m3               the libc-free milestone-3 /init (no input)
 # Each expected line must appear in the UART output, in order
 # (<outdir>/<step>.out has the run, <outdir>/<step>.expect the lines).
 # Needs linux-ws/linux (linux/fetch.sh).  Exits 1 on any failure.
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
-[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|m3] [emu|board]"
+[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|m3) ;; *) die "unknown mode $MODE" ;; esac
 case $WHERE in emu|board) ;; *) die "unknown target $WHERE" ;; esac
 "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--uart-prompt' ||
   die "$KLAUSSCC has no --uart-prompt: build klausscc's mmu branch and set KLAUSSCC"
@@ -27,10 +29,14 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
-else
+fi
+if [ "$MODE" = busybox ]; then
+  "$RT/linux/userland/busybox.sh" >"$OUT/busybox.log" 2>&1 || { echo "FAIL busybox build (see $OUT/busybox.log)"; exit 1; }
+  export INITRAMFS_PROFILE=busybox
+elif [ "$MODE" = m3 ]; then
   export INITRAMFS_PROFILE=m3
 fi
 export LINUX_BUILD=$OUT/build
@@ -109,6 +115,34 @@ rm /tmp/d
 ls /tmp
 EOF2
   run_step shell 3000000000 600 '$ '
+elif [ "$MODE" = busybox ]; then
+  cat >"$OUT/busybox.in" <<'EOF2'
+echo hello from busybox
+uname -sm
+ls /
+echo 1 2 3 | wc -w
+mkdir /tmp/t && echo hi > /tmp/t/f && cat /tmp/t/f
+cat /proc/self/comm
+sh -c 'exit 3'; echo status $?
+EOF2
+  cat >"$OUT/busybox.expect" <<'EOF2'
+Run /init as init process
+echo hello from busybox
+hello from busybox
+uname -sm
+Linux klausscpu
+ls /
+dev   proc  sys   tmp   bin   sbin  etc   root  init
+echo 1 2 3 | wc -w
+3
+mkdir /tmp/t && echo hi > /tmp/t/f && cat /tmp/t/f
+hi
+cat /proc/self/comm
+cat
+sh -c 'exit 3'; echo status $?
+status 3
+EOF2
+  run_step busybox 20000000000 900 '$ '
 else
   cat >"$OUT/m3.expect" <<'EOF2'
 Run /init as init process

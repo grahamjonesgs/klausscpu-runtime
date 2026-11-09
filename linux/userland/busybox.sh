@@ -27,6 +27,6 @@ while IFS= read -r line; do
   sed -i "/^$key=/d; /^# $key is not set/d" "$OUT/.config"
   echo "$line" >>"$OUT/.config"
 done <"$HERE/busybox.config"
-yes "" | "${MK[@]}" oldconfig >>"$OUT/config.log" 2>&1
+{ yes "" || true; } | "${MK[@]}" oldconfig >>"$OUT/config.log" 2>&1
 "${MK[@]}" -j"${JOBS:-$(nproc)}" busybox >"$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; exit 1; }
 echo "busybox: $OUT/busybox"
