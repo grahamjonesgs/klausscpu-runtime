@@ -6,15 +6,10 @@
  * CPU_FEATURES bit 0 is clear (every bitstream before `mmu`): there the new
  * opcodes are illegal and park the core.  exc_init() probes first.
  *
- * Until klausscpu-llvm's MC layer knows SYSCALL/MFSR/MTSR/LR/SC, the
- * instructions are emitted as `.long` words with fixed registers (register
- * variables pin the operands).  Encodings:
- *   SYSCALL           0x6C080000
- *   MFSR rd, sr       0x6C400000 | sr << 12 | rd << 8
- *   MTSR sr, rs1      0x6C600000 | sr << 12 | rs1 << 4
- *   LR.D rd, [rs1]    0x5B001000 | rd << 8 | rs1 << 4     (LR.W 0x5A.., LR.W.S 0x5A80..)
- *   SC.D rd, rs2,[rs1] 0x5F001000 | rd << 8 | rs1 << 4 | rs2   (SC.W 0x5E..)
- *                     rd = 0 success / 1 failure; data is rs2
+ * The instructions are written with klausscpu-llvm's mnemonics (branch
+ * `mmu`): syscall, mfsr rd, sr / mtsr sr, rs (sr by name or number),
+ * lr64/lr32/lr32s rd, [addr] and sc64/sc32 rd, data, [addr] (rd = 0
+ * success / 1 failure), tlbwi/tlbr/tlbp/tlbinv.
  */
 #ifndef KLAUSS_EXC_H
 #define KLAUSS_EXC_H
@@ -31,7 +26,7 @@
 /* Set by exc_init() (0 until then).  atomic.c references it weakly. */
 extern uint32_t __klauss_cpu_features;
 
-/* ── System registers (plain integers: they are pasted into .long) ──────── */
+/* ── System registers (numbers: MFSR/MTSR take them as an immediate) ───── */
 #define SR_STATUS    0   /* user-readable: [0] UM, [1] DI */
 #define SR_EVEC      1
 #define SR_ECAUSE    2
@@ -83,10 +78,10 @@ void exc_mpu_enable(int on);
 #define KMAP_BASE     0xC0000000u
 #define CPU_FEAT_TLB_ENTRIES(f) (((f) >> 8) & 0xFFu)
 
-static inline void klauss_tlbwi(void)  { __asm__ volatile(".long 0x6C090000" ::: "memory"); }
-static inline void klauss_tlbr(void)   { __asm__ volatile(".long 0x6C0A0000" ::: "memory"); }
-static inline void klauss_tlbp(void)   { __asm__ volatile(".long 0x6C0B0000" ::: "memory"); }
-static inline void klauss_tlbinv(void) { __asm__ volatile(".long 0x6C0C0000" ::: "memory"); }
+static inline void klauss_tlbwi(void)  { __asm__ volatile("tlbwi" ::: "memory"); }
+static inline void klauss_tlbr(void)   { __asm__ volatile("tlbr" ::: "memory"); }
+static inline void klauss_tlbp(void)   { __asm__ volatile("tlbp" ::: "memory"); }
+static inline void klauss_tlbinv(void) { __asm__ volatile("tlbinv" ::: "memory"); }
 
 /* ── Causes (ECAUSE[7:0]) ──────────────────────────────────────────────── */
 /* ECAUSE[8] (stage 2): the ACCESS_* fault was a denial by a GUARD region.
@@ -171,62 +166,51 @@ uint64_t exc_run_user(uint64_t (*fn)(uint64_t), uint64_t arg, void *ustack_top);
 #define SYS_EXIT_USER   0x7FFF0000u
 
 /* ── Instruction wrappers ──────────────────────────────────────────────── */
-#define KX_STR2(x) #x
-#define KX_STR(x)  KX_STR2(x)
 
-/* rd = r12 */
+/* SR is a constant expression (SR_* or SR_MPU_BASE(n) with a constant n). */
 #define exc_mfsr(SR) __extension__({                                          \
-    register uint64_t _kx_v __asm__("r12");                                   \
-    __asm__ volatile(".long 0x6C400C00 + ((" KX_STR(SR) ") << 12)"            \
-                     : "=r"(_kx_v) : : "memory");                             \
+    uint64_t _kx_v;                                                           \
+    __asm__ volatile("mfsr %0, %1" : "=r"(_kx_v) : "i"(SR) : "memory");       \
     _kx_v; })
 
-/* rs1 = r1 */
 #define exc_mtsr(SR, VAL) do {                                                \
-    register uint64_t _kx_x __asm__("r1") = (uint64_t)(VAL);                  \
-    __asm__ volatile(".long 0x6C600010 + ((" KX_STR(SR) ") << 12)"            \
-                     : : "r"(_kx_x) : "memory");                              \
+    __asm__ volatile("mtsr %0, %1" : : "i"(SR), "r"((uint64_t)(VAL))          \
+                     : "memory");                                             \
 } while (0)
 
-/* SYSCALL with r0 = nr, r1..r3 = args; result in r12. */
+/* SYSCALL with r0 = nr, r1..r3 = args; result in r12 (the syscall ABI, so
+ * these stay pinned). */
 static inline uint64_t exc_syscall(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3) {
     register uint64_t r0 __asm__("r0") = nr;
     register uint64_t r1 __asm__("r1") = a1;
     register uint64_t r2 __asm__("r2") = a2;
     register uint64_t r3 __asm__("r3") = a3;
     register uint64_t r12 __asm__("r12");
-    __asm__ volatile(".long 0x6C080000"
+    __asm__ volatile("syscall"
                      : "=r"(r12), "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
                      : : "memory", "r8", "r9", "r10", "r11", "r13", "r14");
     return r12;
 }
 
-/* LR / SC (address in r1, data in r2, result in r12).  SC returns 0 on
- * success, 1 on failure. */
+/* LR / SC.  SC returns 0 on success, 1 on failure. */
 static inline uint64_t klauss_lr_d(volatile void *p) {
-    register uintptr_t a __asm__("r1") = (uintptr_t)p;
-    register uint64_t v __asm__("r12");
-    __asm__ volatile(".long 0x5B001C10" : "=r"(v) : "r"(a) : "memory");
+    uint64_t v;
+    __asm__ volatile("lr64 %0, %1" : "=r"(v) : "r"((uintptr_t)p) : "memory");
     return v;
 }
 static inline uint64_t klauss_lr_w(volatile void *p) {   /* zero-extends */
-    register uintptr_t a __asm__("r1") = (uintptr_t)p;
-    register uint64_t v __asm__("r12");
-    __asm__ volatile(".long 0x5A001C10" : "=r"(v) : "r"(a) : "memory");
+    uint64_t v;
+    __asm__ volatile("lr32 %0, %1" : "=r"(v) : "r"((uintptr_t)p) : "memory");
     return v;
 }
 static inline uint64_t klauss_sc_d(volatile void *p, uint64_t val) {
-    register uintptr_t a __asm__("r1") = (uintptr_t)p;
-    register uint64_t d __asm__("r2") = val;
-    register uint64_t ok __asm__("r12");
-    __asm__ volatile(".long 0x5F001C12" : "=r"(ok) : "r"(a), "r"(d) : "memory");
+    uint64_t ok;
+    __asm__ volatile("sc64 %0, %1, %2" : "=r"(ok) : "r"(val), "r"((uintptr_t)p) : "memory");
     return ok;
 }
 static inline uint64_t klauss_sc_w(volatile void *p, uint64_t val) {
-    register uintptr_t a __asm__("r1") = (uintptr_t)p;
-    register uint64_t d __asm__("r2") = val;
-    register uint64_t ok __asm__("r12");
-    __asm__ volatile(".long 0x5E001C12" : "=r"(ok) : "r"(a), "r"(d) : "memory");
+    uint64_t ok;
+    __asm__ volatile("sc32 %0, %1, %2" : "=r"(ok) : "r"(val), "r"((uintptr_t)p) : "memory");
     return ok;
 }
 

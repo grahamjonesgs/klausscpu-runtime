@@ -1,8 +1,7 @@
 // exc_vector.S — the exception entry stub, user-mode entry and return
 // trampoline (MMU stage 1, see exc.h).
 //
-// The new instructions are .long words until klausscpu-llvm's MC layer has
-// them (encodings in exc.h).
+// The new instructions use klausscpu-llvm's `mmu` mnemonics (exc.h).
 
     .text
 
@@ -44,8 +43,8 @@
     push    r2
     push    r1
     push    r0
-    .long   0x6C402000          // MFSR r0, ecause
-    .long   0x6C403100          // MFSR r1, eaddr
+    mfsr r0, ecause
+    mfsr r1, eaddr
     getsp   r2                  // r2 = &struct exc_regs
     call    exc_dispatch
     pop     r0
@@ -70,35 +69,35 @@
     .globl  exc_vector
     .type   exc_vector, @function
 exc_vector:
-    .long   0x6C605000          // MTSR scratch0, r0
-    .long   0x6C402000          // MFSR r0, ecause
+    mtsr scratch0, r0
+    mfsr r0, ecause
     andv    r0, r0, 256         // ECAUSE[8] GUARD (flags are in the frame)
     fbri    r0, 0, 0, .Lexc_normal
     // GUARD denial: SP may be inside a guard region.
-    .long   0x6C606010          // MTSR scratch1, r1
-    .long   0x6C400000          // MFSR r0, status
+    mtsr scratch1, r1
+    mfsr r0, status
     bclr    r0, r0, 8           // MPU_EN = 0
-    .long   0x6C600000          // MTSR status, r0 (serializes)
+    mtsr status, r0             // serializes
     getsp   r1                  // r1 = the SP holding the frame
     setr    r0, exc_emergency_top
     setsp   r0
     push    r1                  // [old SP]
     ldidx64 r0, r1, 0
     push    r0                  // [frame copy] = exc_regs.frame
-    .long   0x6C406100          // MFSR r1, scratch1
-    .long   0x6C405000          // MFSR r0, scratch0
+    mfsr r1, scratch1
+    mfsr r0, scratch0
     EXC_BODY
-    .long   0x6C605000          // MTSR scratch0, r0
-    .long   0x6C606010          // MTSR scratch1, r1
+    mtsr scratch0, r0
+    mtsr scratch1, r1
     pop     r0                  // the frame, as the handler left it
     pop     r1                  // old SP
     stidx64 r0, r1, 0           // write it back where IRET pops it
     setsp   r1
-    .long   0x6C405000          // MFSR r0, scratch0
-    .long   0x6C406100          // MFSR r1, scratch1
+    mfsr r0, scratch0
+    mfsr r1, scratch1
     iret
 .Lexc_normal:
-    .long   0x6C405000          // MFSR r0, scratch0
+    mfsr r0, scratch0
     EXC_BODY
     iret
     .size   exc_vector, . - exc_vector
@@ -122,7 +121,7 @@ exc_emergency_top:
     .globl  exc_enter_user
     .type   exc_enter_user, @function
 exc_enter_user:
-    .long   0x6C604020          // MTSR usp, r2
+    mtsr usp, r2
     push    r0
     copy    r0, r1
     iret
@@ -136,6 +135,6 @@ exc_enter_user:
 exc_user_return:
     copy    r1, r12
     setr    r0, 0x7FFF0000      // SYS_EXIT_USER
-    .long   0x6C080000          // SYSCALL
+    syscall
     jmp     exc_user_return     // not reached
     .size   exc_user_return, . - exc_user_return

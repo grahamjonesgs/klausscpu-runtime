@@ -88,7 +88,7 @@ __asm__(
     "  .globl do_syscall_nop\n"
     "do_syscall_nop:\n"
     "  setr r0, 2\n"                 // SYS_NOP
-    "  .long 0x6C080000\n"           // SYSCALL
+    "  syscall\n"
     "  .globl site_syscall_next\n"
     "site_syscall_next:\n"
     "  ret\n"

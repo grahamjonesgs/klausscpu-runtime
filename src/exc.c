@@ -45,7 +45,7 @@ void exc_disable(void) {
         exc_mtsr(SR_EVEC, 0);
 }
 
-// Region n's SR numbers must be literals for the .long encodings.
+// MFSR/MTSR take the SR number as an immediate, so region n must be a constant.
 #define MPU_CASE(n)                                                         \
     case n:                                                                 \
         exc_mtsr(0x10 + 2 * n, (base & ~0x1Fu) | (attrs & 0x1Fu));         \
