@@ -3,6 +3,7 @@
 *.lo
 crt-*.o
 *.elf
+*.elf.nm
 *.bin
 *.s
 # LLEXT loadable extensions built by `make ext-demos`
