@@ -1,0 +1,20 @@
+diff --git a/include/linux/elf.h b/include/linux/elf.h
+index 5c402788d..bfb4d3f77 100644
+--- a/include/linux/elf.h
++++ b/include/linux/elf.h
+@@ -42,7 +42,15 @@ extern Elf32_Dyn _DYNAMIC [];
+ #define elf_phdr	elf32_phdr
+ #define elf_shdr	elf32_shdr
+ #define elf_note	elf32_note
++/*
++ * An LP64 ABI with 32-bit ELF files (KlaussCPU: 32-bit addresses, 64-bit
++ * pointers) wants the stack's argv/envp/auxv words to be longs.
++ */
++#ifdef ARCH_ELF_ADDR_T
++#define elf_addr_t	ARCH_ELF_ADDR_T
++#else
+ #define elf_addr_t	Elf32_Off
++#endif
+ #define Elf_Half	Elf32_Half
+ #define Elf_Word	Elf32_Word
+ #define ELF_GNU_PROPERTY_ALIGN	ELF32_GNU_PROPERTY_ALIGN

@@ -4,6 +4,7 @@
 #   KLAUSSCPU_LLVM_BIN  toolchain bin dir (default ../klausscpu-llvm/build/bin)
 #   JOBS                parallel jobs (default nproc)
 #   LINUX_BUILD         output directory (default linux-ws/build)
+#   INITRAMFS_PROFILE   m3 | musltest | busybox (linux/initramfs/build.sh)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/.." && pwd)

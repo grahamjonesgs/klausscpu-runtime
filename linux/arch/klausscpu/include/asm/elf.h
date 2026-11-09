@@ -14,6 +14,8 @@
 
 #define ELF_ARCH	EM_KLAUSSCPU
 #define ELF_CLASS	ELFCLASS32
+/* ...but the user stack (argc, argv, envp, auxv) holds longs: patch 0002. */
+#define ARCH_ELF_ADDR_T	unsigned long
 #define ELF_DATA	ELFDATA2LSB
 
 #define elf_check_arch(x)	((x)->e_machine == EM_KLAUSSCPU)
