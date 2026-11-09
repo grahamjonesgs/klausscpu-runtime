@@ -1,9 +1,11 @@
 # xv6 on KlaussCPU — plan
 
-**Status (2026-11-09, branch `mmu`): milestones 0–2 done on the emulator.**
-xv6 boots, init starts sh, the user programs run, and `forktest` and
-`usertests -q` pass (`tools/validate/xv6.sh full`). Milestone 3 (board) is
-next. See *As built* below for where the port differs from the design.
+**Status (2026-11-09, branch `mmu`): milestones 0–3 done.** xv6 boots, init
+starts sh, the user programs run, and `forktest` and `usertests -q` pass on
+the emulator and on the board (klaussCPU `mmu` 98fe470, the stage 3
+release): `tools/validate/xv6.sh <out> full [emu|board]`. Milestone 4
+(polish) is next. See *As built* below for where the port differs from the
+design.
 
 Goal: run xv6, MIT's teaching Unix, on the board as the first protected OS
 on KlaussCPU. User programs run in user mode, each in its own address space
@@ -199,6 +201,20 @@ keeps its text there).
   - quick: a scripted session with ordered expected lines, about 160M
     instructions, 2 s.
   - full: adds `usertests -q`, about 12.9G instructions, 2 min.
+
+## Board (milestone 3)
+
+- Loaded with `klausscc -i kernel -s -m` (a 4 MiB `.kbt`, about 15 s) and
+  typed with `--uart-in`/`--uart-prompt` (klausscc b94000b).
+- **Idle loop.** On 98fe470 the hardware does not take a pending interrupt
+  in the one-instruction window of `intr_on(); intr_off()`. EI's enable
+  commits at WB, about 3 cycles late; the emulator takes it at once.
+  Upstream's idle (`wfi` with interrupts off, relying on that window) never
+  serviced the tick that polls the UART, so the shell got no input. The
+  scheduler now WAITs with interrupts on (`intr_on(); wait; intr_off()`).
+  The CPU session is making EI precise in a later release, as RISC-V does.
+- Results: the quick session and `usertests -q` (ALL TESTS PASSED, about
+  5 minutes) on the board.
 
 ## Milestones
 

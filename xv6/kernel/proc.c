@@ -416,7 +416,15 @@ scheduler(void)
     }
     if (found == 0) {
       // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wait"); // klausscpu
+      // klausscpu: WAIT with interrupts enabled, so the interrupt that wakes
+      // it is taken here.  The hardware doesn't take a pending interrupt in
+      // the one-instruction window of intr_on(); intr_off() at the top of the
+      // loop (the emulator does), so with WAIT under DI the tick that polls
+      // the UART was never serviced on the board.  An interrupt taken just
+      // before the WAIT only delays the wake to the next tick.
+      intr_on();
+      asm volatile("wait");
+      intr_off();
     }
   }
 }
