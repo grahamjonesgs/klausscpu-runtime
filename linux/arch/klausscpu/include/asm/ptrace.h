@@ -68,9 +68,6 @@ static inline void forget_syscall(struct pt_regs *regs)
 	regs->syscallno = -1;
 }
 
-extern unsigned long regs_get_register(struct pt_regs *regs, unsigned int offset);
-extern int regs_query_register_offset(const char *name);
-extern unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs, unsigned int n);
 
 #define arch_has_single_step()	(0)
 

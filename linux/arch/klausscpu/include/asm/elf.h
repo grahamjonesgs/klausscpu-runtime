@@ -30,7 +30,8 @@ typedef struct { unsigned long unused; } elf_fpregset_t;
 
 #define ELF_PLAT_INIT(_r, load_addr)	do { } while (0)
 
-#define ELF_CORE_COPY_REGS(dest, regs)	klausscpu_elf_core_copy_regs((dest), (regs))
+/* elfcore.h writes this without a semicolon. */
+#define ELF_CORE_COPY_REGS(dest, regs)	klausscpu_elf_core_copy_regs((dest), (regs));
 struct pt_regs;
 extern void klausscpu_elf_core_copy_regs(elf_gregset_t dest, struct pt_regs *regs);
 

@@ -54,7 +54,7 @@
 	case 8: __get_user_asm("ldidx64", __gu_val, ptr, __gu_err); break; \
 	default: BUILD_BUG();						\
 	}								\
-	*(x) = (__typeof__(*(ptr)))__gu_val;				\
+	*(x) = (__typeof__(*(x)))__gu_val;				\
 	__gu_err;							\
 })
 

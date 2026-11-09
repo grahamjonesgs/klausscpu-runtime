@@ -19,6 +19,7 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 }
 #define switch_mm switch_mm
 
+#include <asm-generic/mm_hooks.h>
 #include <asm-generic/mmu_context.h>
 
 #endif

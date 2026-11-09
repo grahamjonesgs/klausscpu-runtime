@@ -8,6 +8,10 @@
 #ifndef _UAPI_ASM_KLAUSSCPU_PTRACE_H
 #define _UAPI_ASM_KLAUSSCPU_PTRACE_H
 
+/* GENERIC_ENTRY's syscall emulation requests (the values loongarch/arm64 use). */
+#define PTRACE_SYSEMU			0x1f
+#define PTRACE_SYSEMU_SINGLESTEP	0x20
+
 #ifndef __ASSEMBLY__
 
 #include <linux/types.h>

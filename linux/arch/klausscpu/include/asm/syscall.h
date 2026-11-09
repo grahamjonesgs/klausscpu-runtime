@@ -12,6 +12,9 @@
 #include <linux/sched.h>
 #include <asm/ptrace.h>
 
+/* EM_KLAUSSCPU (0x4B43) with the 64-bit ABI flag. */
+#define AUDIT_ARCH_KLAUSSCPU	(0x4B43 | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE)
+
 extern void *sys_call_table[];
 
 static inline int syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
@@ -79,9 +82,5 @@ static inline bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
 {
 	return false;
 }
-
-#ifndef AUDIT_ARCH_KLAUSSCPU
-#define AUDIT_ARCH_KLAUSSCPU	(EM_KLAUSSCPU | __AUDIT_ARCH_64BIT | __AUDIT_ARCH_LE)
-#endif
 
 #endif
