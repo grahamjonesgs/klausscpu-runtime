@@ -1,20 +1,32 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "klauss.h"
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
 
+// klausscpu: traps for KlaussCPU (XV6_PLAN.md).  Every exception, the
+// timer interrupt and TLB misses that the refill can't satisfy arrive in
+// trap() through trapvec.S, with the registers saved in a struct trapframe
+// on the current kernel stack.
+
 struct spinlock tickslock;
 uint ticks;
 
-extern char trampoline[], uservec[];
+// in trapvec.S
+void excvec(void);
+void timervec(void);
+void tlbrefill(void);
+void trapret(struct trapframe *tf) __attribute__((noreturn));
 
-// in kernelvec.S, calls kerneltrap().
-void kernelvec();
+// The page table the TLB refill reads (tlbactivate()), and the next TLB
+// entry it replaces (round-robin over all of them).
+pagetable_t cur_pagetable;
+static uint tlb_next, tlb_mask;
 
-extern int devintr();
+// timer period in clock cycles: 10 ms at 100 MHz
+#define TICK_CYCLES 1000000
 
 void
 trapinit(void)
@@ -22,60 +34,121 @@ trapinit(void)
   initlock(&tickslock, "time");
 }
 
-// set up to take exceptions and traps while in the kernel.
+// set up the vectors, the TLB and the timer.
 void
 trapinithart(void)
 {
-  w_stvec((uint64)kernelvec);
+  uint n = CPU_FEAT_TLB_ENTRIES(CPU_FEATURES); // a power of 2 (16 on the A7)
+
+  tlb_mask = n - 1;
+  tlb_next = 0;
+  tlbinv(); // drops boot.S's identity entry: the kernel only uses kseg
+  w_sr(asid, 0);
+  w_sr(tlbvec, (uint64)tlbrefill);
+  w_sr(evec, (uint64)excvec);
+  INT_VEC(INT_SRC_TIMER) = (uint32)(uint64)timervec;
+  TIMER_PER = TICK_CYCLES;
+  INT_MASK = 1 << INT_SRC_TIMER;
+}
+
+// Make pagetable the one TLB refills use, and forget the old one's entries.
+void
+tlbactivate(pagetable_t pagetable)
+{
+  cur_pagetable = pagetable;
+  tlbinv();
+}
+
+// Forget every TLB entry (after a mapping of the current process changes).
+void
+tlbflush(void)
+{
+  tlbinv();
+}
+
+// Called by tlbrefill (trapvec.S) on a TLB miss, with TLB_HI auto-loaded
+// ({VPN, G = 0, ASID}).  Loads the entry and returns 1, or returns 0 when
+// the page isn't a valid user page: the miss then goes to trap().
+int
+tlbrefill_c(void)
+{
+  uint64 va = r_sr(tlb_hi) & 0xFFFF0000L;
+  pagetable_t pt = cur_pagetable;
+
+  if (pt == 0 || va >= MAXVA)
+    return 0;
+  pte_t pte = pt[va >> PGSHIFT];
+  if ((pte & (PTE_V | PTE_U)) != (PTE_V | PTE_U))
+    return 0;
+  w_sr(tlb_lo, PTE_TLB_LO(pte));
+  w_sr(tlb_index, tlb_next);
+  tlb_next = (tlb_next + 1) & tlb_mask;
+  tlbwi();
+  return 1;
+}
+
+// Set a user trapframe's frame so that trapret enters user mode at pc,
+// with the timer interrupt enabled.
+void
+trapframe_setpc(struct trapframe *tf, uint64 pc)
+{
+  tf->frame = (pc & 0xFFFFFFFFL) | ((uint64)(1 << INT_SRC_TIMER) << FRAME_INT_MASK_SHIFT) |
+              FRAME_PM;
+}
+
+static int devintr(uint64 kind);
+static void usertrap(struct trapframe *tf, uint64 kind);
+static void kerneltrap(struct trapframe *tf, uint64 kind);
+
+// every trap, from trapvec.S.
+void
+trap(struct trapframe *tf, uint64 kind)
+{
+  // an interrupt doesn't disable interrupts (it clears its INT_MASK bit);
+  // run the handlers with them off, as RISC-V xv6 does.  IRET restores.
+  intr_off();
+  if (tf->frame & FRAME_PM)
+    usertrap(tf, kind);
+  else
+    kerneltrap(tf, kind);
 }
 
 //
 // handle an interrupt, exception, or system call from user space.
-// called from, and returns to, trampoline.S
-// return value is user satp for trampoline.S to switch to.
 //
-uint64
-usertrap(void)
+static void
+usertrap(struct trapframe *tf, uint64 kind)
 {
   int which_dev = 0;
-
-  if ((r_sstatus() & SSTATUS_SPP) != 0)
-    panic("usertrap: not from user mode");
-
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
-  w_stvec((uint64)kernelvec); //DOC: kernelvec
-
   struct proc *p = myproc();
 
-  // save user program counter.
-  p->trapframe->epc = r_sepc();
+  if (tf != p->trapframe)
+    panic("usertrap: trapframe");
 
-  if (r_scause() == 8) {
-    // system call
-
-    if (killed(p))
-      kexit(-1);
-
-    // sepc points to the ecall instruction,
-    // but we want to return to the next instruction.
-    p->trapframe->epc += 4;
-
-    // an interrupt will change sepc, scause, and sstatus,
-    // so enable only now that we're done with those registers.
-    intr_on();
-
-    syscall();
-  } else if ((which_dev = devintr()) != 0) {
-    // ok
-  } else if ((r_scause() == 15 || r_scause() == 13) &&
-             vmfault(p->pagetable, p->sz, r_stval(),
-                     (r_scause() == 13) ? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
+  if (kind != 0) {
+    which_dev = devintr(kind);
   } else {
-    printk("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printk("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-    setkilled(p);
+    uint64 cause = r_sr(ecause) & 0xFF;
+    uint64 eaddr = r_sr(eaddr);
+
+    if (cause == EXC_SYSCALL) {
+      // system call: the frame PC is already past the SYSCALL.
+      if (killed(p))
+        kexit(-1);
+
+      // the cause and address have been read; interrupts may come now.
+      intr_on();
+
+      syscall();
+    } else if ((cause == EXC_TLB_MISS_LOAD || cause == EXC_TLB_MISS_STORE) &&
+               vmfault(p->pagetable, p->sz, eaddr,
+                       (cause == EXC_TLB_MISS_LOAD) ? 1 : 0) != 0) {
+      // page fault on lazily-allocated page
+    } else {
+      printk("usertrap(): unexpected ecause %ld pid=%d\n", cause, p->pid);
+      printk("            pc=0x%lx eaddr=0x%lx\n", FRAME_PC(tf->frame), eaddr);
+      setkilled(p);
+    }
   }
 
   if (killed(p))
@@ -85,82 +158,40 @@ usertrap(void)
   if (which_dev == 2)
     yield();
 
-  prepare_return();
-
-  // the user page table to switch to, for trampoline.S
-  uint64 satp = MAKE_SATP(p->pagetable);
-
-  // return to trampoline.S; satp value in a0.
-  return satp;
+  usertrapret();
 }
 
 //
-// set up trapframe and control registers for a return to user space
+// return to user space with the current process's trapframe.
 //
 void
-prepare_return(void)
+usertrapret(void)
 {
   struct proc *p = myproc();
 
-  // we're about to switch the destination of traps from
-  // kerneltrap() to usertrap(). because a trap from kernel
-  // code to usertrap would be a disaster, turn off interrupts.
+  // trapret pops the trapframe at the top of the kernel stack; the IRET
+  // leaves SP_ALT there for the next trap from user mode.
   intr_off();
-
-  // send syscalls, interrupts, and exceptions to uservec in trampoline.S
-  uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
-  w_stvec(trampoline_uservec);
-
-  // set up trapframe values that uservec will need when
-  // the process next traps into the kernel.
-  p->trapframe->kernel_satp = r_satp();         // kernel page table
-  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
-  p->trapframe->kernel_trap = (uint64)usertrap;
-  p->trapframe->kernel_hartid = r_tp(); // hartid for cpuid()
-
-  // set up the registers that trampoline.S's sret will use
-  // to get to user space.
-
-  // set S Previous Privilege mode to User.
-  unsigned long x = r_sstatus();
-  x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
-  x |= SSTATUS_SPIE; // enable interrupts in user mode
-  w_sstatus(x);
-
-  // set S Exception Program Counter to the saved user pc.
-  w_sepc(p->trapframe->epc);
+  trapret(p->trapframe);
 }
 
-// interrupts and exceptions from kernel code go here via kernelvec,
-// on whatever the current kernel stack is.
-void
-kerneltrap()
+// interrupts and exceptions from kernel code go here, on whatever the
+// current kernel stack is.
+static void
+kerneltrap(struct trapframe *tf, uint64 kind)
 {
-  int which_dev = 0;
-  uint64 sepc = r_sepc();
-  uint64 sstatus = r_sstatus();
-  uint64 scause = r_scause();
+  int which_dev = devintr(kind);
 
-  if ((sstatus & SSTATUS_SPP) == 0)
-    panic("kerneltrap: not from supervisor mode");
-  if (intr_get() != 0)
-    panic("kerneltrap: interrupts enabled");
-
-  if ((which_dev = devintr()) == 0) {
-    // interrupt or trap from an unknown source
-    printk("scause=0x%lx sepc=0x%lx stval=0x%lx\n", scause, r_sepc(),
-           r_stval());
+  if (which_dev == 0) {
+    // an exception in the kernel
+    printk("ecause=%ld pc=0x%lx eaddr=0x%lx\n", r_sr(ecause) & 0xFF,
+           FRAME_PC(tf->frame), r_sr(eaddr));
     panic("kerneltrap");
   }
 
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2 && myproc() != 0)
     yield();
-
-  // the yield() may have caused some traps to occur,
-  // so restore trap registers for use by kernelvec.S's sepc instruction.
-  w_sepc(sepc);
-  w_sstatus(sstatus);
 }
 
 void
@@ -173,48 +204,21 @@ clockintr()
     release(&tickslock);
   }
 
-  // ask for the next timer interrupt. this also clears
-  // the interrupt request. 1000000 is about a tenth
-  // of a second.
-  w_stimecmp(r_time() + 1000000);
+  // taking the interrupt cleared its INT_MASK bit; set it again so that the
+  // scheduler's WAIT can wake (IRET restores the frame's mask anyway).
+  INT_MASK = 1 << INT_SRC_TIMER;
+
+  // the UART has no receive interrupt: poll it every tick.
+  uartintr();
 }
 
-// check if it's an external interrupt or software interrupt,
-// and handle it.
-// returns 2 if timer interrupt,
-// 1 if other device,
-// 0 if not recognized.
-int
-devintr()
+// returns 2 if timer interrupt, 0 if not an interrupt.
+static int
+devintr(uint64 kind)
 {
-  uint64 scause = r_scause();
-
-  if (scause == 0x8000000000000009L) {
-    // this is a supervisor external interrupt, via PLIC.
-
-    // irq indicates which device interrupted.
-    int irq = plic_claim();
-
-    if (irq == UART0_IRQ) {
-      uartintr();
-    } else if (irq == VIRTIO0_IRQ) {
-      virtio_disk_intr();
-    } else if (irq) {
-      printk("unexpected interrupt irq=%d\n", irq);
-    }
-
-    // the PLIC allows each device to raise at most one
-    // interrupt at a time; tell the PLIC the device is
-    // now allowed to interrupt again.
-    if (irq)
-      plic_complete(irq);
-
-    return 1;
-  } else if (scause == 0x8000000000000005L) {
-    // timer interrupt.
+  if (kind == 1) {
     clockintr();
     return 2;
-  } else {
-    return 0;
   }
+  return 0;
 }

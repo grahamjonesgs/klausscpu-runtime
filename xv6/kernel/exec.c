@@ -1,7 +1,7 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "klauss.h"
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
@@ -118,10 +118,10 @@ kexec(char *path, char **argv)
       0)
     goto bad;
 
-  // a0 and a1 contain arguments to user main(argc, argv)
-  // argc is returned via the system call return
-  // value, which goes in a0.
-  p->trapframe->a1 = sp;
+  // klausscpu: r0 and r1 are the arguments of user start(argc, argv)
+  // (ulib.c), which calls main.
+  p->trapframe->r[0] = argc;
+  p->trapframe->r[1] = sp;
 
   // Save program name for debugging.
   for (last = s = path; *s; s++)
@@ -133,8 +133,12 @@ kexec(char *path, char **argv)
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;
-  p->trapframe->epc = elf.entry; // initial program counter = ulib.c:start()
-  p->trapframe->sp = sp;         // initial stack pointer
+  trapframe_setpc(p->trapframe, elf.entry); // klausscpu: = ulib.c:start()
+  p->trapframe->usp = sp;                    // initial stack pointer
+  tlbactivate(pagetable);                    // klausscpu: the new mappings
+  // klausscpu: the code was written through kseg (the D-cache); drop any
+  // stale fetch-side copy before it runs (as test_tlb T5 does).
+  CACHE_CTRL = CACHE_CTRL_ICACHE_INV;
   proc_freepagetable(oldpagetable, oldsz);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)

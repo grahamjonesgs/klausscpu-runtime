@@ -83,7 +83,6 @@ int             cpuid(void);
 void            kexit(int);
 int             kfork(void);
 int             growproc(int);
-void            proc_mapstacks(pagetable_t);
 pagetable_t     proc_pagetable(struct proc *);
 void            proc_freepagetable(pagetable_t, uint64);
 int             kkill(int);
@@ -143,7 +142,13 @@ extern uint     ticks;
 void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
-void            prepare_return(void);
+// klausscpu:
+struct trapframe;
+void            usertrapret(void) __attribute__((noreturn));
+void            trapframe_setpc(struct trapframe*, uint64);
+void            tlbactivate(pagetable_t);
+void            tlbflush(void);
+void            clockintr(void);
 
 // uart.c
 void            uartinit(void);
@@ -152,9 +157,6 @@ void            uartwrite(char [], int);
 void            uartputc_sync(int);
 
 // vm.c
-void            kvminit(void);
-void            kvminithart(void);
-void            kvmmap(pagetable_t, uint64, uint64, uint64, int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);
 uint64          uvmalloc(pagetable_t, uint64, uint64, int);
@@ -171,16 +173,9 @@ int             copyinstr(pagetable_t, uint64, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, uint64, int);
 
-// plic.c
-void            plicinit(void);
-void            plicinithart(void);
-int             plic_claim(void);
-void            plic_complete(int);
-
-// virtio_disk.c
-void            virtio_disk_init(void);
-void            virtio_disk_rw(struct buf *, int);
-void            virtio_disk_intr(void);
+// ramdisk.c (klausscpu: replaces plic.c and virtio_disk.c)
+void            ramdisk_init(void);
+void            ramdisk_rw(struct buf *, int);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x) / sizeof((x)[0]))

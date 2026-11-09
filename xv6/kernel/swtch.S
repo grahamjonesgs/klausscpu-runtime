@@ -1,42 +1,28 @@
-# Context switch
-#
-#   void swtch(struct context *old, struct context *new);
-# 
-# Save current registers in old. Load from new.	
+// klausscpu: context switch (KlaussCPU ABI: callee-saved R4-R7 and R15).
+//
+//   void swtch(struct context *old, struct context *new);
+//
+// Saves SP and the callee-saved registers in *old (r0) and loads them from
+// *new (r1).  The return address is on the stack, so the RET returns into
+// whatever called swtch on the new stack (or, for a new process, to the
+// forkret address allocproc() put there).
 
-
-.globl swtch
+    .text
+    .globl  swtch
+    .p2align 3
 swtch:
-        sd ra, 0(a0)
-        sd sp, 8(a0)
-        sd s0, 16(a0)
-        sd s1, 24(a0)
-        sd s2, 32(a0)
-        sd s3, 40(a0)
-        sd s4, 48(a0)
-        sd s5, 56(a0)
-        sd s6, 64(a0)
-        sd s7, 72(a0)
-        sd s8, 80(a0)
-        sd s9, 88(a0)
-        sd s10, 96(a0)
-        sd s11, 104(a0)
-
-        ld ra, 0(a1)
-        ld sp, 8(a1)
-        ld s0, 16(a1)
-        ld s1, 24(a1)
-        ld s2, 32(a1)
-        ld s3, 40(a1)
-        ld s4, 48(a1)
-        ld s5, 56(a1)
-        ld s6, 64(a1)
-        ld s7, 72(a1)
-        ld s8, 80(a1)
-        ld s9, 88(a1)
-        ld s10, 96(a1)
-        ld s11, 104(a1)
-        
-        ret
-
-	
+    getsp   r2
+    stidx64 r2, r0, 0
+    stidx64 r4, r0, 8
+    stidx64 r5, r0, 16
+    stidx64 r6, r0, 24
+    stidx64 r7, r0, 32
+    stidx64 r15, r0, 40
+    ldidx64 r2, r1, 0
+    setsp   r2
+    ldidx64 r4, r1, 8
+    ldidx64 r5, r1, 16
+    ldidx64 r6, r1, 24
+    ldidx64 r7, r1, 32
+    ldidx64 r15, r1, 40
+    ret

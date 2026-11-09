@@ -1,21 +1,13 @@
-// Saved registers for kernel context switches.
+// klausscpu: saved registers for kernel context switches (swtch.S): SP
+// and the callee-saved set of the KlaussCPU ABI, R4-R7 and R15 (P).  The
+// return address is on the stack (CALL pushes it), not here.
 struct context {
-  uint64 ra;
   uint64 sp;
-
-  // callee-saved
-  uint64 s0;
-  uint64 s1;
-  uint64 s2;
-  uint64 s3;
-  uint64 s4;
-  uint64 s5;
-  uint64 s6;
-  uint64 s7;
-  uint64 s8;
-  uint64 s9;
-  uint64 s10;
-  uint64 s11;
+  uint64 r4;
+  uint64 r5;
+  uint64 r6;
+  uint64 r7;
+  uint64 r15;
 };
 
 // Per-CPU state.
@@ -28,52 +20,19 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 
-// per-process data for the trap handling code in trampoline.S.
-// sits in a page by itself just under the trampoline page in the
-// user page table. not specially mapped in the kernel page table.
-// uservec in trampoline.S saves user registers in the trapframe,
-// then initializes registers from the trapframe's
-// kernel_sp, kernel_hartid, kernel_satp, and jumps to kernel_trap.
-// prepare_return() and userret in trampoline.S set up
-// the trapframe's kernel_*, restore user registers from the
-// trapframe, switch to the user page table, and enter user space.
+// klausscpu: what trapvec.S leaves on the kernel stack on every trap.  The
+// hardware pushes the 64-bit frame (PC, flags, INT_MASK, DI, PM) at SP-8
+// (on the process's kernel stack if it came from user mode), then the stub
+// pushes R15..R0 and the user SP (SR USP).  A trap from user mode always
+// arrives with SP = the top of the kernel stack (SP_ALT), so the user
+// trapframe is at a fixed place: p->trapframe = kstack + KSTACKSIZE - 144.
+// trapret pops it all and IRETs.
+//
+// System calls: number in r[12], arguments in r[0]..r[3], result in r[12].
 struct trapframe {
-  /*   0 */ uint64 kernel_satp;   // kernel page table
-  /*   8 */ uint64 kernel_sp;     // top of process's kernel stack
-  /*  16 */ uint64 kernel_trap;   // usertrap()
-  /*  24 */ uint64 epc;           // saved user program counter
-  /*  32 */ uint64 kernel_hartid; // saved kernel tp
-  /*  40 */ uint64 ra;
-  /*  48 */ uint64 sp;
-  /*  56 */ uint64 gp;
-  /*  64 */ uint64 tp;
-  /*  72 */ uint64 t0;
-  /*  80 */ uint64 t1;
-  /*  88 */ uint64 t2;
-  /*  96 */ uint64 s0;
-  /* 104 */ uint64 s1;
-  /* 112 */ uint64 a0;
-  /* 120 */ uint64 a1;
-  /* 128 */ uint64 a2;
-  /* 136 */ uint64 a3;
-  /* 144 */ uint64 a4;
-  /* 152 */ uint64 a5;
-  /* 160 */ uint64 a6;
-  /* 168 */ uint64 a7;
-  /* 176 */ uint64 s2;
-  /* 184 */ uint64 s3;
-  /* 192 */ uint64 s4;
-  /* 200 */ uint64 s5;
-  /* 208 */ uint64 s6;
-  /* 216 */ uint64 s7;
-  /* 224 */ uint64 s8;
-  /* 232 */ uint64 s9;
-  /* 240 */ uint64 s10;
-  /* 248 */ uint64 s11;
-  /* 256 */ uint64 t3;
-  /* 264 */ uint64 t4;
-  /* 272 */ uint64 t5;
-  /* 280 */ uint64 t6;
+  /*   0 */ uint64 usp;    // the user SP
+  /*   8 */ uint64 r[16];  // R0..R15
+  /* 136 */ uint64 frame;  // hardware frame: PC [31:0], ... PM [44]
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
@@ -93,10 +52,10 @@ struct proc {
   struct proc *parent; // Parent process
 
   // these are private to the process, so p->lock need not be held.
-  uint64 kstack;               // Virtual address of kernel stack
+  uint64 kstack;               // klausscpu: kseg address of the kernel stack page
   uint64 sz;                   // Size of process memory (bytes)
   pagetable_t pagetable;       // User page table
-  struct trapframe *trapframe; // data page for trampoline.S
+  struct trapframe *trapframe; // klausscpu: at the top of kstack
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory

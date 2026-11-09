@@ -17,7 +17,7 @@
 #include "param.h"
 #include "spinlock.h"
 #include "sleeplock.h"
-#include "riscv.h"
+#include "klauss.h" // klausscpu: was riscv.h
 #include "defs.h"
 #include "fs.h"
 #include "buf.h"
@@ -95,7 +95,7 @@ bread(uint dev, uint blockno)
 
   b = bget(dev, blockno);
   if (!b->valid) {
-    virtio_disk_rw(b, 0);
+    ramdisk_rw(b, 0); // klausscpu: RAM disk
     b->valid = 1;
   }
   return b;
@@ -108,7 +108,7 @@ bwrite(struct buf *b)
 {
   if (!holdingsleep(&b->lock))
     panic("bwrite");
-  virtio_disk_rw(b, 1);
+  ramdisk_rw(b, 1); // klausscpu: RAM disk
 }
 
 // Release a locked buffer.

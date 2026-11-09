@@ -1,45 +1,33 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "klauss.h"
 #include "defs.h"
 
-volatile static int started = 0;
-
-// start() jumps here in supervisor mode on all CPUs.
+// klausscpu: boot.S jumps here in supervisor mode, in kseg, with
+// translation on.  One CPU.
 void
 main()
 {
-  if (cpuid() == 0) {
-    consoleinit();
-    printkinit();
-    printk("\n");
-    printk("xv6 kernel is booting\n");
-    printk("\n");
-    kinit();            // physical page allocator
-    kvminit();          // create kernel page table
-    kvminithart();      // turn on paging
-    procinit();         // process table
-    trapinit();         // trap vectors
-    trapinithart();     // install kernel trap vector
-    plicinit();         // set up interrupt controller
-    plicinithart();     // ask PLIC for device interrupts
-    binit();            // buffer cache
-    iinit();            // inode table
-    fileinit();         // file table
-    virtio_disk_init(); // emulated hard disk
-    userinit();         // first user process
-
-    __atomic_store_n(&started, 1, __ATOMIC_RELEASE);
-  } else {
-    while (__atomic_load_n(&started, __ATOMIC_ACQUIRE) == 0)
-      ;
-
-    printk("hart %d starting\n", cpuid());
-    kvminithart();  // turn on paging
-    trapinithart(); // install kernel trap vector
-    plicinithart(); // ask PLIC for device interrupts
-  }
+  consoleinit();
+  printkinit();
+  printk("\n");
+  printk("xv6 kernel is booting\n");
+  printk("\n");
+  uint32 f = CPU_FEATURES;
+  if ((f & (CPU_FEAT_EXC | CPU_FEAT_TLB | CPU_FEAT_LRSC)) !=
+      (CPU_FEAT_EXC | CPU_FEAT_TLB | CPU_FEAT_LRSC))
+    panic("this core has no exceptions, TLB or LR/SC (CPU_FEATURES)");
+  printk("CPU_FEATURES 0x%x: %d TLB entries\n", f, CPU_FEAT_TLB_ENTRIES(f));
+  kinit();         // physical page allocator
+  procinit();      // process table
+  trapinit();      // trap vectors
+  trapinithart();  // install the vectors, TLB and timer
+  binit();         // buffer cache
+  iinit();         // inode table
+  fileinit();      // file table
+  ramdisk_init();  // the file system image
+  userinit();      // first user process
 
   scheduler();
 }

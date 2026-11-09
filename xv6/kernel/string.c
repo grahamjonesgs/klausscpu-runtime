@@ -1,11 +1,20 @@
 #include "types.h"
 
+// klausscpu: 8 bytes at a time where it can (pages are 64 KiB).
 void *
 memset(void *dst, int c, uint n)
 {
   char *cdst = (char *)dst;
-  int i;
-  for (i = 0; i < n; i++) {
+  uint i = 0;
+  if ((((uint64)dst) & 7) == 0) {
+    uint64 v = (uchar)c;
+    v |= v << 8;
+    v |= v << 16;
+    v |= v << 32;
+    for (; i + 8 <= n; i += 8)
+      *(uint64 *)(cdst + i) = v;
+  }
+  for (; i < n; i++) {
     cdst[i] = c;
   }
   return dst;
@@ -38,6 +47,15 @@ memmove(void *dst, const void *src, uint n)
 
   s = src;
   d = dst;
+  // klausscpu: 8 bytes at a time when both are aligned and don't overlap.
+  if (((((uint64)s) | ((uint64)d)) & 7) == 0 && (s + n <= d || d + n <= s)) {
+    uint i = 0;
+    for (; i + 8 <= n; i += 8)
+      *(uint64 *)(d + i) = *(const uint64 *)(s + i);
+    for (; i < n; i++)
+      d[i] = s[i];
+    return dst;
+  }
   if (s < d && s + n > d) {
     s += n;
     d += n;

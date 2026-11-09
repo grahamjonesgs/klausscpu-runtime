@@ -4,7 +4,7 @@
 #include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
-#include "riscv.h"
+#include "klauss.h" // klausscpu: was riscv.h
 #include "proc.h"
 #include "defs.h"
 
@@ -94,8 +94,8 @@ push_off(void)
 {
   // disable interrupts to prevent an involuntary context
   // switch while using mycpu().
-  uint64 flags = rc_sstatus(SSTATUS_SIE);
-  int old = !!(flags & SSTATUS_SIE);
+  // klausscpu: DI returns 1 if interrupts were enabled.
+  int old = __builtin_klausscpu_di();
 
   if (mycpu()->noff == 0)
     mycpu()->intena = old;

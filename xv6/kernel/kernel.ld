@@ -1,44 +1,47 @@
-OUTPUT_ARCH( "riscv" )
-ENTRY( _entry )
+/* klausscpu: the xv6 kernel (XV6_PLAN.md).
+ *
+ * The loader puts the image at PA 0x20 (the first 32 bytes are the
+ * hardware's heap header) whatever its link address, so the kernel is
+ * linked at the kseg alias of that, KERNBASE + 0x20, and boot.S starts
+ * there with translation off and jumps into kseg.
+ */
+OUTPUT_ARCH( "klausscpu" )
+ENTRY( _start )
 
 SECTIONS
 {
-  /*
-   * ensure that entry.S / _entry is at 0x80000000,
-   * where qemu's -kernel jumps.
-   */
-  . = 0x80000000;
+  . = 0x80000020;
 
   .text : {
-    kernel/entry.o(_entry)
+    KEEP(*(.text.boot))  /* _start: the first instruction, at PA 0x20 */
     *(.text .text.*)
-    . = ALIGN(0x1000);
-    _trampoline = .;
-    *(trampsec)
-    . = ALIGN(0x1000);
-    ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page");
+    . = ALIGN(8);
     PROVIDE(etext = .);
   }
 
   .rodata : {
     . = ALIGN(16);
-    *(.srodata .srodata.*) /* do not need to distinguish this from .rodata */
+    *(.srodata .srodata.*)
     . = ALIGN(16);
     *(.rodata .rodata.*)
   }
 
   .data : {
     . = ALIGN(16);
-    *(.sdata .sdata.*) /* do not need to distinguish this from .data */
+    *(.sdata .sdata.*)
     . = ALIGN(16);
     *(.data .data.*)
   }
 
   .bss : {
     . = ALIGN(16);
-    *(.sbss .sbss.*) /* do not need to distinguish this from .bss */
+    __bss_start = .;
+    *(.sbss .sbss.*)
     . = ALIGN(16);
     *(.bss .bss.*)
+    *(COMMON)
+    . = ALIGN(16);
+    __bss_end = .;
   }
 
   PROVIDE(end = .);

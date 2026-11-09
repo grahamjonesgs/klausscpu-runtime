@@ -1,12 +1,13 @@
 // Physical memory allocator, for user processes,
 // kernel stacks, page-table pages,
-// and pipe buffers. Allocates whole 4096-byte pages.
+// and pipe buffers. Allocates whole pages.
+// klausscpu: 64 KiB pages (PGSIZE), handed out as kseg addresses.
 
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
-#include "riscv.h"
+#include "klauss.h" // klausscpu: was riscv.h
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);

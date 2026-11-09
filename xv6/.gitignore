@@ -1,0 +1,8 @@
+# klausscpu: build outputs
+kernel/kernel
+*.asm
+*.sym
+fs.img
+mkfs/mkfs
+user/usys.S
+user/_*

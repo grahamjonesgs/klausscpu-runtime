@@ -1,7 +1,7 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "klauss.h"
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
@@ -18,30 +18,12 @@ struct spinlock pid_lock;
 extern void forkret(void);
 static void freeproc(struct proc *p);
 
-extern char trampoline[]; // trampoline.S
 
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
-
-// Allocate a page for each process's kernel stack.
-// Map it high in memory, followed by an invalid
-// guard page.
-void
-proc_mapstacks(pagetable_t kpgtbl)
-{
-  struct proc *p;
-
-  for (p = proc; p < &proc[NPROC]; p++) {
-    char *pa = kalloc();
-    if (pa == 0)
-      panic("kalloc");
-    uint64 va = KSTACK((int)(p - proc));
-    kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  }
-}
 
 // initialize the proc table.
 void
@@ -54,7 +36,11 @@ procinit(void)
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
     p->state = UNUSED;
-    p->kstack = KSTACK((int)(p - proc));
+    // klausscpu: a kernel stack page (kseg), the user trapframe at its top.
+    if ((p->kstack = (uint64)kalloc()) == 0)
+      panic("procinit: kstack");
+    p->trapframe =
+        (struct trapframe *)(p->kstack + KSTACKSIZE - sizeof(struct trapframe));
   }
 }
 
@@ -64,8 +50,7 @@ procinit(void)
 int
 cpuid()
 {
-  int id = r_tp();
-  return id;
+  return 0; // klausscpu: NCPU = 1
 }
 
 // Return this CPU's cpu struct.
@@ -125,13 +110,6 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
-  // Allocate a trapframe page.
-  if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
-
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if (p->pagetable == 0) {
@@ -142,9 +120,12 @@ found:
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
+  // klausscpu: swtch's RET pops the return address from the new stack,
+  // so the stack starts with forkret's address, just below the trapframe.
   memset(&p->context, 0, sizeof(p->context));
-  p->context.ra = (uint64)forkret;
-  p->context.sp = p->kstack + PGSIZE;
+  uint64 *sp = (uint64 *)p->trapframe - 1;
+  *sp = (uint64)forkret;
+  p->context.sp = (uint64)sp;
 
   return p;
 }
@@ -155,9 +136,7 @@ found:
 static void
 freeproc(struct proc *p)
 {
-  if (p->trapframe)
-    kfree((void *)p->trapframe);
-  p->trapframe = 0;
+  // klausscpu: the trapframe belongs to the kernel stack (procinit).
   if (p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -170,38 +149,12 @@ freeproc(struct proc *p)
   p->state = UNUSED;
 }
 
-// Create a user page table for a given process, with no user memory,
-// but with trampoline and trapframe pages.
+// Create a user page table for a given process, with no user memory.
+// klausscpu: no trampoline or trapframe pages (the kernel is in kseg).
 pagetable_t
 proc_pagetable(struct proc *p)
 {
-  pagetable_t pagetable;
-
-  // An empty page table.
-  pagetable = uvmcreate();
-  if (pagetable == 0)
-    return 0;
-
-  // map the trampoline code (for system call return)
-  // at the highest user virtual address.
-  // only the supervisor uses it, on the way
-  // to/from user space, so not PTE_U.
-  if (mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline,
-               PTE_R | PTE_X) < 0) {
-    uvmfree(pagetable, 0);
-    return 0;
-  }
-
-  // map the trapframe page just below the trampoline page, for
-  // trampoline.S.
-  if (mappages(pagetable, TRAPFRAME, PGSIZE, (uint64)(p->trapframe),
-               PTE_R | PTE_W) < 0) {
-    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-    uvmfree(pagetable, 0);
-    return 0;
-  }
-
-  return pagetable;
+  return uvmcreate();
 }
 
 // Free a process's page table, and free the
@@ -209,8 +162,6 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
-  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
 }
 
@@ -240,7 +191,7 @@ growproc(int n)
 
   sz = p->sz;
   if (n > 0) {
-    if (sz + n > TRAPFRAME) {
+    if (sz + n > MAXVA) { // klausscpu
       return -1;
     }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
@@ -279,7 +230,7 @@ kfork(void)
   *(np->trapframe) = *(p->trapframe);
 
   // Cause fork to return 0 in the child.
-  np->trapframe->a0 = 0;
+  np->trapframe->r[12] = 0; // klausscpu: the return value register
 
   // increment reference counts on open file descriptors.
   for (i = 0; i < NOFILE; i++)
@@ -450,6 +401,7 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        tlbactivate(p->pagetable); // klausscpu: the refill's page table
         swtch(&c->context, &p->context);
 
         // Don't re-enable interrupts on release.
@@ -464,7 +416,7 @@ scheduler(void)
     }
     if (found == 0) {
       // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
+      asm volatile("wait"); // klausscpu
     }
   }
 }
@@ -512,7 +464,6 @@ yield(void)
 void
 forkret(void)
 {
-  extern char userret[];
   static int first = 1;
   struct proc *p = myproc();
 
@@ -528,18 +479,14 @@ forkret(void)
     fsinit(ROOTDEV);
 
     // We can invoke kexec() now that file system is initialized.
-    // Put the return value (argc) of kexec into a0.
-    p->trapframe->a0 = kexec("/init", (char *[]){"/init", 0});
-    if (p->trapframe->a0 == -1) {
+    // klausscpu: kexec puts argc and argv in r0 and r1 for start().
+    if (kexec("/init", (char *[]){"/init", 0}) == -1) {
       panic("exec");
     }
   }
 
   // return to user space, mimicing usertrap()'s return.
-  prepare_return();
-  uint64 satp = MAKE_SATP(p->pagetable);
-  uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64))trampoline_userret)(satp);
+  usertrapret();
 }
 
 // Register current process as waiting for wakeups on chan.

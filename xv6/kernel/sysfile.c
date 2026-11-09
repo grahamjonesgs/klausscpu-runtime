@@ -5,7 +5,7 @@
 //
 
 #include "types.h"
-#include "riscv.h"
+#include "klauss.h" // klausscpu: was riscv.h
 #include "defs.h"
 #include "param.h"
 #include "stat.h"

@@ -2,6 +2,9 @@
 
 #define ELF_MAGIC 0x464C457FU // "\x7FELF" in little endian
 
+// klausscpu: the toolchain emits ELF32 (32-bit addresses), so these are
+// the Elf32_Ehdr and Elf32_Phdr layouts (note p_flags' position).
+
 // File header
 struct elfhdr {
   uint magic; // must equal ELF_MAGIC
@@ -9,9 +12,9 @@ struct elfhdr {
   ushort type;
   ushort machine;
   uint version;
-  uint64 entry;
-  uint64 phoff;
-  uint64 shoff;
+  uint entry;
+  uint phoff;
+  uint shoff;
   uint flags;
   ushort ehsize;
   ushort phentsize;
@@ -24,13 +27,13 @@ struct elfhdr {
 // Program section header
 struct proghdr {
   uint32 type;
+  uint32 off;
+  uint32 vaddr;
+  uint32 paddr;
+  uint32 filesz;
+  uint32 memsz;
   uint32 flags;
-  uint64 off;
-  uint64 vaddr;
-  uint64 paddr;
-  uint64 filesz;
-  uint64 memsz;
-  uint64 align;
+  uint32 align;
 };
 
 // Values for Proghdr type

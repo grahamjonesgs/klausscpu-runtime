@@ -6,7 +6,11 @@
 #include "kernel/fcntl.h"
 #include "kernel/syscall.h"
 #include "kernel/memlayout.h"
-#include "kernel/riscv.h"
+#include "kernel/klauss.h" // klausscpu: was riscv.h
+// klausscpu: no trapframe page: user memory reaches MAXVA (512 MiB), so
+// lazy_sbrk climbs in 64 MiB steps instead of 1 GiB ones.
+#define TRAPFRAME MAXVA
+#define LAZY_STEP (1 << 26)
 
 //
 // Tests xv6 system calls.  usertests without arguments runs them all
@@ -2841,12 +2845,12 @@ lazy_copyinstr(char *s)
 void
 lazy_sbrk(char *s)
 {
-  // sbrk() takes just int, so take 2^30-sized steps towards MAXVA
+  // sbrk() takes just int, so take LAZY_STEP-sized steps towards MAXVA
   char *p = sbrk(0);
-  while ((uint64)p < MAXVA - (1 << 30)) {
-    p = sbrklazy(1 << 30);
+  while ((uint64)p < MAXVA - LAZY_STEP) {
+    p = sbrklazy(LAZY_STEP);
     if (p == SBRK_ERROR) {
-      printf("sbrklazy(%d) returned %p\n", 1 << 30, p);
+      printf("sbrklazy(%d) returned %p\n", LAZY_STEP, p);
       exit(1);
     }
 

@@ -1,7 +1,7 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "klauss.h" // klausscpu: was riscv.h
 #include "spinlock.h"
 #include "proc.h"
 #include "syscall.h"
@@ -31,24 +31,14 @@ fetchstr(uint64 addr, char *buf, int max)
   return strlen(buf);
 }
 
+// klausscpu: the arguments are in r0..r3 (where the C ABI puts them; no
+// xv6 system call has more), the number and the result in r12.
 static uint64
 argraw(int n)
 {
   struct proc *p = myproc();
-  switch (n) {
-  case 0:
-    return p->trapframe->a0;
-  case 1:
-    return p->trapframe->a1;
-  case 2:
-    return p->trapframe->a2;
-  case 3:
-    return p->trapframe->a3;
-  case 4:
-    return p->trapframe->a4;
-  case 5:
-    return p->trapframe->a5;
-  }
+  if (n >= 0 && n < 4)
+    return p->trapframe->r[n];
   panic("argraw");
   return -1;
 }
@@ -139,13 +129,13 @@ syscall(void)
   int num;
   struct proc *p = myproc();
 
-  num = p->trapframe->a7;
+  num = p->trapframe->r[12]; // klausscpu
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
-    // and store its return value in p->trapframe->a0
-    p->trapframe->a0 = syscalls[num]();
+    // and store its return value in p->trapframe->r[12] (klausscpu)
+    p->trapframe->r[12] = syscalls[num]();
   } else {
     printk("%d %s: unknown sys call %d\n", p->pid, p->name, num);
-    p->trapframe->a0 = -1;
+    p->trapframe->r[12] = -1;
   }
 }
