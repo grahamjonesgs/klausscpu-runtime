@@ -5,11 +5,27 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // Run the open .py file on the board (ssh_shell running).  Ctrl+Shift+B.
+      // Run the open file on the board (ssh_shell running).  Ctrl+Shift+B.
+      // A .py file with the board's python; a file in a Rust project under
+      // rust/ is built, copied to /SD:/rust/ and run (tools/klauss-rust).
       "label": "klausscpu: run on board",
       "type": "shell",
-      "command": "python3 zephyr-ws/modules/lib/micropython/tools/pyboard.py -d 'exec:python3 tools/validate/zephyr/ssh_python.py' '${file}'",
+      "command": "tools/run-on-board.sh '${file}'",
       "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": {
+        "owner": "rustc",
+        "fileLocation": ["relative", "${workspaceFolder}/rust"],
+        "pattern": [
+          { "regexp": "^(warning|error)(?:\\[(\\w+)\\])?: (.*)$", "severity": 1, "code": 2, "message": 3 },
+          { "regexp": "^\\s*--> (.*?):(\\d+):(\\d+)$", "file": 1, "line": 2, "column": 3 }
+        ]
+      }
+    },
+    {
+      "label": "klausscpu: Rust: new project",
+      "detail": "Start a Rust program for the board in rust/<name>/ (tools/klauss-rust new)",
+      "type": "shell",
+      "command": "tools/klauss-rust new '${input:rustProject}'",
       "problemMatcher": []
     },
     {
@@ -130,6 +146,11 @@
     }
   ],
   "inputs": [
+    {
+      "id": "rustProject",
+      "type": "promptString",
+      "description": "Name of the new Rust project (lower case, digits, - and _)"
+    },
     {
       "id": "freertosProgram",
       "type": "pickString",

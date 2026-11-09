@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""klauss-rust -- Rust programs for the board (Zephyr LLEXT extensions).
+
+    tools/klauss-rust new <name>     start a project: rust/<name>/
+    tools/klauss-rust build <path>   build rust/<name>/<name>.llext
+    tools/klauss-rust run <path>     build, copy to /SD:/rust/ over SFTP and
+                                     run it in ssh_shell, showing its output
+
+<path> is a project folder or any file in one (VS Code passes the open file).
+The exit status of `run` is the program's own.
+
+Builds go through klausscpu-llvm's klauss-build (the patched rustc, the
+klauss-* crates, the LLEXT packaging and checks), found in ../klausscpu-llvm
+or $KLAUSSCPU_LLVM_SRC.  The board: KLAUSSCPU_BOARD_IP (192.168.68.59),
+KLAUSSCPU_SSH_USER (admin), KLAUSSCPU_SSH_PASS, as tools/validate/zephyr.
+"""
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+
+RT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WS = os.path.join(RT, 'rust')
+LLVM_SRC = os.environ.get('KLAUSSCPU_LLVM_SRC', os.path.join(os.path.dirname(RT), 'klausscpu-llvm'))
+RUSTDIR = os.path.join(LLVM_SRC, 'llvm/lib/Target/KlaussCPU/rust')
+KLAUSS_BUILD = os.path.join(RUSTDIR, 'klauss-build')
+IP = os.environ.get('KLAUSSCPU_BOARD_IP', '192.168.68.59')
+USER = os.environ.get('KLAUSSCPU_SSH_USER', 'admin')
+SSH_OPTS = ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+            '-o', 'PubkeyAuthentication=no', '-o', 'LogLevel=ERROR']
+SSH_ENV = dict(os.environ, SSH_ASKPASS=os.path.join(RT, 'tools/validate/zephyr/askpass.sh'),
+               SSH_ASKPASS_REQUIRE='force', DISPLAY=os.environ.get('DISPLAY', ':0'))
+ESC = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]')
+PROMPT = b'\n/SD:/ $ '       # ssh_shell's prompt in a new session (cwd /SD:/)
+CARD_DIR = 'rust'            # the programs go to /SD:/rust/
+
+TEMPLATE = '''\
+//! {name}: runs on the board as a Zephyr extension (`run rust/{crate}.llext`).
+//!
+//! Build and run: VS Code task "klausscpu: Rust: run on board", or
+//! `tools/klauss-rust run rust/{name}`.  `no_std`: `core` and `alloc` (Vec,
+//! String, BTreeMap, Box, format!) are there; `std` is not.
+
+#![no_std]
+
+extern crate alloc;
+
+use klauss_io::println;
+
+klauss_llext_rt::entry!(run);
+
+/// The program.  The value it returns is the exit code `run` prints.
+fn run() -> i32 {{
+    println!("Hello from {name}!");
+    0
+}}
+'''
+
+
+def die(msg):
+    sys.exit(f'klauss-rust: {msg}')
+
+
+def package(path):
+    """(name, folder) of the rust/ project that <path> is in."""
+    p = os.path.abspath(path)
+    if os.path.isfile(p):
+        p = os.path.dirname(p)
+    while True:
+        toml = os.path.join(p, 'Cargo.toml')
+        if os.path.dirname(p) == WS and os.path.isfile(toml):
+            with open(toml, 'rb') as f:
+                return tomllib.load(f)['package']['name'], p
+        if p == os.path.dirname(p) or p == WS:
+            die(f'{path} is not in a project under {WS} (tools/klauss-rust new <name>)')
+        p = os.path.dirname(p)
+
+
+def cmd_new(name):
+    if not re.fullmatch(r'[a-z][a-z0-9_-]*', name):
+        die('a project name is lower case letters, digits, - and _, starting with a letter')
+    d = os.path.join(WS, name)
+    if os.path.exists(d):
+        die(f'{d} already exists')
+    toml_path = os.path.join(WS, 'Cargo.toml')
+    with open(toml_path) as f:
+        ws = f.read()
+    m = re.search(r'(members = \[\n)((?:    "[^"]*",\n)*)(\])', ws)
+    if not m:
+        die(f'cannot find the members list in {toml_path}')
+    with open(os.path.join(WS, 'hello', 'Cargo.toml')) as f:
+        cargo = f.read().replace('name = "hello"', f'name = "{name}"')
+    os.makedirs(os.path.join(d, 'src'))
+    with open(os.path.join(d, 'Cargo.toml'), 'w') as f:
+        f.write(cargo)
+    with open(os.path.join(d, 'src', 'lib.rs'), 'w') as f:
+        f.write(TEMPLATE.format(name=name, crate=name.replace('-', '_')))
+    with open(toml_path, 'w') as f:
+        f.write(ws[:m.end(2)] + f'    "{name}",\n' + ws[m.end(2):])
+    print(f'created {d}/src/lib.rs; build and run it with: tools/klauss-rust run rust/{name}')
+
+
+def fresh_cache():
+    """Cargo keys its cache on `rustc -vV`, which a rebuilt (relinked) rustc
+    leaves unchanged: start the build cache again when the compiler changed."""
+    rustc = os.environ.get('KLAUSSCPU_RUSTC')
+    if not rustc:
+        env_file = os.path.join(RUSTDIR, '.klaussbuild.env')
+        if os.path.isfile(env_file):
+            m = re.search(r'KLAUSSCPU_RUSTC=(\S+)', open(env_file).read())
+            rustc = m and m.group(1)
+    if not rustc:
+        return
+    lib = os.path.join(os.path.dirname(os.path.dirname(rustc)), 'lib')
+    drivers = [os.path.join(lib, f) for f in os.listdir(lib) if f.startswith('librustc_driver')] \
+        if os.path.isdir(lib) else []
+    stamp = ' '.join(f'{d}:{os.stat(d).st_mtime_ns}' for d in sorted(drivers)) + '\n'
+    target = os.path.join(WS, 'target')
+    stamp_file = os.path.join(target, '.rustc-stamp')
+    old = open(stamp_file).read() if os.path.isfile(stamp_file) else None
+    if old != stamp:
+        if old is not None:
+            print('klauss-rust: the compiler changed; rebuilding everything')
+            shutil.rmtree(target)
+        os.makedirs(target, exist_ok=True)
+        with open(stamp_file, 'w') as f:
+            f.write(stamp)
+
+
+def cmd_build(path):
+    name, d = package(path)
+    if not os.access(KLAUSS_BUILD, os.X_OK):
+        die(f'no {KLAUSS_BUILD} (set KLAUSSCPU_LLVM_SRC to the klausscpu-llvm checkout)')
+    fresh_cache()
+    env = dict(os.environ, KLAUSSCPU_WS=WS, KLAUSSCPU_RUNTIME=RT)
+    # cargo's progress goes to stderr unchanged; klauss-build's own lines
+    # come through here, less its "run <name>.llext" hint (the path is
+    # rust/<name>.llext once `run` has copied it).
+    p = subprocess.Popen([KLAUSS_BUILD, 'llext', name], env=env, stdout=subprocess.PIPE, text=True)
+    for line in p.stdout:
+        if not line.lstrip().startswith('copy to SD'):
+            print(line, end='')
+    if p.wait():
+        die('the build failed (above)')
+    out = os.path.join(d, name.replace('-', '_') + '.llext')
+    if not os.path.isfile(out):
+        die(f'the build made no {out}')
+    return out
+
+
+def upload(llext):
+    # Its own folder: /SD:/llext/ holds the C extensions (hello.llext...),
+    # which a Rust project of the same name must not replace.
+    remote = f'{CARD_DIR}/' + os.path.basename(llext)
+    r = subprocess.run(['sftp', '-o', 'BatchMode=no', *SSH_OPTS, '-b', '-', f'{USER}@{IP}'],
+                       input=f'-mkdir {CARD_DIR}\nput {llext} {remote}\n', text=True,
+                       capture_output=True, env=SSH_ENV, timeout=300)
+    if r.returncode:
+        die(f'copying to the board ({IP}) failed: is ssh_shell running?\n{r.stdout}{r.stderr}')
+    print(f'copied to /SD:/{remote}')
+    return remote
+
+
+def run_on_board(remote):
+    """Log in, `run <remote>`, show the output until the prompt comes back;
+    returns the program's exit code."""
+    ssh = subprocess.Popen(['ssh', '-tt', '-e', 'none', *SSH_OPTS, '-o', 'ServerAliveInterval=15',
+                            f'{USER}@{IP}'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, bufsize=0, env=SSH_ENV)
+    fd = ssh.stdout.fileno()
+    raw = bytearray()
+
+    def text():
+        return ESC.sub(b'', raw).replace(b'\r', b'')
+
+    def wait_for(marker, timeout):
+        end = time.time() + timeout
+        while marker not in text():
+            if time.time() > end or not select.select([fd], [], [], end - time.time())[0]:
+                die(f'no {marker!r} from the board (got {bytes(text()[-200:])!r})')
+            b = os.read(fd, 4096)
+            if not b:
+                die(f'the board closed the session ({bytes(text()[-200:])!r})')
+            raw.extend(b)
+
+    try:
+        wait_for(b'$ ', 30)
+        raw.clear()
+        cmd = f'run {remote}'
+        ssh.stdin.write(cmd.encode() + b'\r')
+        wait_for(cmd.encode() + b'\n', 10)        # the shell's echo
+        shown = len(text())
+        while True:
+            t = text()
+            if t.endswith(PROMPT):
+                sys.stdout.buffer.write(t[shown:-len(PROMPT) + 1])
+                sys.stdout.flush()
+                break
+            # Hold back what may be a split escape sequence or the prompt's start.
+            if b'\x1b' not in raw[-8:]:
+                ready = len(t) - len(PROMPT)
+                if ready > shown:
+                    sys.stdout.buffer.write(t[shown:ready])
+                    sys.stdout.flush()
+                    shown = ready
+            if b'rust .llext panic' in t and not select.select([fd], [], [], 2)[0]:
+                print('\nklauss-rust: the program panicked.  The board keeps that SSH session\'s '
+                      'thread parked until it reboots (no llext_exit yet).')
+                return 101
+            if not select.select([fd], [], [], 0.5)[0]:
+                continue
+            b = os.read(fd, 4096)
+            if not b:
+                die('the board closed the session')
+            raw.extend(b)
+        out = text()[:-len(PROMPT)]
+        m = re.search(rb'Program exited: (-?\d+)', out)
+        if not m:
+            return 1                  # the loader refused it (its message is above)
+        return int(m.group(1)) & 0xff
+    finally:
+        ssh.kill()
+        ssh.wait()
+
+
+def main():
+    # Our lines and the board's (written to sys.stdout.buffer) in order.
+    sys.stdout.reconfigure(line_buffering=True)
+    if len(sys.argv) != 3 or sys.argv[1] not in ('new', 'build', 'run'):
+        sys.exit(__doc__.strip())
+    cmd, arg = sys.argv[1:]
+    if cmd == 'new':
+        cmd_new(arg)
+    elif cmd == 'build':
+        cmd_build(arg)
+    else:
+        remote = upload(cmd_build(arg))
+        print(f'== run {remote}')
+        sys.exit(run_on_board(remote))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)

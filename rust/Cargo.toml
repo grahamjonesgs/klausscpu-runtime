@@ -1,0 +1,20 @@
+# Rust programs for the board, built as Zephyr LLEXT extensions that
+# ssh_shell runs with `run <name>.llext`.  See README.md here.
+#
+# tools/klauss-rust new <name>  adds a project to `members`.
+
+[workspace]
+resolver = "2"
+members = [
+    "hello",
+]
+
+# As klausscpu-llvm's crates/ workspace (its Cargo.toml says why).
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
+[profile.release.package.compiler_builtins]
+codegen-units = 256

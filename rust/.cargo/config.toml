@@ -1,0 +1,13 @@
+# Build every project for KlaussCPU.  The target spec, the klauss-* crates and
+# the build driver (klauss-build) live in the klausscpu-llvm checkout next to
+# this one; build through tools/klauss-rust, which runs klauss-build.
+
+[build]
+target = "../../klausscpu-llvm/llvm/lib/Target/KlaussCPU/rust/klausscpu-unknown-none-elf.json"
+
+[unstable]
+build-std = ["core", "alloc"]
+json-target-spec = true
+
+[target.klausscpu-unknown-none-elf]
+rustflags = ["-Zunstable-options"]

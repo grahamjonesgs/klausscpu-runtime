@@ -1,0 +1,11 @@
+[package]
+name = "hello"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+klauss-llext-rt = { path = "../../../klausscpu-llvm/llvm/lib/Target/KlaussCPU/rust/crates/klauss-llext-rt" }
+klauss-io = { path = "../../../klausscpu-llvm/llvm/lib/Target/KlaussCPU/rust/crates/klauss-io", features = ["kernel"] }
