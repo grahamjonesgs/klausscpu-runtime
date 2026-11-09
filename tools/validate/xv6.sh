@@ -32,7 +32,8 @@ cp "$RT/xv6/kernel/kernel" "$OUT/kernel.elf"
 # expect_in_order <expect> <out>: every line of <expect> is a whole line of
 # <out> (CRs, trailing blanks and the prompt prefix "$ " ignored), in order.
 expect_in_order() {
-  awk 'NR == FNR { sub(/[ \t]+$/, ""); want[n++] = $0; next }
+  awk 'BEGIN { n = 0; i = 0 }
+       NR == FNR { sub(/[ \t]+$/, ""); want[n++] = $0; next }
        { sub(/\r$/, ""); sub(/[ \t]+$/, ""); line = $0; while (sub(/^\$ /, "", line)) {}
          if (i < n && line == want[i]) i++ }
        END { if (i < n) { print "missing: " want[i]; exit 1 } }' "$1" "$2"
