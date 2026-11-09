@@ -29,18 +29,18 @@
 #define TLB_HI_G	0x100
 #define TLB_INDEX_P	0x80000000
 
-/* ECAUSE[7:0] (MMU_PLAN §4.1). */
-#define EXC_MISALIGNED_FETCH	1
-#define EXC_ACCESS_FETCH	2
-#define EXC_ILLEGAL		3
-#define EXC_PRIVILEGED		4
-#define EXC_TRAP		5
-#define EXC_SYSCALL		6
-#define EXC_MISALIGNED_LOAD	7
-#define EXC_MISALIGNED_STORE	8
-#define EXC_ACCESS_LOAD		9
-#define EXC_ACCESS_STORE	10
-#define EXC_TLB_MISS_LOAD	11
+/* ECAUSE[7:0] (MMU_PLAN §4.1; the runtime's exc.h). */
+#define EXC_ILLEGAL		1	/* EADDR = the instruction word */
+#define EXC_PRIVILEGED		2
+#define EXC_TRAP		3
+#define EXC_SYSCALL		4	/* frame PC = the next instruction */
+#define EXC_MISALIGNED_LOAD	5	/* EADDR = the effective address */
+#define EXC_MISALIGNED_STORE	6
+#define EXC_ACCESS_LOAD		7
+#define EXC_ACCESS_STORE	8
+#define EXC_ACCESS_FETCH	9
+#define EXC_MISALIGNED_FETCH	10
+#define EXC_TLB_MISS_LOAD	11	/* EADDR = VA, TLB_HI auto-loaded */
 #define EXC_TLB_MISS_STORE	12
 #define EXC_TLB_MISS_FETCH	13
 

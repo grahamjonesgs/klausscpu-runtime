@@ -9,6 +9,7 @@ RT=$(cd "$HERE/.." && pwd)
 WS=${LINUX_WS:-$RT/linux-ws}
 B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 mkdir -p "$WS/build"
+KLAUSSCPU_LLVM_BIN="$B" "$HERE/initramfs/build.sh" "$WS/build" >/dev/null
 exec make -C "$WS/linux" O="$WS/build" ARCH=klausscpu LLVM="$B/" LLVM_IAS=1 \
   HOSTCC=gcc HOSTCXX=g++ HOSTLD=ld HOSTAR=ar \
   YACC="$HERE/tools/prebuilt-parser.py" LEX="$HERE/tools/prebuilt-parser.py" \

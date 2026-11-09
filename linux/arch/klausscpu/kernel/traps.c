@@ -20,6 +20,8 @@
 
 #define IRQ_FLAG	0x10000
 
+int show_unhandled_signals = 1;
+
 extern void klausscpu_exc_vector(void);
 extern void klausscpu_tlb_refill(void);
 extern void klausscpu_handle_irq(unsigned int hwirq);
@@ -98,6 +100,12 @@ static void do_bad_exception(struct pt_regs *regs, unsigned long cause, int sig,
 	if (user_mode(regs)) {
 		irqentry_state_t state = irqentry_enter(regs);
 
+		if (show_unhandled_signals)
+			pr_info_ratelimited("%s[%d]: %s at pc %08lx eaddr %08lx\n",
+					    current->comm, task_pid_nr(current),
+					    cause < ARRAY_SIZE(cause_names) && cause_names[cause] ?
+					    cause_names[cause] : "exception",
+					    instruction_pointer(regs), regs->eaddr);
 		force_sig_fault(sig, code, (void __user *)instruction_pointer(regs));
 		irqentry_exit(regs, state);
 		return;

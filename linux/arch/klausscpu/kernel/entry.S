@@ -39,7 +39,8 @@
 	stidx64	r0, r12, PT_R12
 	/* The interrupted SP: USP if from user, else just above the frame. */
 	ldidx64	r1, r12, PT_FRAME
-	bextr	r1, r1, 0x12c		/* frame[44] PM */
+	shrv	r1, r1, 44		/* frame[44] PM (bextr reaches bits < 32 only) */
+	andi	r1, r1, 1
 	fbri	r1, 0, 0, 5f		/* EQ: from the kernel */
 	mfsr	r2, usp
 	jmp	6f
@@ -56,7 +57,8 @@
 .macro RESTORE_REGS_IRET
 	getsp	r12
 	ldidx64	r1, r12, PT_FRAME
-	bextr	r1, r1, 0x12c
+	shrv	r1, r1, 44
+	andi	r1, r1, 1
 	fbri	r1, 0, 0, 7f
 	ldidx64	r2, r12, PT_SP
 	mtsr	usp, r2

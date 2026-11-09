@@ -34,6 +34,7 @@ void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr
 	bool exec = cause == EXC_TLB_MISS_FETCH || cause == EXC_ACCESS_FETCH;
 	irqentry_state_t state = irqentry_enter(regs);
 	vm_fault_t fault;
+
 	int code = SEGV_MAPERR;
 
 	if (addr >= TASK_SIZE || faulthandler_disabled() || !mm) {
@@ -87,6 +88,10 @@ retry:
 			pagefault_out_of_memory();
 			goto out;
 		}
+		if (show_unhandled_signals)
+			pr_info_ratelimited("%s[%d]: fault %x at %08lx pc %08lx\n",
+					    current->comm, task_pid_nr(current), fault, addr,
+					    instruction_pointer(regs));
 		force_sig_fault((fault & VM_FAULT_SIGBUS) ? SIGBUS : SIGSEGV,
 				(fault & VM_FAULT_SIGBUS) ? BUS_ADRERR : SEGV_MAPERR,
 				(void __user *)addr);
@@ -97,6 +102,10 @@ bad_area:
 	mmap_read_unlock(mm);
 bad_area_nosemaphore:
 	if (user_mode(regs)) {
+		if (show_unhandled_signals)
+			pr_info_ratelimited("%s[%d]: segfault at %08lx pc %08lx cause %lu\n",
+					    current->comm, task_pid_nr(current), addr,
+					    instruction_pointer(regs), cause);
 		force_sig_fault(SIGSEGV, code, (void __user *)addr);
 		goto out;
 	}
