@@ -285,6 +285,8 @@ from the initramfs, so `/data` is real ext4. It runs one boot per port.
 | CoreMark | eembc 1f483d5 | `coremark` | in `tests/bench.sh quick`: the CRCs for the performance seeds |
 | lmbench 3 (subset) | intel/lmbench 27b43ae | `/usr/libexec/lmbench/`: `lat_syscall`, `lat_proc`, `lat_ctx`, `lat_pagefault`, `bw_mem`, `lat_mem_rd`, `tlb` | `tests/bench.sh quick`: each prints a result |
 | tlbmiss | ours (`linux/userland/tlbmiss.c`) | `tlbmiss` | ns per access through N pages, one page (64 KiB) apart |
+| iperf3 | 3.22 | `iperf3` | `tests/iperf3-test.sh`: a TCP and a UDP run over loopback against one-shot servers: PASS |
+| curl + mbedTLS | curl 8.23.0, mbedTLS 3.6.7 LTS | `curl`; `/etc/ssl/certs/ca-certificates.crt` (curl.se's Mozilla bundle, 2026-11-05); `/usr/libexec/mbedtls-selftest` | `tests/curl-test.sh`: file://, HTTP on loopback against busybox httpd (a page, HEAD, a 1 MiB download checked by SHA-256, a 404), the CA bundle, and mbedTLS's own self-test: 7/7 |
 
 Notes:
 - **SQLite and branch range.** It needs `-ffunction-sections`.
@@ -299,6 +301,13 @@ Notes:
 - **CoreMark's 10 s rule.** CoreMark counts any run shorter than 10 s as
   an error. The emulator's 20-iteration run is checked by its CRCs
   instead.
+- **iperf3 and curl configure.** Both use autoconf, whose `config.sub`
+  doesn't know `klausscpu`. They are configured with
+  `--host=riscv64-unknown-linux-musl`, which only puts configure in cross
+  mode: every test compiles with our clang. curl's `CURL_OS` is then
+  corrected, so `curl --version` says `klausscpu-unknown-linux-musl`.
+- **curl's TLS library.** curl 8.15 dropped BearSSL, so it uses mbedTLS.
+  It has HTTP(S), FTP and FILE, and the synchronous resolver.
 - **TLB on the emulator.** `tlbmiss` jumps between 8 and 16 pages, and
   `tlb` reports 15 pages: the 16-entry TLB, less the entries the code and
   stack use.
@@ -309,6 +318,10 @@ On the board, after `install-rootfs` with an image that has them:
 /usr/share/klausscpu/tests/lua-tests.sh
 /usr/share/klausscpu/tests/sqlite-test.sh            # uses /data
 /usr/share/klausscpu/tests/bench.sh | tee /data/bench-$(date +%F).txt
+/usr/share/klausscpu/tests/iperf3-test.sh     # loopback
+/usr/share/klausscpu/tests/curl-test.sh
+iperf3 -s                       # then on the PC: iperf3 -c 192.168.68.59 [-R]
+curl -sS https://example.com/ | head    # https with the CA bundle
 ```
 
 `bench.sh` without `quick`:

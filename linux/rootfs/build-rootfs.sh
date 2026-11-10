@@ -98,6 +98,17 @@ if [ -x "$WS/coremark-build/coremark" ] && [ -x "$WS/lmbench-build/tlbmiss" ]; t
   done
   install -m 755 "$RT/linux/userland/tests/bench.sh" "$T/"
 fi
+if [ -x "$WS/iperf3-build/iperf3" ]; then
+  cp "$WS/iperf3-build/iperf3" "$ST/usr/bin/"
+  install -m 755 "$RT/linux/userland/tests/iperf3-test.sh" "$T/"
+fi
+if [ -x "$WS/curl-build/curl" ]; then
+  cp "$WS/curl-build/curl" "$ST/usr/bin/"
+  mkdir -p "$ST/etc/ssl/certs" "$ST/usr/libexec"
+  install -m 644 "$WS/curl-build/ca-certificates.crt" "$ST/etc/ssl/certs/ca-certificates.crt"
+  cp "$WS/mbedtls-build/mbedtls-selftest" "$ST/usr/libexec/"
+  install -m 755 "$RT/linux/userland/tests/curl-test.sh" "$T/"
+fi
 cp "$INI/inittab" "$INI/profile" "$ST/etc/"
 cp "$INI/rcS" "$INI/hostkey" "$ST/etc/init.d/"
 cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"

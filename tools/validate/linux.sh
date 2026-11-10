@@ -111,7 +111,7 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
   if [ "$MODE" = ports ]; then
     # Each port: linux/userland/<pkg>.sh, run if its binary isn't built.
     for p in lua:lua-build/lua sqlite:sqlite-build/sqlite3 coremark:coremark-build/coremark \
-             lmbench:lmbench-build/tlbmiss; do
+             lmbench:lmbench-build/tlbmiss iperf3:iperf3-build/iperf3 curl:curl-build/curl; do
       if [ ! -x "$RT/linux-ws/${p#*:}" ]; then
         "$RT/linux/userland/${p%%:*}.sh" >"$OUT/${p%%:*}.log" 2>&1 ||
           { echo "FAIL ${p%%:*} build (see $OUT/${p%%:*}.log)"; exit 1; }
@@ -545,6 +545,16 @@ elif [ "$MODE" = ports ]; then
     done
     grep -aq '\]ERROR!' "$OUT/bench.out" && bad "bench: CoreMark CRC error"
     true
+  fi
+  if want iperf3 && [ -x "$RT/linux-ws/iperf3-build/iperf3" ]; then
+    echo /usr/share/klausscpu/tests/iperf3-test.sh >"$OUT/iperf3.in"
+    printf '%s\n' 'iperf3-test: PASS' >"$OUT/iperf3.expect"
+    run_step iperf3 60000000000 2400 '$ '
+  fi
+  if want curl && [ -x "$RT/linux-ws/curl-build/curl" ]; then
+    echo /usr/share/klausscpu/tests/curl-test.sh >"$OUT/curl.in"
+    printf '%s\n' 'curl-test: 7/7 passed' >"$OUT/curl.expect"
+    run_step curl 120000000000 3600 '$ '
   fi
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
