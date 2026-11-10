@@ -571,7 +571,9 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	unsigned int ms = 3000;
 
 	mutex_lock(&h->lock);
-	if (WARN_ON(h->mrq) || !(rd(h, SDM_STATUS) & ST_CARD)) {
+	/* No card-present check here: the card is non-removable (see probe),
+	 * and CARD_PRESENT read 0 with a card in on mmu-sd c1e540a. */
+	if (WARN_ON(h->mrq)) {
 		mutex_unlock(&h->lock);
 		mrq->cmd->error = -ENOMEDIUM;
 		mmc_request_done(mmc, mrq);
@@ -731,7 +733,11 @@ static int ksd_probe(struct platform_device *pdev)
 	mmc->f_min = DIV_ROUND_UP(KSD_REF_HZ, 2 * 0x10000);
 	mmc->f_max = KSD_F_MAX;
 	mmc->ocr_avail = MMC_VDD_32_33 | MMC_VDD_33_34;
-	mmc->caps = MMC_CAP_WAIT_WHILE_BUSY | MMC_CAP_CMD23;
+	/* Non-removable: the driver doesn't poll for card changes (insert the
+	 * card before boot), and so the mmc core never consults get_cd, which
+	 * also keeps it independent of SDM_STATUS CARD_PRESENT (0 with a card
+	 * in on mmu-sd c1e540a). */
+	mmc->caps = MMC_CAP_WAIT_WHILE_BUSY | MMC_CAP_CMD23 | MMC_CAP_NONREMOVABLE;
 	if (caps & CAPS_4BIT)
 		mmc->caps |= MMC_CAP_4_BIT_DATA;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;

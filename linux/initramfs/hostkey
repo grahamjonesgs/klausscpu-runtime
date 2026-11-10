@@ -10,14 +10,18 @@
 mkdir -p /etc/dropbear
 k=/etc/dropbear/dropbear_ecdsa_host_key
 mtd=$(grep '"storage"' /proc/mtd 2>/dev/null | cut -d: -f1)
+# Convert to a new file and move it over the old one: dropbearconvert won't
+# overwrite, and /etc persists when the root is the SD card's image.
+rm -f "$k.new"
 if [ -n "$mtd" ] && kskey "/dev/$mtd" >/tmp/hostkey.pem 2>/dev/null &&
-   dropbearconvert openssh dropbear /tmp/hostkey.pem "$k" >/dev/null 2>&1; then
+   dropbearconvert openssh dropbear /tmp/hostkey.pem "$k.new" >/dev/null 2>&1 &&
+   mv -f "$k.new" "$k"; then
 	rm -f /tmp/hostkey.pem
 	echo "hostkey: Zephyr's key from the QSPI keystore ($mtd)" >&2
 	echo "-r $k"
 	exit 0
 fi
-rm -f /tmp/hostkey.pem
+rm -f /tmp/hostkey.pem "$k.new"
 if [ -b /dev/mmcblk0p1 ]; then
 	mkdir -p /mnt
 	grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt 2>/dev/null
