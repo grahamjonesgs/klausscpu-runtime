@@ -7,6 +7,7 @@
 #include <asm/ptrace.h>
 #include <asm/processor.h>
 
+void asm_offsets(void);
 void asm_offsets(void)
 {
 	DEFINE(PT_R0, offsetof(struct pt_regs, r[0]));

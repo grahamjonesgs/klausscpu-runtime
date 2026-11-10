@@ -11,8 +11,8 @@
 #include <linux/io.h>
 #include <linux/sched_clock.h>
 #include <asm/klausscpu.h>
+#include <asm/setup.h>
 
-extern unsigned int klausscpu_irq(unsigned int hwirq);
 
 static u64 kl_read_cycles(struct clocksource *cs)
 {

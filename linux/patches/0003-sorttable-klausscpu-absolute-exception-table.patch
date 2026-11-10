@@ -1,0 +1,23 @@
+diff --git a/scripts/sorttable.c b/scripts/sorttable.c
+index d7b50581c..7d2580ea9 100644
+--- a/scripts/sorttable.c
++++ b/scripts/sorttable.c
+@@ -58,6 +58,10 @@
+ #define EM_RISCV	243
+ #endif
+ 
++#ifndef EM_KLAUSSCPU
++#define EM_KLAUSSCPU	0x4B43
++#endif
++
+ #ifndef EM_LOONGARCH
+ #define EM_LOONGARCH	258
+ #endif
+@@ -919,6 +923,7 @@ static int do_file(char const *const fname, void *addr)
+ 	case EM_ARCOMPACT:
+ 	case EM_ARCV2:
+ 	case EM_ARM:
++	case EM_KLAUSSCPU:
+ 	case EM_MICROBLAZE:
+ 	case EM_MIPS:
+ 	case EM_XTENSA:

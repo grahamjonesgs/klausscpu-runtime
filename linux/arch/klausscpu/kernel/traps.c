@@ -15,7 +15,10 @@
 #include <linux/extable.h>
 #include <linux/uaccess.h>
 #include <linux/nospec.h>
+#include <linux/bug.h>
+#include <linux/stacktrace.h>
 #include <asm/klausscpu.h>
+#include <asm/setup.h>
 #include <asm/syscall.h>
 
 #define IRQ_FLAG	0x10000
@@ -24,8 +27,6 @@ int show_unhandled_signals = 1;
 
 extern void klausscpu_exc_vector(void);
 extern void klausscpu_tlb_refill(void);
-extern void klausscpu_handle_irq(unsigned int hwirq);
-extern void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr);
 
 typedef long (*syscall_fn_t)(unsigned long, unsigned long, unsigned long,
 			     unsigned long, unsigned long, unsigned long);
@@ -46,6 +47,12 @@ static const char *const cause_names[] = {
 	[EXC_TLB_MISS_FETCH] = "TLB miss (fetch)",
 };
 
+static bool print_trace_entry(void *loglvl, unsigned long pc)
+{
+	printk("%s [<%08lx>] %pS\n", (const char *)loglvl, pc, (void *)pc);
+	return true;
+}
+
 void show_regs(struct pt_regs *regs)
 {
 	int i;
@@ -56,25 +63,38 @@ void show_regs(struct pt_regs *regs)
 	for (i = 0; i < 16; i += 4)
 		pr_info("r%-2d %016lx %016lx %016lx %016lx\n", i,
 			regs->r[i], regs->r[i + 1], regs->r[i + 2], regs->r[i + 3]);
+	if (!user_mode(regs)) {
+		pr_info("Call trace:\n");
+		arch_stack_walk(print_trace_entry, KERN_INFO, current, regs);
+	}
 }
 
-/* Walk the frame-pointer chain: [P] = caller's P, [P + 8] = return address. */
+/* The frame-pointer chain (stacktrace.c): [P] = caller's P, [P + 8] = return. */
 void show_stack(struct task_struct *task, unsigned long *sp, const char *loglvl)
 {
-	unsigned long fp, pc;
-	int depth = 0;
-
-	if (!task || task == current)
-		asm volatile("copy %0, r15" : "=r"(fp));
-	else
-		fp = task->thread.r15;
 	printk("%sCall trace:\n", loglvl);
-	while (fp && depth++ < 32) {
-		if (fp < PAGE_OFFSET || fp >= (unsigned long)high_memory || (fp & 7))
-			break;
-		pc = ((unsigned long *)fp)[1];
-		printk("%s [<%08lx>] %pS\n", loglvl, pc, (void *)pc);
-		fp = ((unsigned long *)fp)[0];
+	arch_stack_walk(print_trace_entry, (void *)loglvl, task, NULL);
+}
+
+int is_valid_bugaddr(unsigned long pc)
+{
+	return *(u32 *)pc == KLAUSSCPU_TRAP_INSN;
+}
+
+/* A BUG() or WARN() trap in the kernel: report it; step over a WARN. */
+static bool klausscpu_kernel_trap(struct pt_regs *regs)
+{
+	unsigned long pc = instruction_pointer(regs);
+
+	switch (report_bug(pc, regs)) {
+	case BUG_TRAP_TYPE_WARN:
+		instruction_pointer_set(regs, pc + 4);
+		return true;
+	case BUG_TRAP_TYPE_BUG:
+		show_regs(regs);
+		panic("kernel BUG at %08lx", pc);
+	default:
+		return false;
 	}
 }
 
@@ -156,6 +176,8 @@ asmlinkage void klausscpu_do_exception(struct pt_regs *regs)
 		do_bad_exception(regs, cause & 0xff, SIGBUS, BUS_ADRALN);
 		return;
 	case EXC_TRAP:
+		if (!user_mode(regs) && klausscpu_kernel_trap(regs))
+			return;
 		do_bad_exception(regs, EXC_TRAP, SIGTRAP, TRAP_BRKPT);
 		return;
 	case EXC_PRIVILEGED:

@@ -4,6 +4,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <asm/klausscpu.h>
+#include <asm/setup.h>
 
 static void kl_uart_putc(char c)
 {

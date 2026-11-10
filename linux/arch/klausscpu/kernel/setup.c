@@ -12,7 +12,6 @@
 #include <asm/klausscpu.h>
 #include <asm/mmu_context.h>
 
-extern void klausscpu_early_console_init(void);
 extern unsigned long klausscpu_tlb_mask;
 
 unsigned long klausscpu_cpu_features;

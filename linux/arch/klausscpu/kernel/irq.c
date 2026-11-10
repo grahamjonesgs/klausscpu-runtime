@@ -12,6 +12,7 @@
 #include <linux/irqdomain.h>
 #include <linux/io.h>
 #include <asm/klausscpu.h>
+#include <asm/setup.h>
 
 extern void klausscpu_irq_vector0(void), klausscpu_irq_vector1(void),
 	    klausscpu_irq_vector2(void), klausscpu_irq_vector3(void);

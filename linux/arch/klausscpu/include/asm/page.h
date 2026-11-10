@@ -18,8 +18,10 @@
 
 #define clear_page(page)	memset((page), 0, PAGE_SIZE)
 #define copy_page(to, from)	memcpy((to), (from), PAGE_SIZE)
-#define clear_user_page(page, vaddr, pg)	clear_page(page)
-#define copy_user_page(to, from, vaddr, pg)	copy_page(to, from)
+#define clear_user_page(page, vaddr, pg) \
+	do { (void)(vaddr); (void)(pg); clear_page(page); } while (0)
+#define copy_user_page(to, from, vaddr, pg) \
+	do { (void)(vaddr); (void)(pg); copy_page(to, from); } while (0)
 
 typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long pgd; } pgd_t;

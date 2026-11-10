@@ -12,6 +12,7 @@
 #include <linux/sched/signal.h>
 #include <linux/uaccess.h>
 #include <asm/klausscpu.h>
+#include <asm/setup.h>
 
 extern void show_regs(struct pt_regs *regs);
 

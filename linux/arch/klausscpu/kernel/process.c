@@ -7,6 +7,8 @@
 #include <linux/sched/debug.h>
 #include <linux/elf.h>
 #include <linux/elfcore.h>
+#include <linux/reboot.h>
+#include <asm/setup.h>
 #include <asm/klausscpu.h>
 #include <asm/processor.h>
 #include <asm/switch_to.h>

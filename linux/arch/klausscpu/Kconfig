@@ -7,6 +7,8 @@
 config KLAUSSCPU
 	def_bool y
 	select ARCH_HAS_PTE_SPECIAL
+	select ARCH_STACKWALK
+	select BUILDTIME_TABLE_SORT
 	select ARCH_WANT_FRAME_POINTERS
 	select GENERIC_ENTRY
 	select HAVE_GENERIC_TIF_BITS
@@ -53,6 +55,13 @@ config GENERIC_CALIBRATE_DELAY
 	def_bool y
 
 config GENERIC_CSUM
+	def_bool y
+
+config GENERIC_BUG
+	def_bool y
+	depends on BUG
+
+config STACKTRACE_SUPPORT
 	def_bool y
 
 config NO_IOPORT_MAP
