@@ -306,11 +306,16 @@ The driver:
     failed read have been drained.
   - A watchdog fails a request that never completes, instead of hanging
     the mmc core.
-- **Unsupported block sizes.** Block sizes that aren't multiples of 8 are
-  refused with -EINVAL. The core's only such request is ACMD22's 4 bytes,
-  sent after a write error to count the blocks written. Refusing it makes
-  the core redo the whole write. (Question for the CPU session: could the
-  data engine take a 4-byte block?)
+- **Block sizes.** Any multiple of 4 from 4 to 2048 bytes (plan §4.3,
+  57a5a8c). A block takes ceil(size/8) FIFO words; a 4-mod-8 block's last
+  word carries its 4 bytes in [31:0]. The 4-byte case is ACMD22, which the
+  core sends after a write error to learn how many blocks reached the
+  card. Other sizes are refused with -EINVAL.
+- **Test path.** `linux/userland/sdcmd.c` sends ACMD51 (8 bytes), ACMD13
+  (64 bytes) and, after an 8-sector O_DIRECT write, ACMD22 (4 bytes)
+  through mmc_block's `MMC_IOC_CMD`. `linux.sh sd-native` runs it.
+  Its `wtest` writes raw sectors, so it ships only in that test's
+  initramfs.
 - **Card changes.** The driver doesn't poll for card changes: insert the
   card before boot.
 - **Boot wait.** The mmc core finds the card asynchronously. When an mmc
@@ -350,7 +355,8 @@ Status:
   numbers are what count.
 
 An independent review of the driver against the plan found:
-- ACMD22's 4-byte block (fixed as above);
+- ACMD22's 4-byte block (refused at first; supported since the
+  controller gained 4-byte blocks);
 - commands that could start while the engine was busy (now refused);
 - a `jiffies` race in the power-up wait;
 - a missing `MMC_BLOCK` dependency.

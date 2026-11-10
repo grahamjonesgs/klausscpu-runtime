@@ -187,17 +187,17 @@ static u8 *ksd_pio_ptr(struct ksd_pio *p, unsigned int *avail)
 	return p->m.addr + p->off;
 }
 
-/* 8 bytes to or from the buffer, across a chunk boundary. */
-static bool ksd_pio_bytes(struct ksd_pio *p, u8 *b, bool to_sg)
+/* len bytes to or from the buffer, across a chunk boundary. */
+static bool ksd_pio_bytes(struct ksd_pio *p, u8 *b, unsigned int len, bool to_sg)
 {
 	unsigned int got = 0, avail, n;
 	u8 *q;
 
-	while (got < 8) {
+	while (got < len) {
 		q = ksd_pio_ptr(p, &avail);
 		if (!q)
 			return false;
-		n = min(avail, 8 - got);
+		n = min(avail, len - got);
 		if (to_sg)
 			memcpy(q, b + got, n);
 		else
@@ -210,15 +210,32 @@ static bool ksd_pio_bytes(struct ksd_pio *p, u8 *b, bool to_sg)
 
 /*
  * One block between the FIFO and the buffer.  Each FIFO word is the next 8
- * bytes, little-endian: byte 0 in bits [7:0].
+ * bytes, little-endian: byte 0 in bits [7:0].  A block takes ceil(size / 8)
+ * words and starts a new word; with size mod 8 = 4 its last word carries
+ * 4 bytes in [31:0] ([63:32] reads 0, and is ignored on a push).
  */
 static bool ksd_pio_block(struct ksd_host *h, struct ksd_pio *p, unsigned int blksz, bool to_buf)
 {
 	void __iomem *fifo = h->base + SDM_DATA;
-	unsigned int w, avail;
+	unsigned int w, avail, n;
 	u8 b[8], *q;
 
-	for (w = 0; w < blksz / 8; w++) {
+	for (w = 0; w < DIV_ROUND_UP(blksz, 8); w++) {
+		n = min(blksz - w * 8, 8u);
+		if (n < 8) {
+			/* The half word at the end of a 4-mod-8 block. */
+			if (to_buf) {
+				put_unaligned_le64(readq_relaxed(fifo), b);
+				if (!ksd_pio_bytes(p, b, n, true))
+					return false;
+			} else {
+				memset(b, 0, sizeof(b));
+				if (!ksd_pio_bytes(p, b, n, false))
+					return false;
+				writeq_relaxed(get_unaligned_le64(b), fifo);
+			}
+			continue;
+		}
 		q = ksd_pio_ptr(p, &avail);
 		if (!q)
 			return false;
@@ -230,10 +247,10 @@ static bool ksd_pio_block(struct ksd_host *h, struct ksd_pio *p, unsigned int bl
 			p->off += 8;
 		} else if (to_buf) {
 			put_unaligned_le64(readq_relaxed(fifo), b);
-			if (!ksd_pio_bytes(p, b, true))
+			if (!ksd_pio_bytes(p, b, 8, true))
 				return false;
 		} else {
-			if (!ksd_pio_bytes(p, b, false))
+			if (!ksd_pio_bytes(p, b, 8, false))
 				return false;
 			writeq_relaxed(get_unaligned_le64(b), fifo);
 		}
@@ -546,13 +563,10 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		mmc_request_done(mmc, mrq);
 		return;
 	}
-	if (data && (data->blksz % 8 || data->blksz < 8 || data->blksz > 2048)) {
-		/*
-		 * The controller moves whole 8-byte words, 8-2048 bytes a block
-		 * (plan 4.3).  The core's only other size is ACMD22's 4 bytes
-		 * after a write error: failing it makes the core retry the whole
-		 * write, rather than trust a count it never got.
-		 */
+	if (data && (data->blksz % 4 || data->blksz < 4 || data->blksz > 2048)) {
+		/* Block sizes are multiples of 4 from 4 to 2048 (plan 4.3, 57a5a8c):
+		 * 4 is ACMD22's, the count of blocks a failed write got onto the
+		 * card, which the core's write recovery asks for. */
 		mutex_unlock(&h->lock);
 		data->error = -EINVAL;
 		mmc_request_done(mmc, mrq);

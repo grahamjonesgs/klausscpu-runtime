@@ -35,7 +35,9 @@
 #                    switches to the card's /linux/rootfs.img.  fsck.fat
 #                    checks the card between the boots
 #   sd-native        the same through the native 4-bit controller
-#                    (klausscc --sd-native) and the mmc host driver
+#                    (klausscc --sd-native) and the mmc host driver, plus
+#                    sdcmd (MMC_IOC_CMD): ACMD51, ACMD13, and ACMD22's
+#                    4-byte block after an 8-sector O_DIRECT write
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -103,6 +105,14 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
     "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 ||
       { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
     printf 'dir /seed 0755 0 0\nfile /seed/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
+    if [ "$MODE" = sd-native ]; then
+      # sdcmd: ACMD51/13/22 (8, 64 and 4-byte blocks) through MMC_IOC_CMD.
+      # Test-only, since its wtest writes raw sectors.
+      "$LLVM_BIN/clang" --target=klausscpu-unknown-linux-musl --sysroot="$RT/linux-ws/sysroot" -Os \
+        "$RT/linux/userland/sdcmd.c" -o "$OUT/sdcmd" >"$OUT/sdcmd.log" 2>&1 ||
+        { echo "FAIL sdcmd build (see $OUT/sdcmd.log)"; exit 1; }
+      printf 'file /seed/sdcmd %s 0755 0 0\n' "$OUT/sdcmd" >>"$OUT/extra.list"
+    fi
     export INITRAMFS_EXTRA=$OUT/extra.list
     CARD=$OUT/card.img
     truncate -s 64M "$CARD" &&
@@ -260,6 +270,9 @@ elif [ $SD = 1 ]; then
     else
       echo 'head -c 262144 /seed/rootfs.img > /mnt/linux/b.bin; sync; echo 3 > /proc/sys/vm/drop_caches'
       echo 'sha256sum /mnt/linux/b.bin | cut -c1-16'
+      # The card's last 8 KiB: FAT free space, past the raw hash below.
+      echo '/seed/sdcmd scr /dev/mmcblk0; /seed/sdcmd ssr /dev/mmcblk0'
+      echo '/seed/sdcmd wtest /dev/mmcblk0 131056'
     fi
     echo 'umount /mnt; head -c 8388608 /dev/mmcblk0 | sha256sum | cut -c1-16'
   } >"$OUT/sd1.in"
@@ -288,6 +301,8 @@ elif [ $SD = 1 ]; then
       echo '0'
     else
       echo "$HEAD"
+      echo 'acmd22: 8 blocks written'
+      echo 'wtest: read back same'
     fi
   } >"$OUT/sd1.expect"
   run_step sd1 100000000000 3000 '$ '
@@ -297,6 +312,10 @@ elif [ $SD = 1 ]; then
   dd if="$CARD" of="$OUT/part.img" bs=512 skip=2048 status=none &&
     fsck.fat -n "$OUT/part.img" >"$OUT/fsck.log" 2>&1 || bad "sd1: fsck.fat on the card's partition (see $OUT/fsck.log)"
   rm -f "$OUT/part.img"
+  if [ "$MODE" = sd-native ]; then
+    grep -aq '^scr: ' "$OUT/sd1.out" || bad "sd1: sdcmd scr (ACMD51, 8 bytes)"
+    grep -aq '^ssr: ' "$OUT/sd1.out" || bad "sd1: sdcmd ssr (ACMD13, 64 bytes)"
+  fi
 
   # Boot 2: sdinit switches to the card's image.
   cat >"$OUT/sd2.in" <<'EOF2'
