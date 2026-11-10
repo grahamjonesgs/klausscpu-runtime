@@ -10,7 +10,9 @@ CONFIG_INITRAMFS_SOURCE="initramfs.list"
 # CONFIG_RD_LZO is not set
 # CONFIG_RD_LZ4 is not set
 # CONFIG_RD_ZSTD is not set
-CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+# -O2: measured on the board against -Os, stat 25% and read 14% faster,
+# context switches 11%, nothing slower (LINUX_PLAN.md "Board results").
+CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
 CONFIG_EXPERT=y
 # CONFIG_SYSFS_SYSCALL is not set
 # CONFIG_FHANDLE is not set

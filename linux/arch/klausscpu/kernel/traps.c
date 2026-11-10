@@ -98,7 +98,9 @@ static bool klausscpu_kernel_trap(struct pt_regs *regs)
 	}
 }
 
-static void do_syscall(struct pt_regs *regs)
+/* From klausscpu_exc_vector (entry.S) for a SYSCALL from user mode. */
+asmlinkage void klausscpu_do_syscall(struct pt_regs *regs);
+asmlinkage void klausscpu_do_syscall(struct pt_regs *regs)
 {
 	long nr = regs->r[12];
 
@@ -156,10 +158,7 @@ asmlinkage void klausscpu_do_exception(struct pt_regs *regs)
 
 	switch (cause & 0xff) {
 	case EXC_SYSCALL:
-		if (user_mode(regs)) {
-			do_syscall(regs);
-			return;
-		}
+		/* From user mode, klausscpu_exc_vector calls klausscpu_do_syscall. */
 		do_bad_exception(regs, EXC_SYSCALL, SIGILL, ILL_ILLTRP);
 		return;
 	case EXC_TLB_MISS_LOAD:

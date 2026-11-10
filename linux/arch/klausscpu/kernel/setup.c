@@ -12,8 +12,6 @@
 #include <asm/klausscpu.h>
 #include <asm/mmu_context.h>
 
-extern unsigned long klausscpu_tlb_mask;
-
 unsigned long klausscpu_cpu_features;
 
 static void __init probe_cpu(void)
@@ -24,7 +22,6 @@ static void __init probe_cpu(void)
 	klausscpu_cpu_features = f;
 	if ((f & need) != need)
 		panic("KlaussCPU: CPU_FEATURES %08lx lacks exceptions/TLB/LR-SC", f);
-	klausscpu_tlb_mask = CPU_FEAT_TLB_ENTRIES(f) - 1;
 	pr_info("KlaussCPU: CPU_FEATURES %08lx, %lu TLB entries\n", f,
 		CPU_FEAT_TLB_ENTRIES(f));
 }

@@ -14,7 +14,10 @@
 
 #define IRQ_FLAG	0x10000		/* ecause marker for an interrupt */
 
-/* Save everything below the frame; r12 = &pt_regs afterwards. */
+/*
+ * Save everything below the frame; afterwards r12 = &pt_regs and r1 = the
+ * frame's PM bit (1: from user mode).
+ */
 .macro SAVE_REGS
 	push	r12			/* into the syscallno slot */
 	getsp	r12
@@ -35,8 +38,8 @@
 	stidx64	r13, r12, 104
 	stidx64	r14, r12, 112
 	stidx64	r15, r12, 120
-	ldidx64	r0, r12, PT_SYSCALLNO
-	stidx64	r0, r12, PT_R12
+	ldidx64	r2, r12, PT_SYSCALLNO
+	stidx64	r2, r12, PT_R12
 	/* The interrupted SP: USP if from user, else just above the frame. */
 	ldidx64	r1, r12, PT_FRAME
 	shrv	r1, r1, 44		/* frame[44] PM (bextr reaches bits < 32 only) */
@@ -46,10 +49,9 @@
 	jmp	6f
 5:	addi	r2, r12, PT_SIZE
 6:	stidx64	r2, r12, PT_SP
-	ldidx64	r0, r12, 0
 	stidx64	r0, r12, PT_ORIG_R0
-	setr	r0, -1
-	stidx64	r0, r12, PT_SYSCALLNO
+	setr	r2, -1
+	stidx64	r2, r12, PT_SYSCALLNO
 	setr	r15, 0
 .endm
 
@@ -89,9 +91,15 @@ ENTRY(klausscpu_exc_vector)		/* EVEC */
 	SAVE_REGS
 	mfsr	r0, ecause
 	stidx64	r0, r12, PT_ECAUSE
-	mfsr	r0, eaddr
-	stidx64	r0, r12, PT_EADDR
+	mfsr	r2, eaddr
+	stidx64	r2, r12, PT_EADDR
+	/* A system call from user mode goes straight to its handler. */
+	fbri	r0, EXC_SYSCALL, 8, 1f	/* NE */
+	fbri	r1, 0, 0, 1f		/* EQ: from the kernel */
 	copy	r0, r12
+	call	klausscpu_do_syscall
+	RESTORE_REGS_IRET
+1:	copy	r0, r12
 	call	klausscpu_do_exception
 	RESTORE_REGS_IRET
 ENDPROC(klausscpu_exc_vector)

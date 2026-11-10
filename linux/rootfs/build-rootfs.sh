@@ -92,6 +92,9 @@ if [ -x "$WS/sqlite-build/sqlite3" ]; then
 fi
 if [ -x "$WS/coremark-build/coremark" ] && [ -x "$WS/lmbench-build/tlbmiss" ]; then
   cp "$WS/coremark-build/coremark" "$WS/lmbench-build/tlbmiss" "$ST/usr/bin/"
+  for b in perfstat sysloop; do
+    if [ -x "$WS/lmbench-build/$b" ]; then cp "$WS/lmbench-build/$b" "$ST/usr/bin/"; fi
+  done
   mkdir -p "$ST/usr/libexec/lmbench"
   for b in lat_syscall lat_proc lat_ctx lat_pagefault bw_mem lat_mem_rd tlb hello; do
     cp "$WS/lmbench-build/$b" "$ST/usr/libexec/lmbench/"

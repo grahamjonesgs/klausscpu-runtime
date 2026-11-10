@@ -5,7 +5,6 @@
 #include <asm/pgtable.h>
 
 pgd_t swapper_pg_dir[PTRS_PER_PGD] __aligned(64);
-pgd_t *pgd_current = swapper_pg_dir;
 
 /* The core calls free_area_init() itself and asks for the zone limits. */
 void __init arch_zone_limits_init(unsigned long *max_zone_pfns)

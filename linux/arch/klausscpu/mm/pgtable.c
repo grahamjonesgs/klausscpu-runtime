@@ -3,7 +3,10 @@
 #include <linux/slab.h>
 #include <asm/pgalloc.h>
 
-/* The pgd is 8 entries; the user half starts empty, kmap comes from swapper. */
+/*
+ * The pgd is 64 entries; the user half starts empty, kmap comes from swapper
+ * (for show: the refill handler walks swapper_pg_dir for kmap).
+ */
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	pgd_t *pgd = kzalloc(PTRS_PER_PGD * sizeof(pgd_t), GFP_KERNEL);

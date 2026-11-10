@@ -65,9 +65,18 @@ static int loop_attach(const char *image, char *dev, size_t devlen, int ro)
 	}
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.fd = fd;
-	cfg.info.lo_flags = LO_FLAGS_AUTOCLEAR | (ro ? LO_FLAGS_READ_ONLY : 0);
+	/*
+	 * Direct I/O to the FAT file: without it every block is cached twice
+	 * (by ext4 above and by FAT below) and copied once more, which costs
+	 * a third of a cold read's time.  Buffered if the kernel refuses.
+	 */
+	cfg.info.lo_flags = LO_FLAGS_AUTOCLEAR | LO_FLAGS_DIRECT_IO | (ro ? LO_FLAGS_READ_ONLY : 0);
 	strncpy((char *)cfg.info.lo_file_name, image, LO_NAME_SIZE - 1);
 	n = ioctl(lfd, LOOP_CONFIGURE, &cfg);
+	if (n) {
+		cfg.info.lo_flags &= ~LO_FLAGS_DIRECT_IO;
+		n = ioctl(lfd, LOOP_CONFIGURE, &cfg);
+	}
 	close(fd);
 	if (n) {
 		close(lfd);

@@ -22,7 +22,9 @@ limit() { # <seconds> <command...>: run it, killed after that long
 	shift
 	"$@" &
 	p=$!
-	( sleep "$s"; kill "$p" 2>/dev/null && echo "bench: ${1##*/} stopped after $s s" ) &
+	# lmbench measures in forked children: they go too (pkill -P), or a
+	# child left measuring would load every benchmark after it.
+	( sleep "$s"; pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null && echo "bench: ${1##*/} stopped after $s s" ) &
 	w=$!
 	wait "$p"
 	r=$?
@@ -30,10 +32,13 @@ limit() { # <seconds> <command...>: run it, killed after that long
 	return $r
 }
 if [ "${1:-}" = quick ]; then
-	N="-N 1 -W 0"; CM="0x0 0x0 0x66 20"; MEM=64k; MEMRD=1; CTX="2 4"
+	N="-N 1 -W 0"; CM="0x0 0x0 0x66 20"; MEM=64k; MEMRD=1; CTX="2 4"; MEMRDN=$N
 	TLBM="-M 1M"; TLBA=100000; T=900
 else
 	N=""; CM=""; MEM=8m; MEMRD=32; CTX="2 4 8 16"; TLBM="-c -M 8M"; TLBA=2000000; T=600
+	# lat_mem_rd's ~110 sizes at the default 11 repetitions take far
+	# longer than T; one repetition is about 1.3 s a size.
+	MEMRDN="-N 1"
 fi
 echo "== coremark $CM"
 limit $T coremark $CM 2>&1
@@ -52,7 +57,7 @@ rm -f /tmp/pf
 echo "== bw_mem $MEM"
 for w in rd wr cp bcopy; do printf '%s ' $w; limit $T "$L/bw_mem" $N $MEM $w 2>&1; done
 echo "== lat_mem_rd ${MEMRD}M stride 64"
-limit $T "$L/lat_mem_rd" $N $MEMRD 64 2>&1
+limit $T "$L/lat_mem_rd" $MEMRDN $MEMRD 64 2>&1
 echo "== tlb $TLBM"
 limit $T "$L/tlb" $N $TLBM 2>&1
 echo "== tlbmiss"

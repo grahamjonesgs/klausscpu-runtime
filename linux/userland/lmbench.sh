@@ -3,8 +3,10 @@
 # KlaussCPU Linux port (static, musl), into linux-ws/lmbench-build/:
 #   lat_syscall lat_proc lat_ctx lat_pagefault bw_mem lat_mem_rd tlb hello
 # plus tlbmiss (linux/userland/tlbmiss.c, the TLB-miss cost at 64 KiB
-# strides).  build-rootfs.sh puts them in /usr/libexec/lmbench and tlbmiss
-# in /usr/bin; tests/bench.sh runs them.
+# strides), perfstat (perfstat.c, the board's performance counters around
+# a command) and sysloop (sysloop.c, kernel-entry microbenchmarks).
+# build-rootfs.sh puts the lmbench ones in /usr/libexec/lmbench and the
+# others in /usr/bin; tests/bench.sh runs them.
 #
 # lmbench's own build (scripts/build, configure-like) is not used.  Its
 # bench.h includes <rpc/rpc.h> for the RPC benchmarks' prototypes only;
@@ -47,4 +49,6 @@ for b in $BENCH; do
   "${CC[@]}" -static -o "$OUT/$b" "$OUT/obj/$b.o" "$OUT/obj/liblm.a" -lm
 done
 "${CC[@]}" -static -O2 -o "$OUT/tlbmiss" "$HERE/tlbmiss.c"
-echo "lmbench: $OUT ($BENCH tlbmiss; lmbench $REV)"
+"${CC[@]}" -static -O2 -o "$OUT/perfstat" "$HERE/perfstat.c"
+"${CC[@]}" -static -O2 -o "$OUT/sysloop" "$HERE/sysloop.c"
+echo "lmbench: $OUT ($BENCH tlbmiss perfstat sysloop; lmbench $REV)"

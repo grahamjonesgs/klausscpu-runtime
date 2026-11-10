@@ -45,6 +45,8 @@ _start:
 	setsp	r1
 	setru	r1, init_task
 	mtsr	scratch0, r1
+	setru	r1, swapper_pg_dir	/* the refill handler's useg pgd until switch_mm */
+	mtsr	scratch1, r1
 	setr	r15, 0
 	call	start_kernel
 4:	halt

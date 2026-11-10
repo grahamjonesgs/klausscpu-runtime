@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /* A hosted (musl) smoke test for the KlaussCPU Linux port. */
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -10,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -140,6 +142,48 @@ int main(int argc, char **argv)
 		printf("musltest: 4 threads: mutex count %ld, atomic count %d\n",
 		       locked_count, atomic_count);
 		fails += bad || locked_count != 8000 || atomic_count != 8000;
+	}
+
+	/*
+	 * User copies that run into an unmapped page move exactly the bytes
+	 * before it (raw_copy_*_user's exact count; a group copy that gave
+	 * up whole made generic_perform_write retry forever).  Through a
+	 * file: a pipe reports a partial copy as EFAULT.
+	 */
+	{
+		long pg = sysconf(_SC_PAGESIZE);
+		char *m = mmap(NULL, 2 * pg, PROT_READ | PROT_WRITE,
+			       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		const char *path = "/tmp/musltest.edge";
+		char src[64];
+		int fd, k, bad = 0;
+
+		for (k = 0; k < 64; k++)
+			src[k] = k + 1;
+		fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		if (fd < 0) {
+			path = "/musltest.edge";
+			fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		}
+		if (m == MAP_FAILED || munmap(m + pg, pg) || fd < 0 ||
+		    pwrite(fd, src, 64, 0) != 64)
+			bad = -1;
+		for (k = 1; !bad && k <= 40; k++) {
+			char *b = m + pg - k;
+
+			memcpy(b, src, k);
+			if (pwrite(fd, b, 64, 128) != k)	/* from user */
+				bad = k;
+			memset(b, 0, k);
+			if (pread(fd, b, 64, 0) != k || memcmp(b, src, k))	/* to user */
+				bad = k;
+		}
+		if (fd >= 0) {
+			close(fd);
+			unlink(path);
+		}
+		printf("musltest: uaccess at a page edge %s\n", bad ? "FAILED" : "ok");
+		fails += bad != 0;
 	}
 
 	/* 300 short-lived address spaces: ASID generations roll over. */

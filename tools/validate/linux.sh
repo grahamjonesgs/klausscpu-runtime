@@ -250,6 +250,7 @@ musltest: setjmp/longjmp ok
 musltest: child exited with 5
 musltest: tcp loopback echo ok
 musltest: 4 threads: mutex count 8000, atomic count 8000
+musltest: uaccess at a page edge ok
 musltest: 300 forks, 0 bad
 musltest: PASS
 mkdir /tmp/d
@@ -392,7 +393,7 @@ touch /usr/x 2>/dev/null && echo usr writable || echo usr read-only
 echo persist > /root/t; sync; cat /root/t
 ls /mnt/linux/rootfs.img
 /usr/bin/musltest | tail -1
-echo HOSTNAME=klaustest > /data/etc/network; echo 'echo rc.local ran' > /data/etc/rc.local; sync
+echo HOSTNAME=klaustest > /data/etc/network; echo 'echo rc.local ran > /tmp/rc.local.out' > /data/etc/rc.local; sync
 install-rootfs -z - < /mnt/linux/rootfs-b.img.gz
 EOF2
   cat >"$OUT/sd2.expect" <<'EOF2'
@@ -411,7 +412,10 @@ EOF2
 
   # Boot 3: sdinit swaps in system image B; /root and the settings in
   # /data/etc survive.  Then a broken /data/etc/network for boot 4.
+  # rc.local runs in the background (rcS), so its output would race the
+  # shell's: it writes a file, read here once it has had time to run.
   cat >"$OUT/sd3.in" <<'EOF2'
+sleep 2; cat /tmp/rc.local.out
 cut -d' ' -f1,6 /etc/klausscpu-rootfs
 cat /root/t
 hostname

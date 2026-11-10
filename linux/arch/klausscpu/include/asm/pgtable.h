@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Two-level page tables (pgd -> pte, pmd folded) over a 32-bit address
- * space with 64 KiB pages: a PTE page holds 8192 entries (512 MiB), so the
- * pgd has 8.  See LINUX_PLAN.md "Pages and page tables".
+ * space with 64 KiB pages.  A PTE table is 1024 entries (8 KiB, mapping
+ * 64 MiB), a fragment of a 64 KiB page shared by eight (mm/pgalloc.c), so
+ * the pgd has 64 entries (512 bytes).  A whole-page table (8192 entries,
+ * 512 MiB) cost every new process two or three 64 KiB pages to zero, at
+ * about 1.5 ms each.  See LINUX_PLAN.md "Pages and page tables".
  *
  * PTE layout (64 bits).  The hardware bits are TLB_LO's, so the refill
  * handler writes the PTE to TLB_LO unmasked (MTSR keeps only [26:16] and
@@ -29,11 +32,17 @@
 #include <asm-generic/pgtable-nopmd.h>
 #endif
 
-#define PGDIR_SHIFT	(PAGE_SHIFT + (PAGE_SHIFT - 3))		/* 29 */
+#define PTE_INDEX_BITS	10
+#define PGDIR_SHIFT	(PAGE_SHIFT + PTE_INDEX_BITS)		/* 26 */
 #define PGDIR_SIZE	(_AC(1, UL) << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE - 1))
-#define PTRS_PER_PTE	(_AC(1, UL) << (PAGE_SHIFT - 3))		/* 8192 */
-#define PTRS_PER_PGD	(_AC(1, UL) << (32 - PGDIR_SHIFT))	/* 8 */
+#define PTRS_PER_PTE	(_AC(1, UL) << PTE_INDEX_BITS)		/* 1024 */
+#define PTRS_PER_PGD	(_AC(1, UL) << (32 - PGDIR_SHIFT))	/* 64 */
+
+/* A PTE table: PTE_FRAG_NR of them share a page. */
+#define PTE_FRAG_SIZE_SHIFT	(PTE_INDEX_BITS + 3)		/* 8 KiB */
+#define PTE_FRAG_SIZE		(_AC(1, UL) << PTE_FRAG_SIZE_SHIFT)
+#define PTE_FRAG_NR		(PAGE_SIZE >> PTE_FRAG_SIZE_SHIFT)	/* 8 */
 
 #define TASK_SIZE		_AC(0x80000000, UL)
 #define USER_PTRS_PER_PGD	(TASK_SIZE / PGDIR_SIZE)
@@ -54,7 +63,7 @@
 #define _PAGE_SWP_EXCLUSIVE	0x400UL
 #define _PAGE_PFN_MASK	0x07ff0000UL
 
-/* A pgd entry: the PA of a PTE page | _PAGE_TABLE. */
+/* A pgd entry: the PA of a PTE table (8 KiB aligned) | _PAGE_TABLE. */
 #define _PAGE_TABLE	0x001UL
 
 #define _PAGE_BASE	(_PAGE_PRESENT | _PAGE_VALID | _PAGE_ACCESSED)
@@ -142,9 +151,12 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 	return __pte(pte_hw_fix((pte_val(pte) & _PAGE_CHG_MASK) | pgprot_val(newprot)));
 }
 
-/* The folded pmd is the pgd entry: PA of the PTE page | _PAGE_TABLE. */
+/*
+ * The folded pmd is the pgd entry: PA of the PTE table | _PAGE_TABLE.
+ * pmd_page is the page holding the table (and its fragment siblings).
+ */
 #define pmd_none(pmd)		(!pmd_val(pmd))
-#define pmd_bad(pmd)		((pmd_val(pmd) & ~PAGE_MASK) != _PAGE_TABLE)
+#define pmd_bad(pmd)		((pmd_val(pmd) & (PTE_FRAG_SIZE - 1)) != _PAGE_TABLE)
 #define pmd_present(pmd)	(pmd_val(pmd) & _PAGE_TABLE)
 #define pmd_clear(pmdp)		WRITE_ONCE(*(pmdp), __pmd(0))
 #define set_pmd(pmdp, pmd)	WRITE_ONCE(*(pmdp), (pmd))
@@ -153,8 +165,9 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 {
-	return (unsigned long)__va(pmd_val(pmd) & PAGE_MASK);
+	return (unsigned long)__va(pmd_val(pmd) & ~(PTE_FRAG_SIZE - 1));
 }
+#define pmd_pgtable(pmd)	((pgtable_t)pmd_page_vaddr(pmd))
 
 #define pte_ERROR(e) pr_err("%s:%d: bad pte %016lx\n", __FILE__, __LINE__, pte_val(e))
 #define pgd_ERROR(e) pr_err("%s:%d: bad pgd %016lx\n", __FILE__, __LINE__, pgd_val(e))

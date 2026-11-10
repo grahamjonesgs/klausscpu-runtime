@@ -226,6 +226,35 @@ static bool ksd_pio_block(struct ksd_host *h, struct ksd_pio *p, unsigned int bl
 	unsigned int w, avail, n;
 	u8 b[8], *q;
 
+	/*
+	 * The usual case: the whole block fits in the buffer's current chunk
+	 * at an aligned address, so it moves as aligned doublewords.  (The
+	 * unaligned accessors below are byte at a time on this CPU: 64-bit
+	 * accesses must be aligned.)
+	 */
+	q = ksd_pio_ptr(p, &avail);
+	if (q && avail >= blksz && !((unsigned long)q & 7) && !(blksz & 31)) {
+		u64 *d = (u64 *)q;
+
+		if (to_buf) {
+			for (w = 0; w < blksz / 8; w += 4, d += 4) {
+				d[0] = readq_relaxed(fifo);
+				d[1] = readq_relaxed(fifo);
+				d[2] = readq_relaxed(fifo);
+				d[3] = readq_relaxed(fifo);
+			}
+		} else {
+			for (w = 0; w < blksz / 8; w += 4, d += 4) {
+				writeq_relaxed(d[0], fifo);
+				writeq_relaxed(d[1], fifo);
+				writeq_relaxed(d[2], fifo);
+				writeq_relaxed(d[3], fifo);
+			}
+		}
+		p->off += blksz;
+		return true;
+	}
+
 	for (w = 0; w < DIV_ROUND_UP(blksz, 8); w++) {
 		n = min(blksz - w * 8, 8u);
 		if (n < 8) {

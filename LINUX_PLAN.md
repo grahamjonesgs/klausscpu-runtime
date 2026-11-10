@@ -285,6 +285,8 @@ from the initramfs, so `/data` is real ext4. It runs one boot per port.
 | CoreMark | eembc 1f483d5 | `coremark` | in `tests/bench.sh quick`: the CRCs for the performance seeds |
 | lmbench 3 (subset) | intel/lmbench 27b43ae | `/usr/libexec/lmbench/`: `lat_syscall`, `lat_proc`, `lat_ctx`, `lat_pagefault`, `bw_mem`, `lat_mem_rd`, `tlb` | `tests/bench.sh quick`: each prints a result |
 | tlbmiss | ours (`linux/userland/tlbmiss.c`) | `tlbmiss` | ns per access through N pages, one page (64 KiB) apart |
+| perfstat | ours (`linux/userland/perfstat.c`) | `perfstat` | the board's performance counters around a command (`/proc/klausscpu_perf`) |
+| sysloop | ours (`linux/userland/sysloop.c`) | `sysloop` | kernel-entry microbenchmarks: syscalls, TLB refill, page fault, fork, exec |
 | iperf3 | 3.22 | `iperf3` | `tests/iperf3-test.sh`: a TCP and a UDP run over loopback against one-shot servers: PASS |
 | curl + mbedTLS | curl 8.23.0, mbedTLS 3.6.7 LTS | `curl`; `/etc/ssl/certs/ca-certificates.crt` (curl.se's Mozilla bundle, 2026-11-05); `/usr/libexec/mbedtls-selftest` | `tests/curl-test.sh`: file://, HTTP on loopback against busybox httpd (a page, HEAD, a 1 MiB download checked by SHA-256, a 404), the CA bundle, and mbedTLS's own self-test: 7/7 |
 
@@ -438,31 +440,92 @@ doesn't need the setting.
   `set_tid_address`, `brk`, `mmap(... MAP_PRIVATE|MAP_ANONYMOUS ...)`,
   `write(1, "hi\n", 3) = 3` and `exit_group(0)`.
 
-### Board results (2026-11-10, release bitstream from QSPI)
+### Board results (release bitstream from QSPI)
 
 Measured on the board (klaussCPU master 2743116, mmu-sd 5648f75 LEAN,
-100 MHz) under Linux from the SD root, with the ported programs:
+100 MHz) under Linux from the SD root, with the ported programs and
+`tests/bench.sh`. "First" is the first port (2026-11-10); "tuned" is
+after the performance work below (2026-11-11, `-O2` kernel).
 
-| What | Result |
-|---|---|
-| Lua 5.4 self-tests, SQLite known-answer test | PASS |
-| CoreMark (-O2, 3000 iterations, 17.5 s) | 171.7 it/s (1.72 / MHz) |
-| null syscall / read / write | 4.7 / 10.9 / 9.3 us |
-| stat / open+close | 122 / 131 us |
-| fork+exit / fork+execve / fork+sh -c | 42.6 / 78.4 / 143 ms |
-| context switch, 2 / 16 processes | 101 / 203 us |
-| page fault (file) | 77 us |
-| memory bandwidth read / write / copy (8 MiB) | 47 / 37 / 21 MB/s |
-| load latency: D-cache / DDR (lat_mem_rd, stride 64) | 42 ns / 617 ns |
-| TLB miss + refill (tlbmiss, 64 KiB stride, >15 pages) | ~2.9 us (~290 cycles) |
-| iperf3 board -> PC / PC -> board | 13.8 / 10.9 Mbit/s (PC -> board: 1360 retransmits, 94 RX drops) |
-| curl https://example.com/ (mbedTLS, CA bundle) | 200, verified, 4.0 s |
-| VGA vsync / DOOM timedemo demo1 | 59.52 Hz / 33.2 fps |
+| What | First | Tuned |
+|---|---|---|
+| Lua 5.4 self-tests, SQLite known-answer test, Buildroot 10/10, curl 7/7 | PASS | PASS |
+| CoreMark (-O2, user code only) | 171.7 it/s | 174.1 it/s |
+| null syscall / read / write | 4.7 / 10.9 / 9.3 us | 3.9 / 9.3 / 7.8 us |
+| stat / open+close | 122 / 131 us | 62 / 92 us |
+| fork+exit / fork+execve / fork+sh -c | 42.6 / 78.4 / 143 ms | 13.7 / 25.5 / 50.0 ms |
+| context switch, 2 / 16 processes | 101 / 203 us | 75 / 168 us |
+| page fault (file) | 77 us | 60 us |
+| anonymous page fault + munmap (`sysloop fault`) | 13.8 ms | 3.5 ms |
+| memory bandwidth read / write / copy (8 MiB) | 47 / 37 / 21 MB/s | 48 / 37 / 21 MB/s |
+| load latency: D-cache / DDR (lat_mem_rd, stride 64) | 42 / 617 ns | 42 / 614 ns |
+| TLB miss + refill (tlbmiss, 64 KiB stride) | 1.39 us | 1.20 us |
+| SD read, raw, 64 KiB requests (native 4-bit) | 3.1 MB/s | 10.7 MB/s (direct I/O 11 MB/s; bare metal 12.1) |
+| SD write through vfat, 64 KiB requests | 1.96 MB/s | 3.7 MB/s |
+| cold read of a 10 MB file from the SD root | 5.1 s | 1.7 s |
+| boot to `eth0: link up` | 14.8 s | 9.1 s |
+| iperf3 board -> PC / PC -> board | 13.8 / 10.9 Mbit/s (PC -> board: 1360 retransmits, 94 RX drops) | not remeasured |
+| curl https://example.com/ (mbedTLS, CA bundle) | 200, verified, 4.0 s | 200, verified |
+| VGA vsync / DOOM timedemo demo1 | 59.52 Hz / 33.2 fps | not remeasured |
 
-Tuning candidates the numbers point at:
-- the TLB refill path (about 290 cycles per miss; 16 entries of 64 KiB);
-- system-call and fork/exec overheads;
-- Ethernet receive (the LiteEth has 2 RX slots, so line-rate traffic drops packets while the CPU drains them).
+(The first port's TLB figure was recorded as ~2.9 us; remeasured on that
+kernel it is 1.39 us.)
+
+### Performance tuning (2026-11-11)
+
+**Tools.** `/proc/klausscpu_perf` (`arch/klausscpu/kernel/perf.c`) reads
+the board's performance counters (klaussCPU MMIO_MAP.md: cycles,
+instructions, the instruction mix, stall buckets, I-cache and D-cache
+misses) plus the refill handler's `tlb_refills`; a write clears them.
+`perfstat [-d N] command` (in `/usr/bin`) clears, runs the command and
+prints them, divided by N for a loop of N iterations. The counters are
+global, so run it on a quiet system. `sysloop MODE N` holds the
+microbenchmarks: `loop` (baseline), `enosys`, `getppid`, `tlb` (a chase
+through 32 pages), `fault`, `fork`, `exec`.
+
+**What the counters showed, and what changed:**
+- **The kernel's memset/memcpy/memmove were a byte at a time**
+  (lib/string.c), and `clear_page`/`copy_page` use them on 64 KiB pages:
+  140 000 stores per page fault. `arch/klausscpu/lib/string.c` goes a
+  doubleword at a time (a misaligned source is shifted into place), and
+  the user copies (`lib/uaccess.S`) move doublewords when the two sides
+  share alignment. Page fault 12.5 -> 5.4 ms, fork+exit 42.6 -> 19.4 ms.
+  KUnit `memcpy` (overlaps included), `string` and `usercopy` pass.
+- **Page tables were whole 64 KiB pages**, zeroed for every new process
+  (two or three per process, ~1.5 ms each, since the DDR moves about
+  40 MB/s). They are now 8 KiB fragments ("Pages and page tables").
+  fork+exit 19.3 -> 14.0 ms.
+- **System calls** skip the general exception dispatcher (a fast path in
+  `klausscpu_exc_vector`), and the save path stores `orig_r0` without a
+  reload: null syscall 4.7 -> 3.9 us.
+- **The TLB refill handler** keeps the pgd in `SCRATCH1` and drops two
+  loads; 1.39 -> 1.20 us. The rest is the hardware's (exception entry,
+  `TLBWI` serializing and discarding the fetch side, `IRET`), and real
+  programs rarely miss, so it was left there.
+- **The native SD driver** moved its FIFO words with
+  `put_unaligned_le64`, which is eight byte stores here (no unaligned
+  64-bit accesses). A whole aligned block now moves as doublewords. And
+  `sdinit` attaches the system and data images with loop direct I/O, so
+  their blocks aren't cached (and copied) a second time by vfat.
+- **`-O2` instead of `-Os`** for the kernel: same board, same tests,
+  stat 81 -> 61 us, read 10.9 -> 9.3 us, context switches 11% faster,
+  nothing slower; the text grows 0.6 MB.
+
+**What is left is mostly memory.** fork and exec are 60% memory-port
+waits: D-cache misses (a write miss fetches the line first; the DDR
+latency is ~610 ns) and I-cache misses (8 KiB, direct-mapped, against
+the kernel's fork/exec paths). A 64 KiB copy-on-write copy after fork is
+~1.5 ms of DDR traffic. Buffered reads of big blocks are bounded by
+copying at ~17 MB/s. Software can't change those much; candidates for
+the hardware: a write-allocate without fetch for whole-line stores, a
+non-blocking or prefetching D-cache, a larger I-cache, more LiteEth RX
+slots. vfat writes cost ~2300 instructions per 512-byte sector in the
+buffer-head layer.
+
+**bench.sh.** `lat_mem_rd` runs once per size on the board (its ~110
+sizes at lmbench's default 11 repetitions took far longer than the
+600 s limit), and the limit now also kills lmbench's measuring child
+(`pkill -P`), which had kept running after its parent was killed.
 
 ### Board checks: SD card speed
 
@@ -873,12 +936,27 @@ direct-mapped windows. RISC-V shows the generic syscall table and
 ### Pages and page tables
 
 - `PAGE_SIZE` = 64 KiB (`HAVE_PAGE_SIZE_64KB`), the only TLB page size.
-- PTEs are 8 bytes, 8192 per page, so one PTE page maps 512 MiB.
+- PTEs are 8 bytes. A PTE table is 1024 of them (8 KiB), mapping 64 MiB.
 - **Two levels**: pgd → pte (`asm-generic/pgtable-nopmd.h`).
-  `PGDIR_SHIFT` = 29, so the pgd has 8 entries covering 4 GiB.
-  - Four entries are user space and two are kmap.
-  - The first version allocates one pgd page; a small slab comes later.
-  - `pgd_alloc` copies the kernel (kmap) entries from `swapper_pg_dir`.
+  `PGDIR_SHIFT` = 26, so the pgd has 64 entries (512 bytes, kmalloc)
+  covering 4 GiB.
+  - 32 entries are user space and 12 are kmap.
+  - `pgd_alloc` copies the kernel (kmap) entries from `swapper_pg_dir`
+    (only for show: the refill handler walks `swapper_pg_dir` for kmap).
+- **PTE tables are fragments**: eight 8 KiB tables share a 64 KiB page,
+  handed out per mm (`mm/pgalloc.c`, after powerpc's
+  `pgtable-frag.c`), so `pgtable_t` is the table's address. The page is
+  not allocated zeroed; each table is zeroed as it is handed out.
+  - Why: with whole-page tables (8192 entries, 512 MiB each, the first
+    version) every new process zeroed two or three 64 KiB pages, about
+    1.5 ms each at the DDR's write speed. fork+exit fell from 19.3 to
+    14.0 ms, fork+execve from 35.0 to 26.2 ms, and all page tables on a
+    running system take about 0.7 MiB.
+  - Freed tables go back to their page at once, not after the
+    mmu_gather's flush. `free_pte_range` clears the pgd entry first, the
+    only walker is this CPU's refill handler (no SMP), and the TLB caches
+    no table pointers. SMP, THP or RCU table freeing would need the
+    deferred path (and `pte_free_defer`).
 - PTE low 32 bits = `TLB_LO` format: PFN [26:16], X [3], W [2], R [1], V [0].
   `MTSR tlb_lo` keeps only those bits, so the refill handler writes the PTE
   unmasked. Software bits are in [63:32]: PRESENT, DIRTY, YOUNG, SPECIAL,
@@ -896,10 +974,20 @@ direct-mapped windows. RISC-V shows the generic syscall table and
     has already switched to it, and in supervisor mode SP is a kernel stack.
     So the handler may push.
   - It picks the pgd by VA: `swapper_pg_dir` for kmap (≥ 0xC000_0000),
-    otherwise `pgd_current`, which `switch_mm` keeps in a variable.
-  - pte = pgd[VA >> 29] → [(VA >> 16) & 8191]. If PRESENT: `MTSR tlb_lo`,
-    then `TLBWI` at a round-robin index over the non-wired entries, then
-    `IRET`.
+    otherwise the current mm's, which `switch_mm` (and `head.S`) keep in
+    `SCRATCH1`, so finding it needs no memory load.
+  - pte = pgd[VA >> 26] → [(VA >> 16) & 1023]. If PRESENT: `MTSR tlb_lo`,
+    then `TLBWI` at a round-robin index (no wired entries), then `IRET`.
+    The index is a counter masked with 31: `TLB_INDEX` ignores the bits
+    above log2 N, so that serves every TLB size. The counter is never
+    masked in memory, so it also counts refills (`/proc/klausscpu_perf`
+    `tlb_refills`).
+  - Cost on the board: about 120 cycles per miss (1.20 us per access in
+    `sysloop tlb`, against 1.39 us before the tuning). Most of it is the
+    hardware's: the exception entry, `TLBWI` serializing and discarding the
+    fetch window, NLB and BTIC (about 35 cycles of fetch bubbles), and
+    `IRET`. Real programs rarely miss: CoreMark takes 32 refills in 1.8 s,
+    a 200 000-element Lua table 514 in 2 s, `ls -lR /usr` 37.
   - Otherwise it branches to the general exception path, which becomes
     `do_page_fault`.
   - TLB_HI already holds {VPN, ASID}; G is set for kmap.
@@ -921,15 +1009,18 @@ direct-mapped windows. RISC-V shows the generic syscall table and
   own short prologue. The handler unmasks the source when done, since
   entry auto-masked it.
 - **System calls** use the asm-generic syscall table (`unistd.h`, as
-  RISC-V/LoongArch/OpenRISC do).
+  RISC-V/LoongArch/OpenRISC do). After saving the registers,
+  `klausscpu_exc_vector` sends a SYSCALL from user mode straight to
+  `klausscpu_do_syscall`; everything else goes through
+  `klausscpu_do_exception`'s switch.
   - **ABI:** `SYSCALL` with the number in **r12**, arguments in **r0–r5**,
     result in **r12**.
   - The frame PC already points past `SYSCALL`, so restarting rewinds by 4.
   - `orig_r0` and `syscallno` are kept for restart and ptrace.
 - **`current`** lives in `SCRATCH0` (`mfsr`, one instruction), so no
   `-ffixed` register is needed (klausscpu-llvm doesn't support that).
-  `SCRATCH1` is free. With no MPU, the entry stub doesn't need scratch
-  registers for a guard-safe path.
+  `SCRATCH1` holds the current pgd for the refill handler. With no MPU,
+  the entry stub doesn't need scratch registers for a guard-safe path.
 - **Context switch.** `__switch_to` saves and restores R4–R7, R15, SP and
   the return address in `thread_struct`, plus `TP` (user TLS) and
   `SCRATCH0` (`current`). USP lives in each thread's `pt_regs`.
@@ -939,7 +1030,13 @@ direct-mapped windows. RISC-V shows the generic syscall table and
 - **uaccess.** The kernel touches user memory directly through useg (TLB
   R/W/X apply to supervisor too), with an `__ex_table` fixup on each
   accessing instruction. Faults inside them are restartable and precise
-  (§4.1).
+  (§4.1). The copies (`lib/uaccess.S`) move doublewords when both sides
+  share their alignment; a fault inside a doubleword group redoes that
+  group a byte at a time, so the count of bytes not copied is exact.
+- **memset, memcpy, memmove** (`lib/string.c`) go a doubleword at a time,
+  shifting a misaligned source into place. lib/string.c's are a byte at
+  a time, and `clear_page`/`copy_page` (64 KiB) use these: switching cut
+  a page fault from 12.5 to 5.4 ms and fork+exit from 42.6 to 19.4 ms.
 
 ### Time, interrupts, console
 
