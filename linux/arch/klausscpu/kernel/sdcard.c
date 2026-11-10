@@ -6,7 +6,9 @@
  * contiguous, so each goes to the card as one multi-block command, through
  * a bounce buffer that holds the largest request (max_hw_sectors).
  * Without a card, or on an emulator without the controller (its registers
- * read 0), the probe fails and no disk is registered.
+ * read 0), the probe fails and no disk is registered.  On bitstreams with
+ * the native 4-bit controller, sd_native.c drives the card instead (unless
+ * klausscpu_sd.native=0) and this driver registers nothing.
  *
  * Switches for A/B measurements, on by default (kernel command line
  * klausscpu_sd.<name>=0, or /sys/module/klausscpu_sd/parameters/<name>):
@@ -22,6 +24,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <asm/setup.h>
 #include "sd_spi.h"
 
 #undef MODULE_PARAM_PREFIX
@@ -112,6 +115,10 @@ static int __init klausscpu_sd_init(void)
 	sector_t sectors;
 	int err;
 
+	if (klausscpu_sd_use_native()) {
+		pr_info("klausscpu-sd: the native SD controller has the card\n");
+		return 0;
+	}
 	if (sd_spi_init()) {
 		pr_info("klausscpu-sd: no card\n");
 		return 0;

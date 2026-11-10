@@ -107,6 +107,17 @@ config KLAUSSCPU_SD
 	  The board's SD card slot.  Polled; the probe finds nothing on an
 	  emulator without the controller.
 
+config KLAUSSCPU_SDNATIVE
+	bool "Native 4-bit SD controller (mmc host)"
+	depends on MMC_BLOCK && KLAUSSCPU_SD
+	default y
+	help
+	  The SD controller's native mode on bitstreams that have it
+	  (CPU_FEATURES[21]): an mmc host, so the card is mmcblk0 through
+	  mmc_block, in 4-bit mode.  Where it is present, the SPI driver
+	  stands aside (klausscpu_sd.native=0 keeps SPI).  Elsewhere the
+	  probe finds nothing.
+
 config KLAUSSCPU_ETH
 	bool "LiteEth Ethernet (eth0)"
 	depends on NET

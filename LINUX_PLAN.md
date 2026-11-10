@@ -12,6 +12,9 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
   - SD transfers ported from Zephyr: a multi-block command per request
     (CMD18/CMD25, up to 64 KiB) and pipelined byte loops; `sd_spi.c`
     carries the protocol, host-tested by `linux/tools/sd_spi_test/`;
+  - the native 4-bit SD controller as an mmc host (`sd_native.c`) where
+    the bitstream has it, with interrupt source 2 as an Ethernet+SD
+    cascade; not run yet (no emulator model or bitstream so far);
   - the QSPI flash as read-only MTD (`qspi_flash.c`): its opcode check
     allows READ and RDID only, and partitions aren't writable;
   - ext4 and loop devices, for the root file system on the SD card.
@@ -253,6 +256,95 @@ How to read the results:
   cache.
 - `late_reads` above zero means the pipelined read loop sometimes reads
   late. Each such block costs one plain retry.
+
+### Native 4-bit SD controller (klaussCPU `mmu-sd`)
+
+`sd_native.c` drives the controller in klaussCPU SD_NATIVE_PLAN.md
+(register map v1, 951c62c) as an mmc host. The mmc core runs the card
+protocol, and mmc_block names the card `mmcblk0`. That is the name the
+SPI driver uses too, so `sdinit`, `install-rootfs` and `hostkey` work
+with either driver.
+
+Which driver runs:
+
+| Bitstream | Driver |
+|---|---|
+| `CPU_FEATURES[21]` set and `SDM_CAPS` ≠ 0 | native; the SPI driver logs `the native SD controller has the card` and registers nothing |
+| otherwise (older bitstreams, the emulator for now) | SPI, unchanged; the native driver finds nothing |
+
+`klausscpu_sd.native=0` keeps SPI on a native bitstream for A/B
+comparisons. The loader passes no command line, so add it to
+`CONFIG_CMDLINE` and rebuild.
+
+The interrupt cascade:
+- On a native bitstream, interrupt source 2 is a chained irqchip with two
+  children, masked through `INT2_EN` (0xF00F_0050). Child 0 is LiteEth,
+  child 1 is SD.
+- Boot logs `klausscpu-intc: source 2 cascades Ethernet and SD`, and
+  `/proc/interrupts` lists both children under `klausscpu-int2`.
+- Elsewhere, `INT2_*` read 0, so source 2 stays Ethernet's own line, as
+  before.
+
+The driver:
+- **Power and clock.** At probe it selects SD mode with the slot powered
+  off. `set_ios(POWER_UP)` waits until the slot has been off 20 ms
+  (≥ 10 ms is needed; to be measured), then powers it.
+  `set_ios(POWER_ON)` sets `CLK_ON`, so the clock runs freely during the
+  core's `power_delay_ms` (≥ 74 clocks). The first request clears it.
+- **Clock rates.** The clock runs at 400 kHz during identification, then
+  25 MHz. High speed (50 MHz) waits for phase 3.
+- **Bus.** 4-bit when `SDM_CAPS[8]` is set. It handles SD cards only
+  (no SDIO or MMC probing).
+- **Requests.** A threaded IRQ handler runs each request: CMD23 when the
+  card supports it, then the command and its data, then CMD12.
+  - CMD12 is always sent as R1b with `SDM_CMD[13]` set.
+  - Data moves by PIO, one block per FIFO_THRESH, through `sg_miter`.
+  - Errors map to -ETIMEDOUT (timeouts, no CRC token) and -EILSEQ
+    (CRC, end bit, index, write CRC token).
+  - `bytes_xfered` = `SDM_BLKDONE` × block size, after the good blocks of a
+    failed read have been drained.
+  - A watchdog fails a request that never completes, instead of hanging
+    the mmc core.
+- **Unsupported block sizes.** Block sizes that aren't multiples of 8 are
+  refused with -EINVAL. The core's only such request is ACMD22's 4 bytes,
+  sent after a write error to count the blocks written. Refusing it makes
+  the core redo the whole write. (Question for the CPU session: could the
+  data engine take a 4-byte block?)
+- **Card changes.** The driver doesn't poll for card changes: insert the
+  card before boot.
+- **Boot wait.** The mmc core finds the card asynchronously. When an mmc
+  host exists, `sdinit` waits up to 3 s for `/dev/mmcblk0p1`.
+
+The SPI driver now powers the slot off for 20 ms, in SPI mode
+(`SD_CTRL[18]` = 0), before its first CMD0. This follows plan §4.1: a
+load after native mode resets the controller, but only that power cycle
+reliably resets a card left in any state.
+
+Status: it builds (W=1 clean) and is probe-safe on the emulator (the
+`busybox`, `rootfs` and `ssh` modes pass with the cascade off). It hasn't
+run yet:
+- the emulator's native SD model is coming;
+- after that, the board on a `mmu-sd` bitstream.
+
+An independent review of the driver against the plan found:
+- ACMD22's 4-byte block (fixed as above);
+- commands that could start while the engine was busy (now refused);
+- a `jiffies` race in the power-up wait;
+- a missing `MMC_BLOCK` dependency.
+
+All four are fixed.
+
+Board check, on a native bitstream:
+- dmesg: `klausscpu-sdnative ...: native SD controller v1, 8-block FIFO,
+  4-bit, IRQ N`, `mmc0: new SDHC card at address ...`, then
+  `mmcblk0: mmc0:... p1`.
+- `cat /sys/class/mmc_host/mmc0/mmc0:*/type` (SD) and
+  `cat /sys/kernel/debug/mmc0/ios`, if debugfs is mounted: the clock and
+  the 4-bit bus.
+- The SD speed benchmark above. It reads `/dev/mmcblk0` and writes only
+  `/linux/bench`; the `klausscpu_sd` switches apply to SPI only.
+- Compare with SPI on the same bitstream: rebuild with
+  `klausscpu_sd.native=0` in `CONFIG_CMDLINE`.
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:

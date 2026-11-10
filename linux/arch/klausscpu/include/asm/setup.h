@@ -12,6 +12,16 @@ struct task_struct;
 void klausscpu_early_console_init(void);
 void klausscpu_handle_irq(unsigned int hwirq);
 unsigned int klausscpu_irq(unsigned int hwirq);
+/* A device on interrupt source 2 (KL_INT2_ETH, KL_INT2_SD): its child IRQ
+ * of the cascade, or source 2 itself (Ethernet) on bitstreams without it. */
+unsigned int klausscpu_int2_irq(unsigned int child);
+extern unsigned long klausscpu_cpu_features;
+#ifdef CONFIG_KLAUSSCPU_SDNATIVE
+/* The native SD controller is present and in use: the SPI driver stays off. */
+bool klausscpu_sd_use_native(void);
+#else
+static inline bool klausscpu_sd_use_native(void) { return false; }
+#endif
 void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr);
 asmlinkage void klausscpu_ret_from_fork(struct task_struct *prev, struct pt_regs *regs,
 					int (*fn)(void *), void *arg);

@@ -80,6 +80,11 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define KL_TIMER_CNT		0x38
 #define KL_CLOCK_MS		0x40
 #define KL_CPU_FEATURES		0x48
+/* Source 2's cascade (bitstreams with the native SD controller). */
+#define KL_INT2_EN		0x50	/* [0] Ethernet, [1] SD; reset 0b01 */
+#define KL_INT2_PEND		0x58	/* raw, before INT2_EN */
+#define KL_INT2_ETH		0
+#define KL_INT2_SD		1
 #define KL_NR_IRQS		4
 #define KL_IRQ_TIMER		0
 
@@ -87,6 +92,7 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define CPU_FEAT_TLB		0x4
 #define CPU_FEAT_LRSC		0x8
 #define CPU_FEAT_TLB_ENTRIES(f)	(((f) >> 8) & 0xff)
+#define CPU_FEAT_SDNATIVE	(1UL << 21)	/* native SD controller, INT2 cascade */
 
 #ifndef __ASSEMBLER__
 

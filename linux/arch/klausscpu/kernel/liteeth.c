@@ -44,7 +44,6 @@
 #define RX_SLOTS	2
 #define TX_SLOT0	(ETH_SRAM + 2 * SLOT_SIZE)
 #define SCRATCH_RESET	0x12345678
-#define IRQ_ETH		2
 
 #define MDIO_MDC	1
 #define MDIO_OE		2
@@ -330,7 +329,7 @@ static int __init kl_eth_init(void)
 	INIT_DELAYED_WORK(&priv->link_work, kl_eth_link);
 	netif_napi_add(ndev, &priv->napi, kl_eth_poll);
 	ndev->netdev_ops = &kl_eth_ops;
-	ndev->irq = klausscpu_irq(IRQ_ETH);
+	ndev->irq = klausscpu_int2_irq(KL_INT2_ETH);	/* source 2, or its cascade */
 	ndev->max_mtu = ETH_DATA_LEN;
 	eth_hw_addr_set(ndev, mac);
 	err = register_netdev(ndev);

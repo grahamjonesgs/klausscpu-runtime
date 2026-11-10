@@ -35,6 +35,7 @@ extern volatile unsigned long jiffies;
 #define cpu_relax()			((void)0)
 #define udelay(us)			((void)0)
 #define usleep_range(a, b)		((void)0)
+#define msleep(ms)			((void)0)
 
 extern int model_verbose;
 extern unsigned long model_log_lines;

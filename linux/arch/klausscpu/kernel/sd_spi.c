@@ -29,6 +29,12 @@
 #define SD_CTRL_PWR_ON	(1u << 17)
 #define SD_CLK_INIT	249		/* ~200 kHz */
 #define SD_CLK_FAST	1		/* ~25 MHz */
+/*
+ * Power off before the first CMD0 (SD_NATIVE_PLAN 4.1): the card may have
+ * been left in native SD mode, or in any state, by the last program.
+ * At least 10 ms; the slot's capacitance decides, to be measured.
+ */
+#define SD_POWER_OFF_MS	20
 
 /* SD spec, SPI mode: read access <= 100 ms, write busy <= 250 ms (SDHC),
  * 500 ms (SDXC); with margin. */
@@ -226,6 +232,8 @@ int sd_spi_init(void)
 	int i;
 	u8 ocr;
 
+	writel(SD_CLK_INIT | SD_CTRL_CS_HI, reg(SD_CTRL));	/* SPI mode, power off */
+	msleep(SD_POWER_OFF_MS);
 	writel(SD_CLK_INIT | SD_CTRL_CS_HI | SD_CTRL_PWR_ON, reg(SD_CTRL));
 	usleep_range(1000, 2000);
 	for (i = 0; i < 10; i++)

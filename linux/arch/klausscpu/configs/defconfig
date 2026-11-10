@@ -66,3 +66,5 @@ CONFIG_PRINTK_TIME=y
 # function-pointer parameters that blkdev.h uses with this on.
 # CONFIG_WARN_CONTEXT_ANALYSIS is not set
 CONFIG_CMDLINE="console=hvc0 rdinit=/init"
+CONFIG_MMC=y
+CONFIG_MMC_BLOCK=y

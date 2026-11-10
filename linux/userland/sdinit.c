@@ -10,6 +10,7 @@
  * /mnt/sd/linux/rootfs.img on mmcblk0p1.  After the switch the card stays
  * mounted at /mnt (the image file lives on it).
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/loop.h>
@@ -65,6 +66,26 @@ static int loop_attach(const char *image, char *dev, size_t devlen)
 	return lfd;
 }
 
+/*
+ * The native SD controller's card comes through the mmc core, which finds
+ * it asynchronously, maybe after /init starts; the SPI driver's disk is
+ * there before.  With an mmc host present, wait a little for the partition.
+ */
+static void wait_for_card(void)
+{
+	struct dirent *e;
+	DIR *d = opendir("/sys/class/mmc_host");
+	int i, hosts = 0;
+
+	if (!d)
+		return;
+	while ((e = readdir(d)))
+		hosts += e->d_name[0] != '.';
+	closedir(d);
+	for (i = 0; hosts && i < 30 && access("/dev/mmcblk0p1", F_OK); i++)
+		usleep(100000);
+}
+
 static int try_root(const char *image)
 {
 	char dev[32];
@@ -106,6 +127,7 @@ int main(void)
 	if (try_root("/test/rootfs.img")) {
 		mkdir("/mnt", 0755);
 		mkdir("/mnt/sd", 0755);
+		wait_for_card();
 		if (mount("/dev/mmcblk0p1", "/mnt/sd", "vfat", 0, "utf8") == 0) {
 			sd = 1;
 			/* An update staged by install-rootfs while this image was
