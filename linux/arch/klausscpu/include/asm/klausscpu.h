@@ -66,6 +66,10 @@
 #define KL_UART_STATUS		0x10
 #define KL_UART_TX_BUSY		0x1
 #define KL_UART_RX_EMPTY	0x2
+
+#ifndef __ASSEMBLY__
+void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
+#endif
 #define KL_CACHE_BASE		(MMIO_BASE + 0x00050000UL)
 #define KL_CACHE_ICACHE_INV	0x8
 #define KL_INTC_BASE		(MMIO_BASE + 0x000F0000UL)

@@ -61,6 +61,7 @@ static irqreturn_t kl_timer_interrupt(int irq, void *dev_id)
 {
 	struct clock_event_device *ced = dev_id;
 
+	kl_uart_rx_poll();	/* the UART has no RX interrupt (hvc_uart.c) */
 	ced->event_handler(ced);
 	return IRQ_HANDLED;
 }
