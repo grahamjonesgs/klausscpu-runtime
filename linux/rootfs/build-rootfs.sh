@@ -68,6 +68,17 @@ if [ -x "$DB" ]; then
     ln -s ../sbin/dropbearmulti "$ST/usr/bin/$p"
   done
 fi
+# Ports (linux/userland/<pkg>.sh), each when built, and their self-tests in
+# /usr/share/klausscpu/tests (linux/userland/tests; run them on the board).
+T=$ST/usr/share/klausscpu/tests
+mkdir -p "$T"
+if [ -x "$WS/lua-build/lua" ]; then
+  cp "$WS/lua-build/lua" "$WS/lua-build/luac" "$ST/usr/bin/"
+  cp -r "$WS/lua-tests" "$T/lua"
+  rm -rf "$T/lua/libs" "$T/lua/ltests"
+  install -m 755 "$RT/linux/userland/tests/lua-tests.sh" "$T/"
+  cp "$RT/linux/userland/tests/lua-selftest.lua" "$T/"
+fi
 cp "$INI/inittab" "$INI/profile" "$ST/etc/"
 cp "$INI/rcS" "$INI/hostkey" "$ST/etc/init.d/"
 cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"

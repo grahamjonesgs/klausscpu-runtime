@@ -43,6 +43,11 @@
 #                    write busy that never ends, a bad read block, a
 #                    command timeout) on a fresh card, write and read back
 #                    a 2 MiB file, and check its hash and fsck.fat
+#   ports            the ported programs (linux/userland/<pkg>.sh: lua, ...),
+#                    each built here if it isn't yet, in a system image that
+#                    sdinit boots from the initramfs with a data image at
+#                    /data; one boot per port runs its self-test from
+#                    /usr/share/klausscpu/tests
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -54,7 +59,7 @@ EMU_ARGS=()
 . "$(dirname "$0")/common.sh"
 [ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|ports|m3) ;; *) die "unknown mode $MODE" ;; esac
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 SD=0
 case $MODE in sd-*) SD=1 ;; esac
@@ -70,11 +75,11 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
@@ -101,6 +106,21 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
     "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 ||
       { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
     printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
+  fi
+  if [ "$MODE" = ports ]; then
+    # Each port: linux/userland/<pkg>.sh, run if its binary isn't built.
+    for p in lua:lua-build/lua; do
+      if [ ! -x "$RT/linux-ws/${p#*:}" ]; then
+        "$RT/linux/userland/${p%%:*}.sh" >"$OUT/${p%%:*}.log" 2>&1 ||
+          { echo "FAIL ${p%%:*} build (see $OUT/${p%%:*}.log)"; exit 1; }
+      fi
+    done
+    "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 24 >"$OUT/rootfs.log" 2>&1 &&
+      "$RT/linux/rootfs/build-data.sh" "$OUT/data.img" 8 >>"$OUT/rootfs.log" 2>&1 ||
+      { echo "FAIL rootfs/data images (see $OUT/rootfs.log)"; exit 1; }
+    printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\nfile /test/data.img %s 0644 0 0\n' \
+      "$OUT/rootfs.img" "$OUT/data.img" >"$OUT/extra.list"
     export INITRAMFS_EXTRA=$OUT/extra.list
   fi
   if [ $SD = 1 ]; then
@@ -491,6 +511,14 @@ EOF2
     done
   else
     echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
+  fi
+elif [ "$MODE" = ports ]; then
+  # One boot per built port; each self-test ends with known lines.
+  if [ -x "$RT/linux-ws/lua-build/lua" ]; then
+    echo /usr/share/klausscpu/tests/lua-tests.sh >"$OUT/lua.in"
+    printf '%s\n' 'sdinit: data.img mounted read-write at /data' \
+      'lua-tests: 19/19 passed' 'lua-selftest: PASS' 'luac lua-selftest: PASS' >"$OUT/lua.expect"
+    run_step lua 60000000000 2400 '$ '
   fi
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
