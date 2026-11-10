@@ -10,33 +10,51 @@
 # CoreMark counts a run shorter than 10 s as an error ("Errors detected"),
 # so the quick run is checked by its CRCs instead (list 0xe714, matrix
 # 0x1fd7, state 0x8e3a for these seeds).
+#
+# Every benchmark runs under a time limit (busybox here has no timeout
+# applet), so one that hangs is reported and the rest still run.  lmbench's
+# tlb gets -M: its default search goes to 16384 pages, which with 64 KiB
+# pages is 1 GiB, far beyond the board's 128 MiB (it stalled the board run
+# after lat_mem_rd); 8 MiB is 128 pages, 8x the TLB's 16 entries.
 L=/usr/libexec/lmbench
+limit() { # <seconds> <command...>: run it, killed after that long
+	s=$1
+	shift
+	"$@" &
+	p=$!
+	( sleep "$s"; kill "$p" 2>/dev/null && echo "bench: ${1##*/} stopped after $s s" ) &
+	w=$!
+	wait "$p"
+	r=$?
+	kill "$w" 2>/dev/null
+	return $r
+}
 if [ "${1:-}" = quick ]; then
 	N="-N 1 -W 0"; CM="0x0 0x0 0x66 20"; MEM=64k; MEMRD=1; CTX="2 4"
-	TLBM="-M 1M"; TLBA=100000
+	TLBM="-M 1M"; TLBA=100000; T=900
 else
-	N=""; CM=""; MEM=8m; MEMRD=32; CTX="2 4 8 16"; TLBM=""; TLBA=2000000
+	N=""; CM=""; MEM=8m; MEMRD=32; CTX="2 4 8 16"; TLBM="-c -M 8M"; TLBA=2000000; T=600
 fi
 echo "== coremark $CM"
-coremark $CM 2>&1
+limit $T coremark $CM 2>&1
 cp "$L/hello" /tmp/hello
 echo "== lat_syscall"
-for s in null read write; do "$L/lat_syscall" $N $s 2>&1; done
-"$L/lat_syscall" $N stat /tmp 2>&1
-"$L/lat_syscall" $N open /tmp 2>&1
+for s in null read write; do limit $T "$L/lat_syscall" $N $s 2>&1; done
+limit $T "$L/lat_syscall" $N stat /tmp 2>&1
+limit $T "$L/lat_syscall" $N open /tmp 2>&1
 echo "== lat_proc"
-for p in fork exec shell; do "$L/lat_proc" $N $p 2>&1; done
+for p in fork exec shell; do limit $T "$L/lat_proc" $N $p 2>&1; done
 echo "== lat_ctx"
-"$L/lat_ctx" $N -s 0 $CTX 2>&1
+limit $T "$L/lat_ctx" $N -s 0 $CTX 2>&1
 echo "== lat_pagefault"
-head -c 4194304 /dev/zero >/tmp/pf && "$L/lat_pagefault" $N /tmp/pf 2>&1
+head -c 4194304 /dev/zero >/tmp/pf && limit $T "$L/lat_pagefault" $N /tmp/pf 2>&1
 rm -f /tmp/pf
 echo "== bw_mem $MEM"
-for w in rd wr cp bcopy; do printf '%s ' $w; "$L/bw_mem" $N $MEM $w 2>&1; done
+for w in rd wr cp bcopy; do printf '%s ' $w; limit $T "$L/bw_mem" $N $MEM $w 2>&1; done
 echo "== lat_mem_rd ${MEMRD}M stride 64"
-"$L/lat_mem_rd" $N $MEMRD 64 2>&1
+limit $T "$L/lat_mem_rd" $N $MEMRD 64 2>&1
 echo "== tlb $TLBM"
-"$L/tlb" $N $TLBM 2>&1
+limit $T "$L/tlb" $N $TLBM 2>&1
 echo "== tlbmiss"
-tlbmiss 64 $TLBA
+limit $T tlbmiss 64 $TLBA
 echo "bench: done"
