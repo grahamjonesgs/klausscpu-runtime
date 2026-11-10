@@ -25,6 +25,17 @@
 #   rootfs           sdinit switches to an ext4 rootfs image (linux/rootfs/
 #                    build-rootfs.sh) loop-mounted from the initramfs
 #                    (the SD card's /linux/rootfs.img on the board)
+#   sd-spi           (emulator) an SD card image (klausscc --sd-image: MBR,
+#                    one FAT32 partition) through the SPI driver, in two
+#                    boots: (1) from the initramfs, install-rootfs writes
+#                    the rootfs image to /linux/ on the card, which is read
+#                    back after dropping caches (also with the multiblock
+#                    and pipeline switches off), then the raw device is
+#                    hashed and compared with the image file; (2) sdinit
+#                    switches to the card's /linux/rootfs.img.  fsck.fat
+#                    checks the card between the boots
+#   sd-native        the same through the native 4-bit controller
+#                    (klausscc --sd-native) and the mmc host driver
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -32,11 +43,17 @@
 # (<outdir>/<step>.out has the run, <outdir>/<step>.expect the lines).
 # Needs linux-ws/linux (linux/fetch.sh).  Exits 1 on any failure.
 set -uo pipefail
+EMU_ARGS=()
 . "$(dirname "$0")/common.sh"
-[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|rootfs|m3] [emu|board]"
+[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|net|keystore|rootfs|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|m3) ;; *) die "unknown mode $MODE" ;; esac
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
+SD=0
+case $MODE in sd-*) SD=1 ;; esac
+[ $SD = 0 ] || [ "$WHERE" = emu ] || die "$MODE runs on the emulator (on the board the card holds real files)"
+[ $SD = 0 ] || "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--sd-native' ||
+  die "$KLAUSSCC has no --sd-image/--sd-native: build klausscc's mmu branch"
 case $WHERE in emu|board) ;; *) die "unknown target $WHERE" ;; esac
 "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--uart-prompt' ||
   die "$KLAUSSCC has no --uart-prompt: build klausscc's mmu branch and set KLAUSSCC"
@@ -46,11 +63,11 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
@@ -78,6 +95,22 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
     printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
     export INITRAMFS_EXTRA=$OUT/extra.list
+  fi
+  if [ $SD = 1 ]; then
+    # The rootfs image rides in the initramfs as /seed/rootfs.img (not
+    # /test, which sdinit would boot); the card starts with an empty FAT32
+    # partition at sector 2048, as on the board's card.
+    "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 ||
+      { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
+    printf 'dir /seed 0755 0 0\nfile /seed/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
+    CARD=$OUT/card.img
+    truncate -s 64M "$CARD" &&
+      echo 'start=2048, type=c' | sfdisk -q "$CARD" >"$OUT/card.log" 2>&1 &&
+      mkfs.vfat -F 32 -s 1 -n KLAUSSCPU --offset 2048 "$CARD" $(( 65536 - 1024 )) >>"$OUT/card.log" 2>&1 ||
+      { echo "FAIL card image (see $OUT/card.log)"; exit 1; }
+    EMU_ARGS=(--sd-image "$CARD")
+    [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native)
   fi
   export INITRAMFS_PROFILE=busybox
 elif [ "$MODE" = m3 ]; then
@@ -111,7 +144,7 @@ run_step() {
       "${input[@]}" </dev/null >"$OUT/$1.out" 2>&1
   else
     timeout "$3" "$KLAUSSCC" -i "$OUT/vmlinux" --emulate --max-instructions "$2" \
-      "${input[@]}" </dev/null >"$OUT/$1.out" 2>&1
+      "${EMU_ARGS[@]}" "${input[@]}" </dev/null >"$OUT/$1.out" 2>&1
     if [ -n "${4:-}" ]; then
       grep -aq 'stop = InputDone' "$OUT/$1.out" || bad "$1: the session did not finish ($(grep -ao 'stop = [A-Za-z]*' "$OUT/$1.out"))"
     fi
@@ -208,6 +241,80 @@ ext4
 musltest: PASS
 EOF2
   run_step rootfs 20000000000 900 '$ '
+elif [ $SD = 1 ]; then
+  P=/sys/module/klausscpu_sd/parameters
+  SHA=$(sha256sum "$OUT/rootfs.img" | cut -c1-16)
+  HEAD=$(head -c 262144 "$OUT/rootfs.img" | sha256sum | cut -c1-16)
+  # Boot 1: the card has no image yet, so sdinit stays in the initramfs.
+  {
+    echo 'cat /sys/class/block/mmcblk0p1/start'
+    echo 'install-rootfs - < /seed/rootfs.img'
+    echo 'sync; echo 3 > /proc/sys/vm/drop_caches; sha256sum /mnt/linux/rootfs.img | cut -c1-16'
+    if [ "$MODE" = sd-spi ]; then
+      echo "echo 0 > $P/pipeline; echo 0 > $P/multiblock; echo 3 > /proc/sys/vm/drop_caches"
+      echo 'sha256sum /mnt/linux/rootfs.img | cut -c1-16'
+      echo 'head -c 262144 /seed/rootfs.img > /mnt/linux/b.bin; sync; echo 3 > /proc/sys/vm/drop_caches'
+      echo "echo 1 > $P/pipeline; echo 1 > $P/multiblock"
+      echo 'sha256sum /mnt/linux/b.bin | cut -c1-16'
+      echo "cat $P/late_reads $P/multi_fallbacks $P/retries"
+    else
+      echo 'head -c 262144 /seed/rootfs.img > /mnt/linux/b.bin; sync; echo 3 > /proc/sys/vm/drop_caches'
+      echo 'sha256sum /mnt/linux/b.bin | cut -c1-16'
+    fi
+    echo 'umount /mnt; head -c 8388608 /dev/mmcblk0 | sha256sum | cut -c1-16'
+  } >"$OUT/sd1.in"
+  {
+    # Probe lines come before /init.
+    if [ "$MODE" = sd-spi ]; then
+      echo 'klausscpu-sd: mmcblk0, 64 MiB (SDHC/SDXC), multiblock 1, pipeline 1'
+    else
+      echo 'klausscpu-intc: source 2 cascades Ethernet and SD'
+      echo 'klausscpu-sd: the native SD controller has the card'
+      echo 'klausscpu-sdnative klausscpu-sdnative: native SD controller v1, 8-block FIFO, 4-bit, IRQ 3'
+      echo 'mmc0: new SDHC card at address 1234'
+    fi
+    echo 'Run /init as init process'
+    echo 'sdinit: no usable /linux/rootfs.img on the SD card'
+    echo 'sdinit: staying in the initramfs'
+    echo 'cat /sys/class/block/mmcblk0p1/start'
+    echo '2048'
+    echo 'install-rootfs: /linux/rootfs.img installed; reboot to use it'
+    echo "$SHA"
+    if [ "$MODE" = sd-spi ]; then
+      echo "$SHA"
+      echo "$HEAD"
+      echo '0'
+      echo '0'
+      echo '0'
+    else
+      echo "$HEAD"
+    fi
+  } >"$OUT/sd1.expect"
+  run_step sd1 100000000000 3000 '$ '
+  # The raw read of the card's first 8 MiB, against the image file.
+  RAW=$(head -c 8388608 "$CARD" | sha256sum | cut -c1-16)
+  grep -aq "$RAW" "$OUT/sd1.out" || bad "sd1: the raw read of mmcblk0 differs from the card image ($RAW)"
+  dd if="$CARD" of="$OUT/part.img" bs=512 skip=2048 status=none &&
+    fsck.fat -n "$OUT/part.img" >"$OUT/fsck.log" 2>&1 || bad "sd1: fsck.fat on the card's partition (see $OUT/fsck.log)"
+  rm -f "$OUT/part.img"
+
+  # Boot 2: sdinit switches to the card's image.
+  cat >"$OUT/sd2.in" <<'EOF2'
+cut -d' ' -f1 /etc/klausscpu-rootfs
+grep ' / ' /proc/mounts | cut -d' ' -f1,3
+ls /mnt/linux/rootfs.img
+echo persist > /root/t; sync; cat /root/t
+/usr/bin/musltest | tail -1
+EOF2
+  cat >"$OUT/sd2.expect" <<'EOF2'
+sdinit: switching to the SD card's root file system
+klausscpu-rootfs
+/dev/loop0 ext4
+/mnt/linux/rootfs.img
+persist
+musltest: PASS
+EOF2
+  run_step sd2 60000000000 2400 '$ '
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
   # dropbearconvert converts the PEM, and Dropbear's fingerprint must be

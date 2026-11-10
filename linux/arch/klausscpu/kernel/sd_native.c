@@ -278,8 +278,9 @@ static int ksd_pio(struct ksd_host *h, unsigned int limit)
 
 /*
  * Start cmd.  The controller ignores SDM_CMD while CMD_BUSY is set, and a
- * command other than CMD12 must not overlap a data phase: refuse (-EBUSY)
- * rather than take a later completion for this command's.
+ * data command while DATA_BUSY is (plan 4.8; other commands, CMD12
+ * included, may run during a data phase): refuse (-EBUSY) rather than take
+ * a later completion for this command's.
  */
 static int ksd_send(struct ksd_host *h, struct mmc_command *cmd)
 {
@@ -288,7 +289,7 @@ static int ksd_send(struct ksd_host *h, struct mmc_command *cmd)
 	unsigned int type;
 	u64 v;
 
-	if (cmd->opcode != MMC_STOP_TRANSMISSION)
+	if (cmd->data)
 		busy |= ST_DATA_BUSY;
 	if (rd(h, SDM_STATUS) & busy) {
 		dev_err(mmc_dev(h->mmc), "CMD%u: controller still busy (STATUS %llx)\n",
@@ -516,7 +517,12 @@ static void ksd_watchdog(struct work_struct *work)
 			mrq->cmd->error = -ETIMEDOUT;
 		else
 			mrq->data->error = -ETIMEDOUT;
+		/* Clearing SD_MODE makes both engines abandon what they are
+		 * doing (plan 4.8); the core's recovery starts from there. */
+		wr(h, SD_CTRL, rd(h, SD_CTRL) & ~CTRL_SD_MODE);
+		ksd_write_ctrl(h);
 		wr(h, SDM_FIFO, FIFO_RESET);
+		wr(h, SDM_STATUS, ST_STICKY);
 		done = ksd_finish(h);
 	}
 	mutex_unlock(&h->lock);

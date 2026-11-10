@@ -14,7 +14,8 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
     carries the protocol, host-tested by `linux/tools/sd_spi_test/`;
   - the native 4-bit SD controller as an mmc host (`sd_native.c`) where
     the bitstream has it, with interrupt source 2 as an Ethernet+SD
-    cascade; not run yet (no emulator model or bitstream so far);
+    cascade. It passes on the klausscc SD model (`linux.sh <out>
+    sd-native`, and `sd-spi` for SPI) and awaits an `mmu-sd` bitstream;
   - the QSPI flash as read-only MTD (`qspi_flash.c`): its opcode check
     allows READ and RDID only, and partitions aren't writable;
   - ext4 and loop devices, for the root file system on the SD card.
@@ -320,11 +321,33 @@ The SPI driver now powers the slot off for 20 ms, in SPI mode
 load after native mode resets the controller, but only that power cycle
 reliably resets a card left in any state.
 
-Status: it builds (W=1 clean) and is probe-safe on the emulator (the
-`busybox`, `rootfs` and `ssh` modes pass with the cascade off). It hasn't
-run yet:
-- the emulator's native SD model is coming;
-- after that, the board on a `mmu-sd` bitstream.
+Status:
+- It builds W=1 clean. On bitstreams without the controller the probe
+  finds nothing, and the `busybox`, `rootfs` and `ssh` modes pass.
+- It runs on the klausscc SD model (5e73d28: `--sd-image FILE`, plus
+  `--sd-native` for this controller): `tools/validate/linux.sh <out>
+  sd-native`, and `sd-spi` for the SPI driver on the same card. The
+  emulator must be the build with the SD model; set
+  `KLAUSSCC=~/.cache/klausscc-mmu-bin/klausscc`.
+- Each SD mode makes a 64 MiB card image in `<out>/card.img`: an MBR,
+  with one FAT32 partition from sector 2048. It then boots twice.
+
+  Boot 1 starts from the initramfs, since there is no image on the card
+  yet:
+  - `install-rootfs -` writes the 16 MiB rootfs image to `/linux/`
+    through vfat;
+  - after `drop_caches`, its SHA-256 matches;
+  - in `sd-spi`, it also matches with multiblock and pipeline off, and a
+    256 KiB file written with the switches off reads back the same;
+  - after `umount`, the hash of the first 8 MiB of raw `/dev/mmcblk0`
+    equals the image file's;
+  - `fsck.fat -n` is clean.
+
+  Boot 2: sdinit loop-mounts the card's `/linux/rootfs.img` as `/`. A
+  file written there is synced, and musltest passes.
+- Boot 1 takes 4.0 G emulated instructions with the native driver and
+  6.1 G over SPI. The emulator doesn't model bus speed, so the board
+  numbers are what count.
 
 An independent review of the driver against the plan found:
 - ACMD22's 4-byte block (fixed as above);
