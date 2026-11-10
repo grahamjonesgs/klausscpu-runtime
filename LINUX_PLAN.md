@@ -379,7 +379,7 @@ kernel, and our initramfs, `sdinit`, `rcS` and layout stay.
 
 ```
 linux/buildroot/build.sh                       # all packages
-ROOTFS_BUILDROOT=1 linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 96
+ROOTFS_BUILDROOT=1 linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 256
 ```
 
 This merges `bin`, `sbin` and `usr` from `rootfs.tar`:
@@ -388,9 +388,13 @@ This merges `bin`, `sbin` and `usr` from `rootfs.tar`:
 - It never replaces one of our own files.
 - Buildroot's `/etc`, headers and static libraries stay out.
 
-**Emulator check.** `tools/validate/linux.sh <out> buildroot` boots that
-image, as the ports mode does, and runs `tests/buildroot-test.sh`. All
-10/10 pass. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output`, and
+**Emulator check.** `tools/validate/linux.sh <out> buildroot` booted that
+image from the initramfs, as the ports mode does, and ran
+`tests/buildroot-test.sh` (10/10 with the first packages). With the
+development tools the image holds ~160 MiB, more than the emulated
+machine's 128 MiB of RAM, so the mode now stops and says so; the check is
+`buildroot-test.sh` on the board (40/40). Putting the image on an emulated
+SD card instead needs a FAT writer (mtools) on the PC. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output`, and
 `LINUX_BUILDROOT_EXPECT=N` requires at least N packages.
 
 **Applets win in the shell.** The busybox shell is built with
@@ -413,6 +417,54 @@ doesn't need the setting.
 | htop | 3.4.1 | `--version` |
 | tmux | 3.6a (libevent 2.1.12) | a detached session, `ls`, `kill-server` |
 | strace | 6.19 | see below |
+
+**Development and test tools (2026-11-11).** All checked by
+`buildroot-test.sh` on the board, each with a small real use:
+
+| Area | Packages (check) |
+|---|---|
+| shell, scripting, editing | bash 5.2 (arrays, arithmetic), bc (`4*a(1)`), gawk 5.3, diffutils 3.12 (`diff -u`, `cmp`), make 4.4 (a rule runs), vim 9.1 (ex mode writes a file), ncdu, dos2unix |
+| archives | xz 5.8, bzip2, zstd 1.5.7 (round trips) |
+| files and disks | rsync 3.4 (`-a` with a symlink), e2fsprogs (mke2fs, e2fsck, debugfs on an image), dosfstools (mkfs.fat, fsck.fat), util-linux 2.41 (lsblk, findmnt, lscpu, dmesg, fdisk...) |
+| processes | procps-ng (ps, free, vmstat, top), psmisc (pstree, killall), lsof, sysstat (iostat, mpstat) |
+| network | iproute2 (`ip`, `ss`), tcpdump 4.99 (ICMP on lo), socat (a TCP echo), ethtool, OpenSSH 10 (ssh, scp, sftp, ssh-keygen, and **sftp-server**, which Dropbear runs for SFTP: modern `scp` needs it), git 2.x with HTTPS (libcurl + OpenSSL) |
+| testing | stress-ng 0.20 (cpu and vm stressors), fio 3.41 (hand-built, `linux/userland/fio.sh`: Buildroot's needs shared libraries; random read/write with crc32c verify), memtester, dhrystone (180 505/s, ~103 DMIPS), whetstone |
+
+What it took:
+- **Thread-local storage.** libpcap and procps-ng use `__thread`. klausscpu-llvm
+  gained TLS for `klausscpu-*-linux-*` (local-exec: `mfsr rT, tp` plus a
+  `%tprel` offset, `R_KLAUSSCPU_TPREL32`, variant II like x86-64 to match
+  musl's layout; llvm 84822afa). musl needed a fix too:
+  `src/env/__init_tls.c` chose `Elf64_Phdr` from `ULONG_MAX`, but KlaussCPU
+  binaries are ELF32 with a 64-bit `long`, so it misread the program headers.
+  That was harmless until a binary had a `PT_TLS` segment: the TLS size came
+  out at ~1e15 and startup crashed. `linux/musl/src/env/klausscpu/__init_tls.c`
+  uses `Elf32_Phdr`.
+- **gnulib's stack direction** (`external.mk`): gnulib's sigsegv/c-stack
+  code (diffutils, gawk, ...) can't run a test when cross-compiling and knows
+  the direction only for listed CPUs, so the cache variables say it grows
+  down.
+- **An empty `libatomic.a`** (`toolchain.sh`): stress-ng links `-latomic`;
+  KlaussCPU's atomics are inline or musl's `__sync_*`.
+- **git** installs every built-in as its own copy of the 3.9 MB binary (550 MB
+  in all): `SKIP_DASHED_BUILT_INS` in `external.mk`. For HTTPS, git's
+  configure and its link of `git-remote-http` need libcurl's static
+  dependencies spelled out (`-lcurl -lssl -lcrypto -lzstd -lz`), or it
+  quietly builds without curl.
+- Checked by hand on the board: `scp` and `sftp` from the PC (Dropbear runs
+  OpenSSH's `sftp-server`; a 300 KB file round trip is identical), and
+  `git clone https://github.com/octocat/Hello-World.git` (also `--depth 1`).
+  A bigger repository (libexpat) fails: `index-pack` needs over 60 MB and
+  the OOM killer stops it (128 MiB of RAM, no swap: the kernel has
+  `CONFIG_SWAP` off). Once, an earlier git build also died on a misaligned
+  store (`git[576]: misaligned store at pc 003aa16c eaddr 2ab00007`),
+  which didn't recur; Linux doesn't emulate misaligned accesses here, so
+  code that stores through unaligned pointers gets SIGBUS.
+- The system image is now 256 MiB (about 160 MiB used; static binaries).
+- Not packaged: rt-tests (Buildroot excludes musl; cyclictest), Python 3 and
+  MicroPython (shared libraries only; Python also needs libffi, which has no
+  KlaussCPU port), Perl, gdb (no KlaussCPU target in gdb), and anything in
+  C++ (no C++ runtime).
 
 **strace.**
 - The kernel gained `PTRACE_GETREGSET`/`SETREGSET` (`NT_PRSTATUS`) and

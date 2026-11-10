@@ -101,6 +101,9 @@ if [ -x "$WS/coremark-build/coremark" ] && [ -x "$WS/lmbench-build/tlbmiss" ]; t
   done
   install -m 755 "$RT/linux/userland/tests/bench.sh" "$T/"
 fi
+if [ -x "$WS/fio-build/fio" ]; then
+  cp "$WS/fio-build/fio" "$ST/usr/bin/"
+fi
 if [ -x "$WS/iperf3-build/iperf3" ]; then
   cp "$WS/iperf3-build/iperf3" "$ST/usr/bin/"
   install -m 755 "$RT/linux/userland/tests/iperf3-test.sh" "$T/"

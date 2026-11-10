@@ -130,6 +130,16 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
   if [ "$MODE" = buildroot ]; then
     # Buildroot's packages (built unless LINUX_BUILDROOT_PREBUILT=1 and
     # there is an image) merged into a system image, booted as in ports.
+    # With the development tools (2026-11-11) the image holds ~160 MiB, more
+    # than the emulated machine's 128 MiB of RAM, so it can't ride in the
+    # initramfs; putting it on an emulated SD card needs a FAT writer
+    # (mtools) on this PC.  Until then the check is the board's
+    # /usr/share/klausscpu/tests/buildroot-test.sh.
+    if [ "${LINUX_BUILDROOT_EMU_FORCE:-0}" != 1 ]; then
+      echo "buildroot: the full system image no longer fits in the emulator's RAM;"
+      echo "run tests/buildroot-test.sh on the board (LINUX_BUILDROOT_EMU_FORCE=1 tries anyway)"
+      exit 2
+    fi
     if [ "${LINUX_BUILDROOT_PREBUILT:-0}" != 1 ] || [ ! -f "$RT/linux-ws/br-output/images/rootfs.tar" ]; then
       "$RT/linux/buildroot/build.sh" >"$OUT/buildroot.log" 2>&1 ||
         { echo "FAIL buildroot build (see $OUT/buildroot.log)"; exit 1; }

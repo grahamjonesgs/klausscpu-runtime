@@ -33,6 +33,11 @@ cp -a "$WS/sysroot/include" "$OUT/sysroot/usr/include"
 cp -a "$WS/sysroot/lib" "$OUT/sysroot/usr/lib"
 ln -s usr/include "$OUT/sysroot/include"
 ln -s usr/lib "$OUT/sysroot/lib"
+# An empty libatomic.a: KlaussCPU's atomics are inline (LR/SC) or musl's
+# __sync_* (src/misc/klausscpu/sync_atomic.c), but some packages link
+# -latomic regardless (stress-ng).  A real __atomic_* libcall still fails
+# to link, as it should.
+"$B/llvm-ar" rc "$OUT/sysroot/usr/lib/libatomic.a"
 
 cat >"$OUT/bin/$P-gcc" <<EOF
 #!/bin/bash
