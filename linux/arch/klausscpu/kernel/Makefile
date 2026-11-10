@@ -5,5 +5,6 @@ obj-y := head.o entry.o setup.o traps.o irq.o time.o process.o signal.o \
 	ptrace.o syscall_table.o early_printk.o hvc_uart.o \
 	stacktrace.o
 obj-$(CONFIG_KLAUSSCPU_SD) += sdcard.o
+obj-$(CONFIG_KLAUSSCPU_ETH) += liteeth.o
 
 CFLAGS_hvc_uart.o := -I$(srctree)/drivers/tty/hvc

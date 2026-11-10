@@ -107,6 +107,14 @@ config KLAUSSCPU_SD
 	  The board's SD card slot.  Polled; the probe finds nothing on an
 	  emulator without the controller.
 
+config KLAUSSCPU_ETH
+	bool "LiteEth Ethernet (eth0)"
+	depends on NET
+	default y
+	help
+	  The board's LiteEth MAC and LAN8720A PHY.  The probe finds nothing
+	  on an emulator without the MAC.
+
 config KLAUSSCPU_EARLY_UART
 	bool "Early console on the polled UART"
 	default y
