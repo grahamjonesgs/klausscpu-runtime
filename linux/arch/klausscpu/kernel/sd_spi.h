@@ -12,6 +12,7 @@
 /* Counters, read-only module parameters. */
 struct sd_spi_stats {
 	unsigned long late;		/* pipelined blocks that read late, retried */
+	unsigned long multi_retries;	/* multi-block commands tried again */
 	unsigned long multi_fallbacks;	/* multi-block commands redone per block */
 	unsigned long retries;		/* single-block commands retried */
 };

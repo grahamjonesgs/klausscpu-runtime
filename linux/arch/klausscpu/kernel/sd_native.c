@@ -41,6 +41,12 @@ static bool sd_native = true;
 module_param_named(native, sd_native, bool, 0444);
 MODULE_PARM_DESC(native, "Use the native SD controller when present (else SPI)");
 
+/* Errors the mmc core recovered from (or not): it logs only failures. */
+static unsigned long ksd_cmd_errors, ksd_data_errors, ksd_timeouts;
+module_param_named(native_cmd_errors, ksd_cmd_errors, ulong, 0444);
+module_param_named(native_data_errors, ksd_data_errors, ulong, 0444);
+module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
+
 #define SD_BASE		(MMIO_BASE + 0x0)
 #define SD_CTRL		0x000
 #define  CTRL_DIV	GENMASK(15, 0)
@@ -364,6 +370,8 @@ static void ksd_cmd_result(struct ksd_host *h, struct mmc_command *cmd)
 		cmd->error = -EILSEQ;
 	else if (!cmd->data && (h->acc & ST_BUSY_TIMEOUT))
 		cmd->error = -ETIMEDOUT;	/* R1b busy */
+	if (cmd->error)
+		ksd_cmd_errors++;
 	if (cmd->error == -ETIMEDOUT && !(h->acc & ST_BUSY_TIMEOUT))
 		return;
 	if (cmd->flags & MMC_RSP_136) {
@@ -465,6 +473,11 @@ static struct mmc_request *ksd_advance(struct ksd_host *h)
 			if (data->flags & MMC_DATA_READ)
 				ksd_pio(h, good);
 			data->bytes_xfered = min(good, h->moved) * data->blksz;
+			ksd_data_errors++;
+			dev_warn_ratelimited(mmc_dev(h->mmc),
+					     "CMD%u arg %08x: data error %d (STATUS %llx) after %u of %u blocks\n",
+					     mrq->cmd->opcode, mrq->cmd->arg, data->error, h->acc,
+					     good, data->blocks);
 			wr(h, SDM_FIFO, FIFO_RESET);
 			return ksd_end_data(h, true);
 		}
@@ -524,6 +537,7 @@ static void ksd_watchdog(struct work_struct *work)
 	mutex_lock(&h->lock);
 	mrq = h->mrq;
 	if (mrq && time_after_eq(jiffies, h->deadline)) {
+		ksd_timeouts++;
 		dev_err(mmc_dev(h->mmc), "CMD%u timed out (state %d, STATUS %llx, BLKDONE %llu)\n",
 			mrq->cmd->opcode, h->state, rd(h, SDM_STATUS), rd(h, SDM_BLKDONE));
 		if (h->state == KSD_SBC)

@@ -197,7 +197,7 @@ counters beside them:
 
 ```
 /sys/module/klausscpu_sd/parameters/{multiblock,pipeline}
-/sys/module/klausscpu_sd/parameters/{late_reads,multi_fallbacks,retries}
+/sys/module/klausscpu_sd/parameters/{late_reads,multi_retries,multi_fallbacks,retries}
 ```
 
 Write 0 to a switch to turn it off. On the kernel command line, the
@@ -353,6 +353,36 @@ Status:
 - Boot 1 takes 4.0 G emulated instructions with the native driver and
   6.1 G over SPI. The emulator doesn't model bus speed, so the board
   numbers are what count.
+
+Fault injection (klausscc 293be13 `--sd-fault`, transient faults): both
+SD modes then boot once per fault on a fresh card. Each boot writes a
+2 MiB file through vfat and reads it back after `drop_caches`, then
+checks:
+- that the fault was injected;
+- the file's SHA-256;
+- `fsck.fat`;
+- that a counter shows the error path was taken.
+
+Both modes pass every case:
+
+| Fault | SPI driver | Native driver and mmc core |
+|---|---|---|
+| `wcrc@1000`: a block mid-CMD25 rejected | the multi-block write is retried (`multi_retries` 1) | e.g. `CMD25 …: data error -84 … after 929 of 2048 blocks`; the core asks ACMD22 for the count, and the rest is requeued |
+| `wbusy@1000`: write busy never ends | 750 ms busy timeout, then a retry | `data error -110` (BUSY_TIMEOUT), CMD12, then ACMD22 and requeue |
+| `wbusy@1`: busy on a single-block write (vfat's dirty flag) | retried (`retries` 1); before the fix this lost the write (`I/O error … lost sync page write`) | `CMD24 …: data error -110 … after 0 of 1 blocks`; the core recovers |
+| `rerr@3000`: a bad block mid-CMD18 | the multi-block read is retried | `CMD18 …: data error -84 … after 15 of 256 blocks`; the core retries |
+| `cmdto:18@8`: no response to CMD18 | retried | command error -110; the core retries (`native_cmd_errors` 1) |
+| `cmdto:13@5`: no response to CMD13 (native only) | — | the core's status poll retries |
+
+What Linux logs: the mmc core says nothing when its recovery works (it
+prints only `recovery failed!`).
+- The native driver adds a rate-limited `data error` line, and counts
+  errors in `native_cmd_errors`, `native_data_errors` and
+  `native_timeouts`.
+- The SPI driver logs only when a request falls back to one command per
+  sector, or fails. Its retries show in `multi_retries` and `retries`.
+- In none of these cases did the watchdog fire, or a request fall back
+  or fail.
 
 An independent review of the driver against the plan found:
 - ACMD22's 4-byte block (refused at first; supported since the

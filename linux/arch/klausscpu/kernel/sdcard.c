@@ -15,7 +15,8 @@
  *   multiblock  CMD18/CMD25 for a request's run of sectors (else CMD17/24
  *               per sector);
  *   pipeline    the pipelined byte loops (else one byte at a time).
- * Counters there too: late_reads, multi_fallbacks, retries.
+ * Counters there too: late_reads, multi_retries (failed multi-block
+ * tries), multi_fallbacks, retries (failed single-block tries).
  */
 #include <linux/blk-mq.h>
 #include <linux/blkdev.h>
@@ -39,6 +40,7 @@ static bool sd_pipeline = true;
 module_param_named(pipeline, sd_pipeline, bool, 0644);
 MODULE_PARM_DESC(pipeline, "Pipelined data-block byte loops");
 module_param_named(late_reads, sd_spi_stats.late, ulong, 0444);
+module_param_named(multi_retries, sd_spi_stats.multi_retries, ulong, 0444);
 module_param_named(multi_fallbacks, sd_spi_stats.multi_fallbacks, ulong, 0444);
 module_param_named(retries, sd_spi_stats.retries, ulong, 0444);
 

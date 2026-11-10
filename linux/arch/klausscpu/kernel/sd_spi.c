@@ -483,6 +483,7 @@ int sd_spi_read(sector_t lba, u8 *buf, unsigned int n, bool multi, bool pipe)
 			rc = sd_read_multi(lba, buf, n, &info, pipe);
 			if (!rc)
 				return 0;
+			sd_spi_stats.multi_retries++;
 			if (rc == SD_E_LATE)
 				pipe = false;
 			else
@@ -523,16 +524,23 @@ int sd_spi_write(sector_t lba, const u8 *buf, unsigned int n, bool multi, bool p
 			rc = sd_write_multi(lba, buf, n, &info, pipe);
 			if (!rc)
 				return 0;
+			sd_spi_stats.multi_retries++;
 		}
 		sd_spi_stats.multi_fallbacks++;
 		pr_warn_ratelimited("klausscpu-sd: multi-block write %llu+%u failed (step %d info 0x%02x); retrying per block\n",
 				    (u64)lba, n, rc, info);
 	}
 	for (i = 0; i < n; i++) {
+		/*
+		 * A busy timeout is retried too (Zephyr's driver gives up): the
+		 * card may come back, and a retry costs only a ready wait, while
+		 * giving up loses the write (seen with klausscc's wbusy fault on
+		 * vfat's dirty-flag write).
+		 */
 		for (a = 0; a < SD_RETRIES; a++) {
 			rc = sd_write_block(lba + i, buf + i * 512, &info, pipe);
-			if (!rc || rc == SD_E_BUSY)
-				break;	/* still busy: a retry can't help */
+			if (!rc)
+				break;
 			sd_spi_stats.retries++;
 		}
 		if (rc) {

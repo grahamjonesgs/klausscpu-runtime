@@ -38,6 +38,11 @@
 #                    (klausscc --sd-native) and the mmc host driver, plus
 #                    sdcmd (MMC_IOC_CMD): ACMD51, ACMD13, and ACMD22's
 #                    4-byte block after an 8-sector O_DIRECT write
+#                    Both SD modes then boot once per injected fault
+#                    (klausscc --sd-fault: a rejected written block, a
+#                    write busy that never ends, a bad read block, a
+#                    command timeout) on a fresh card, write and read back
+#                    a 2 MiB file, and check its hash and fsck.fat
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -119,6 +124,7 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       echo 'start=2048, type=c' | sfdisk -q "$CARD" >"$OUT/card.log" 2>&1 &&
       mkfs.vfat -F 32 -s 1 -n KLAUSSCPU --offset 2048 "$CARD" $(( 65536 - 1024 )) >>"$OUT/card.log" 2>&1 ||
       { echo "FAIL card image (see $OUT/card.log)"; exit 1; }
+    cp "$CARD" "$OUT/card-empty.img"	# for the fault boots
     EMU_ARGS=(--sd-image "$CARD")
     [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native)
   fi
@@ -257,6 +263,9 @@ elif [ $SD = 1 ]; then
   HEAD=$(head -c 262144 "$OUT/rootfs.img" | sha256sum | cut -c1-16)
   # Boot 1: the card has no image yet, so sdinit stays in the initramfs.
   {
+    # The native driver's command errors after a clean boot (the mmc
+    # core's probing), the baseline for the cmdto fault boots below.
+    [ "$MODE" = sd-native ] && echo "echo base \$(cat $P/native_cmd_errors)"
     echo 'cat /sys/class/block/mmcblk0p1/start'
     echo 'install-rootfs - < /seed/rootfs.img'
     echo 'sync; echo 3 > /proc/sys/vm/drop_caches; sha256sum /mnt/linux/rootfs.img | cut -c1-16'
@@ -334,6 +343,62 @@ persist
 musltest: PASS
 EOF2
   run_step sd2 60000000000 2400 '$ '
+
+  # Fault boots (klausscc --sd-fault; transient: a retry succeeds).  Each
+  # starts from the empty card, so sdinit stays in the initramfs and boot
+  # touches few blocks; the session writes a 2 MiB file (4096 blocks) and
+  # reads it back after dropping caches, so the event numbers below land
+  # in that file's transfers.  Linux must recover: the data reads back
+  # right, and the FAT stays clean.
+  if "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--sd-fault'; then
+    H2=$(head -c 2097152 "$OUT/rootfs.img" | sha256sum | cut -c1-16)
+    # wbusy@1 hits a single-block write: sdinit's vfat mount marking the
+    # file system dirty.  The rest land in the 2 MiB file's transfers.
+    FAULTS="wcrc@1000 wbusy@1000 wbusy@1 rerr@3000 cmdto:18@8"
+    [ "$MODE" = sd-native ] && FAULTS="$FAULTS cmdto:13@5"
+    BASE=$(grep -ao '^base [0-9]*' "$OUT/sd1.out" | awk '{print $2}')
+    {
+      echo 'cat /sys/block/mmcblk0/stat'
+      echo 'mount -t vfat /dev/mmcblk0p1 /mnt; head -c 2097152 /seed/rootfs.img > /mnt/t.bin; sync; echo wrote'
+      echo 'cat /sys/block/mmcblk0/stat'
+      echo 'echo 3 > /proc/sys/vm/drop_caches; sha256sum /mnt/t.bin | cut -c1-16'
+      echo 'cat /sys/block/mmcblk0/stat'
+      echo 'umount /mnt; echo unmounted'
+      # Evidence that the fault went through the error path: the mmc core
+      # recovers silently, and so do the SPI driver's retries.
+      if [ "$MODE" = sd-spi ]; then
+        echo "echo stats \$(cat $P/multi_retries) \$(cat $P/retries) \$(cat $P/multi_fallbacks)"
+      else
+        echo "echo stats \$(cat $P/native_data_errors) \$(cat $P/native_cmd_errors) \$(cat $P/native_timeouts)"
+      fi
+    } >"$OUT/fault.in"
+    for f in $FAULTS; do
+      n=fault-$(echo "$f" | tr ':@' '--')
+      cp "$OUT/card-empty.img" "$OUT/$n.img"
+      EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f")
+      [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native)
+      cp "$OUT/fault.in" "$OUT/$n.in"
+      printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
+      run_step "$n" 40000000000 2400 '$ '
+      grep -aq 'klausscc sd: injected' "$OUT/$n.out" || bad "$n: the fault was never injected"
+      read -r a b c < <(grep -ao '^stats [0-9]* [0-9]* [0-9]*' "$OUT/$n.out" | awk '{print $2, $3, $4}')
+      echo "$n: stats ${a:-?} ${b:-?} ${c:-?} ($([ "$MODE" = sd-spi ] && echo 'multi_retries retries multi_fallbacks' || echo "data_errors cmd_errors (base ${BASE:-?}) timeouts"))"
+      if [ "$MODE" = sd-spi ]; then
+        [ "$(( ${a:-0} + ${b:-0} ))" -ge 1 ] || bad "$n: no retry counted"
+      else
+        case $f in
+        cmdto*) [ "${b:-0}" -gt "${BASE:-0}" ] || bad "$n: no command error counted" ;;
+        *) [ "${a:-0}" -ge 1 ] || bad "$n: no data error counted" ;;
+        esac
+        [ "${c:-1}" = 0 ] || bad "$n: the watchdog fired"
+      fi
+      dd if="$OUT/$n.img" of="$OUT/part.img" bs=512 skip=2048 status=none &&
+        fsck.fat -n "$OUT/part.img" >"$OUT/$n.fsck" 2>&1 || bad "$n: fsck.fat (see $OUT/$n.fsck)"
+      rm -f "$OUT/part.img" "$OUT/$n.img"
+    done
+  else
+    echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
+  fi
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
   # dropbearconvert converts the PEM, and Dropbear's fingerprint must be
