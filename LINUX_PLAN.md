@@ -333,6 +333,32 @@ curl -sS https://example.com/ | head    # https with the CA bundle
   processes.
 - `tlbmiss` runs up to 64 pages.
 
+### Board results (2026-11-10, release bitstream from QSPI)
+
+Measured on the board (klaussCPU master 2743116, mmu-sd 5648f75 LEAN,
+100 MHz) under Linux from the SD root, with the ported programs:
+
+| What | Result |
+|---|---|
+| Lua 5.4 self-tests, SQLite known-answer test | PASS |
+| CoreMark (-O2, 3000 iterations, 17.5 s) | 171.7 it/s (1.72 / MHz) |
+| null syscall / read / write | 4.7 / 10.9 / 9.3 us |
+| stat / open+close | 122 / 131 us |
+| fork+exit / fork+execve / fork+sh -c | 42.6 / 78.4 / 143 ms |
+| context switch, 2 / 16 processes | 101 / 203 us |
+| page fault (file) | 77 us |
+| memory bandwidth read / write / copy (8 MiB) | 47 / 37 / 21 MB/s |
+| load latency: D-cache / DDR (lat_mem_rd, stride 64) | 42 ns / 617 ns |
+| TLB miss + refill (tlbmiss, 64 KiB stride, >15 pages) | ~2.9 us (~290 cycles) |
+| iperf3 board -> PC / PC -> board | 13.8 / 10.9 Mbit/s (PC -> board: 1360 retransmits, 94 RX drops) |
+| curl https://example.com/ (mbedTLS, CA bundle) | 200, verified, 4.0 s |
+| VGA vsync / DOOM timedemo demo1 | 59.52 Hz / 33.2 fps |
+
+Tuning candidates the numbers point at:
+- the TLB refill path (about 290 cycles per miss; 16 entries of 64 KiB);
+- system-call and fork/exec overheads;
+- Ethernet receive (the LiteEth has 2 RX slots, so line-rate traffic drops packets while the CPU drains them).
+
 ### Board checks: SD card speed
 
 The driver (`sdcard.c` over `sd_spi.c`) sends each request, up to 64 KiB,
