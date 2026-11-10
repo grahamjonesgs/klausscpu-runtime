@@ -1,0 +1,27 @@
+# KlaussCPU: packages for the system image (linux/buildroot/build.sh).
+# No kernel, bootloader, init or busybox: linux/build.sh and our own
+# initramfs/rcS do those; build-rootfs.sh merges output/images/rootfs.tar
+# into the system image (ROOTFS_BUILDROOT=1).
+BR2_klausscpu=y
+BR2_DL_DIR="$(KLAUSSCPU_WS)/br-dl"
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PREINSTALLED=y
+BR2_TOOLCHAIN_EXTERNAL_PATH="$(KLAUSSCPU_WS)/br-toolchain"
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="klausscpu-linux-musl"
+BR2_TOOLCHAIN_EXTERNAL_GCC_14=y
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_19=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_MUSL=y
+# BR2_TOOLCHAIN_EXTERNAL_CXX is not set
+BR2_STATIC_LIBS=y
+BR2_SSP_NONE=y
+BR2_INIT_NONE=y
+BR2_SYSTEM_BIN_SH_NONE=y
+# BR2_TARGET_GENERIC_GETTY is not set
+# BR2_PACKAGE_BUSYBOX is not set
+BR2_TARGET_ROOTFS_TAR=y
+# BR2_TARGET_ROOTFS_TAR_GZIP is not set
+BR2_PACKAGE_ZLIB=y
+BR2_PACKAGE_NCURSES=y
+BR2_PACKAGE_NCURSES_TARGET_PROGS=y
+BR2_PACKAGE_NANO=y

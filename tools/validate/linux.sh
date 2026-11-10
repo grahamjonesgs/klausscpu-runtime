@@ -48,6 +48,9 @@
 #                    sdinit boots from the initramfs with a data image at
 #                    /data; one boot per port runs its self-test from
 #                    /usr/share/klausscpu/tests
+#   buildroot        the Buildroot packages (linux/buildroot/build.sh) merged
+#                    into the system image (ROOTFS_BUILDROOT=1), booted as
+#                    in ports; tests/buildroot-test.sh checks each one
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -59,7 +62,7 @@ EMU_ARGS=()
 . "$(dirname "$0")/common.sh"
 [ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|ports|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|ports|buildroot|m3) ;; *) die "unknown mode $MODE" ;; esac
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 SD=0
 case $MODE in sd-*) SD=1 ;; esac
@@ -75,11 +78,11 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ] || [ "$MODE" = buildroot ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ] || [ $SD = 1 ] || [ "$MODE" = ports ] || [ "$MODE" = buildroot ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
@@ -118,6 +121,20 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       fi
     done
     "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 24 >"$OUT/rootfs.log" 2>&1 &&
+      "$RT/linux/rootfs/build-data.sh" "$OUT/data.img" 8 >>"$OUT/rootfs.log" 2>&1 ||
+      { echo "FAIL rootfs/data images (see $OUT/rootfs.log)"; exit 1; }
+    printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\nfile /test/data.img %s 0644 0 0\n' \
+      "$OUT/rootfs.img" "$OUT/data.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
+  fi
+  if [ "$MODE" = buildroot ]; then
+    # Buildroot's packages (built unless LINUX_BUILDROOT_PREBUILT=1 and
+    # there is an image) merged into a system image, booted as in ports.
+    if [ "${LINUX_BUILDROOT_PREBUILT:-0}" != 1 ] || [ ! -f "$RT/linux-ws/br-output/images/rootfs.tar" ]; then
+      "$RT/linux/buildroot/build.sh" >"$OUT/buildroot.log" 2>&1 ||
+        { echo "FAIL buildroot build (see $OUT/buildroot.log)"; exit 1; }
+    fi
+    ROOTFS_BUILDROOT=1 "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 32 >"$OUT/rootfs.log" 2>&1 &&
       "$RT/linux/rootfs/build-data.sh" "$OUT/data.img" 8 >>"$OUT/rootfs.log" 2>&1 ||
       { echo "FAIL rootfs/data images (see $OUT/rootfs.log)"; exit 1; }
     printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\nfile /test/data.img %s 0644 0 0\n' \
@@ -513,6 +530,16 @@ EOF2
   else
     echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
   fi
+elif [ "$MODE" = buildroot ]; then
+  # Every installed package passes (LINUX_BUILDROOT_EXPECT=N: at least N).
+  echo /usr/share/klausscpu/tests/buildroot-test.sh >"$OUT/br.in"
+  echo 'sdinit: data.img mounted read-write at /data' >"$OUT/br.expect"
+  run_step br 120000000000 3600 '$ '
+  line=$(grep -ao 'buildroot-test: [0-9]*/[0-9]* passed' "$OUT/br.out" | tail -1)
+  p=${line#buildroot-test: }; p=${p%%/*}; m=${line#*/}; m=${m%% *}
+  echo "br: ${line:-no summary}"
+  [ -n "$line" ] && [ "$p" = "$m" ] && [ "$p" -ge "${LINUX_BUILDROOT_EXPECT:-1}" ] ||
+    bad "br: ${line:-no buildroot-test summary}"
 elif [ "$MODE" = ports ]; then
   # One boot per built port (LINUX_PORTS="lua sqlite ..." picks some);
   # each self-test ends with known lines.

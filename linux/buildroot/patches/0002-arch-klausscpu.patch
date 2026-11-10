@@ -1,0 +1,54 @@
+arch: KlaussCPU
+
+The architecture choice and its Config.in: 64-bit little-endian, MMU,
+no FPU (soft float), readelf machine name "KlaussCPU" (EM 0x4B43).
+Packages are built with the external clang toolchain in
+linux/buildroot/external.
+
+diff -ruN a/arch/Config.in b/arch/Config.in
+--- a/arch/Config.in	2026-11-10 18:51:17.171963612 +0200
++++ b/arch/Config.in	2026-11-10 18:51:17.183332563 +0200
+@@ -95,6 +95,17 @@
+ 	  http://www.loongson.cn/
+ 	  https://en.wikipedia.org/wiki/Loongson
+ 
++config BR2_klausscpu
++	bool "KlaussCPU"
++	select BR2_ARCH_IS_64
++	select BR2_USE_MMU
++	select BR2_SOFT_FLOAT
++	help
++	  KlaussCPU: a 64-bit little-endian soft core (64-bit registers
++	  and pointers, 32-bit virtual addresses, ELF machine 0x4B43),
++	  with an MMU and no FPU.  Built with clang/LLVM (klausscpu-llvm)
++	  as an external toolchain; musl, static only.
++
+ config BR2_m68k
+ 	bool "m68k"
+ 	depends on !BR2_HIDE_SECONDARY_TARGET_OPTIONS
+@@ -420,6 +431,10 @@
+ source "arch/Config.in.loongarch"
+ endif
+ 
++if BR2_klausscpu
++source "arch/Config.in.klausscpu"
++endif
++
+ if BR2_m68k
+ source "arch/Config.in.m68k"
+ endif
+diff -ruN a/arch/Config.in.klausscpu b/arch/Config.in.klausscpu
+--- a/arch/Config.in.klausscpu	1970-01-01 02:00:00.000000000 +0200
++++ b/arch/Config.in.klausscpu	2026-11-10 18:51:17.183447005 +0200
+@@ -0,0 +1,11 @@
++config BR2_ARCH
++	default "klausscpu"
++
++config BR2_NORMALIZED_ARCH
++	default "klausscpu"
++
++config BR2_ENDIAN
++	default "LITTLE"
++
++config BR2_READELF_ARCH_NAME
++	default "KlaussCPU"

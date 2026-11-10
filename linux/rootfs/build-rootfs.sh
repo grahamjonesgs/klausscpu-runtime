@@ -118,6 +118,32 @@ cp "$INI/etc/index.html" "$ST/www/index.html"
 echo "klausscpu-rootfs $(date -u +%Y-%m-%dT%H:%MZ) from runtime $(git -C "$RT" rev-parse --short HEAD)${KLAUSSCPU_ROOTFS_TAG:+ $KLAUSSCPU_ROOTFS_TAG}" \
   >"$ST/etc/klausscpu-rootfs"
 
+# Buildroot's packages (linux/buildroot/build.sh), with ROOTFS_BUILDROOT=1:
+# bin, sbin and usr of its rootfs.tar.  A package's file replaces a busybox
+# applet link (a real less over the applet), never one of our own files;
+# its /etc (Buildroot's skeleton), headers and static libraries stay out,
+# so our init, rcS and layout are untouched.
+if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
+  BRT=$WS/br-output/images/rootfs.tar
+  [ -f "$BRT" ] || { echo "no $BRT: run linux/buildroot/build.sh" >&2; exit 1; }
+  X=$WS/br-merge
+  rm -rf "$X"; mkdir -p "$X"
+  tar -xf "$BRT" -C "$X"
+  (cd "$X" && find bin sbin usr \( -type f -o -type l \) 2>/dev/null) | while IFS= read -r f; do
+    case $f in usr/include/*|*.a|*.la|usr/lib/pkgconfig/*|usr/share/aclocal/*|usr/share/man/*|usr/share/doc/*) continue ;; esac
+    d=$ST/$f
+    if [ -e "$d" ] && [ ! -L "$d" ]; then
+      echo "buildroot: keeping our /$f" >&2
+      continue
+    fi
+    mkdir -p "$(dirname "$d")"
+    rm -f "$d"
+    cp -a "$X/$f" "$d"
+  done
+  echo "buildroot: merged $(tar -tf "$BRT" | grep -c -E '^\./(usr/)?s?bin/[^/]+$') programs from $BRT"
+  install -m 755 "$RT/linux/userland/tests/buildroot-test.sh" "$T/"
+fi
+
 tar --owner=0 --group=0 --numeric-owner -C "$ST" -cf "$WS/rootfs.tar" .
 rm -f "$OUTIMG"
 mke2fs -q -t ext4 -O ^has_journal -L klausscpu-root -m 0 -d "$WS/rootfs.tar" "$OUTIMG" "${SIZE}M"

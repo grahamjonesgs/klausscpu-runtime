@@ -1,0 +1,16 @@
+support/gnuconfig/config.sub: the klausscpu CPU
+
+Buildroot copies this config.sub into every autotools package
+(UPDATE_CONFIG_HOOK), so --host=klausscpu-buildroot-linux-musl works
+for all of them.
+
+--- a/support/gnuconfig/config.sub	2026-11-10 18:49:16.739867972 +0200
++++ b/support/gnuconfig/config.sub	2026-11-10 18:49:16.741454800 +0200
+@@ -1207,6 +1207,7 @@
+ 			| i370 | i*86 | i860 | i960 | ia16 | ia64 \
+ 			| ip2k | iq2000 \
+ 			| k1om \
++			| klausscpu \
+ 			| kvx \
+ 			| le32 | le64 \
+ 			| lm32 \
