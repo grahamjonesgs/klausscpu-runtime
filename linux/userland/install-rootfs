@@ -1,0 +1,28 @@
+#!/bin/sh
+# install-rootfs <url> [sha256]: put a root file system image on the SD card
+# as /linux/rootfs.img, over the network, without touching anything else on
+# the card (its single FAT partition and its files stay as they are).
+# The image is downloaded beside the old one and renamed only when it is
+# complete (and its SHA-256 matches, when given).  Reboot to use it.
+set -e
+url=$1
+want=${2:-}
+[ -n "$url" ] || { echo "usage: install-rootfs <url> [sha256]" >&2; exit 2; }
+[ -b /dev/mmcblk0p1 ] || { echo "install-rootfs: no SD card" >&2; exit 1; }
+mkdir -p /mnt
+grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
+mkdir -p /mnt/linux
+rm -f /mnt/linux/rootfs.img.new
+echo "install-rootfs: downloading $url"
+wget -O /mnt/linux/rootfs.img.new "$url"
+if [ -n "$want" ]; then
+	got=$(sha256sum /mnt/linux/rootfs.img.new | cut -d' ' -f1)
+	if [ "$got" != "$want" ]; then
+		echo "install-rootfs: SHA-256 mismatch ($got), keeping the old image" >&2
+		rm -f /mnt/linux/rootfs.img.new
+		exit 1
+	fi
+fi
+mv /mnt/linux/rootfs.img.new /mnt/linux/rootfs.img
+sync
+echo "install-rootfs: /linux/rootfs.img installed; reboot to use it"

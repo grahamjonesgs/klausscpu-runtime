@@ -8,12 +8,20 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
   - GENERIC_BUG, stack traces with KALLSYMS, and the exception table
     sorted at build time;
   - `hvc0` console, the SD card as `mmcblk0` (vfat), LiteEth as `eth0`,
-    and the TRNG as `hwrng`.
+    and the TRNG as `hwrng`;
+  - the QSPI flash as read-only MTD (`qspi_flash.c`): its opcode check
+    allows READ and RDID only, and partitions aren't writable;
+  - ext4 and loop devices, for the root file system on the SD card.
 - **User space:**
   - musl 1.2.5 (`linux/musl/`), threads included;
   - busybox (init with `/etc/init.d/rcS` and mdev; ash);
   - Dropbear 2026.94 (`linux/userland/dropbear.sh`): an SSH login over
-    loopback passes on the emulator (`linux.sh <out> ssh`).
+    loopback passes on the emulator (`linux.sh <out> ssh`). It presents
+    Zephyr's `ssh_shell` host key, read from the QSPI keystore (`kskey`,
+    `linux.sh <out> keystore`);
+  - `/init` is `sdinit` (`linux/userland/sdinit.c`): it boots an ext4
+    image on the SD card, `/linux/rootfs.img` on the FAT partition, and
+    falls back to the initramfs (`linux.sh <out> rootfs`).
 - **Board-checked (2026-11-10, d9cf6c2):**
   - the richer busybox config is built (vi without regex search; built
     with `-DBB_GLOBAL_CONST=`, see below);
@@ -65,6 +73,92 @@ On the board:
 - `mount -t vfat /dev/mmcblk0p1 /mnt` (after `mkdir /mnt`), then `ls /mnt`
 - `cat /proc/interrupts` (the `eth0` count rises with traffic)
 - `dmesg | grep -i 'trng\|random'`
+
+### Board checks: Zephyr's SSH host key (QSPI keystore)
+
+Zephyr's `ssh_shell` keeps its ECDSA P-256 host key in NVS on the flash's
+`storage` partition (0xF00000, 768 KiB), entry `ssh_host_key.bin` (SEC1
+DER). Linux only reads the flash.
+- `qspi_flash.c` refuses every opcode except READ (0x03) and RDID (0x9F).
+- The MTD is `MTD_ROM`, and its partitions are registered without
+  `MTD_WRITEABLE`.
+- With no `qspi_ctrl` (the emulator, older bitstreams) the probe logs
+  `klausscpu-qspi: no qspi_ctrl in this bitstream` and registers nothing.
+
+`/etc/init.d/hostkey` picks the key for rcS's `dropbear`, in this order:
+1. `kskey /dev/mtdN` (the `"storage"` line in `/proc/mtd`), converted
+   with `dropbearconvert`;
+2. else `/linux/dropbear_ed25519_host_key` on the SD card, generated once;
+3. else `-R`.
+
+Host tests: `linux/userland/keystore/test_kskey.sh` (synthetic NVS images:
+newest-wins, torn write, sector rollover, wrap, deleted, bad CRC; plus an
+`ssh-keygen` fingerprint round trip).
+
+On the board:
+- dmesg shows `klausscpu-qspi: S25FL128S 16 MiB, read-only`, and
+  `cat /proc/mtd` lists `bitstream`, `storage` and `scratch` (mtd0–2).
+- rcS prints `hostkey: Zephyr's key from the QSPI keystore (mtd1)`.
+- `kskey /dev/mtd1 | head -1` prints `-----BEGIN EC PRIVATE KEY-----`.
+
+From the PC, the fingerprint must match Zephyr's
+(`SHA256:DYRxGyaKM2ZNhrjasuYI3VHyznQ7oWfC9LxA2KwsIYI`, ECDSA 256):
+
+```
+ssh-keyscan -t ecdsa 192.168.68.59 2>/dev/null | ssh-keygen -lf -
+```
+
+`ssh root@192.168.68.59` then logs in without a host-key warning, because
+`known_hosts` already holds Zephyr's key.
+
+### Board checks: root file system on the SD card
+
+The card keeps its single FAT partition and its files. Linux only adds
+the `/linux/` folder:
+- `/linux/rootfs.img`, an ext4 image;
+- `/linux/rootfs.img.new` while an install is in progress;
+- `/linux/dropbear_ed25519_host_key`, only when the QSPI key isn't found.
+
+The boot path:
+- `sdinit`, the initramfs's `/init`, mounts `mmcblk0p1` (vfat) and
+  attaches `/linux/rootfs.img` to a loop device. It mounts the image as
+  ext4 and switches root to it, after which the card is at `/mnt`.
+- Any failure falls back to the initramfs's busybox. The failures are no
+  card, no image, a mount error, or no `/sbin/init`.
+- Its messages start with `sdinit:`.
+
+Build the image on the PC (busybox, and Dropbear if built; `/etc` comes
+from `linux/initramfs/`):
+
+```
+linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 96
+sha256sum linux-ws/rootfs.img
+cd linux-ws && python3 -m http.server 8000
+```
+
+On the board, booted from the initramfs with the network up:
+
+```
+install-rootfs http://<PC>:8000/rootfs.img <sha256>
+```
+
+It downloads to `rootfs.img.new` and checks the SHA-256. Only then does it
+rename the file to `rootfs.img` and `sync`. Then reload the kernel
+(`klausscc -i linux-ws/build/vmlinux -s -m`).
+
+The checks:
+- The console shows `EXT4-fs (loop0): mounted filesystem` and
+  `sdinit: switching to the SD card's root file system`.
+- `cat /etc/klausscpu-rootfs` prints the build date and runtime commit.
+- `grep ' / ' /proc/mounts` shows ext4 on `/dev/loop0`.
+- `ls /mnt/linux` lists the card's folder.
+- Persistence: `echo x > /root/t; sync`, reload, then `cat /root/t`.
+- Run `sync` before resetting the board, because the image is a file on
+  vfat.
+
+To update, run `install-rootfs` again from the running system. The old
+image stays open until the next boot. To go back to the initramfs, rename
+`/linux/rootfs.img` on the card, for example from a PC.
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
@@ -343,7 +437,7 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
 4. **busybox.** *(done: musl, busybox init and ash, Dropbear)*
    - musl and the clang Linux toolchain.
    - Checkpoint: a busybox shell on the emulator, scripted with `--uart-in`.
-5. **Board.** *(busybox on d9cf6c2 done; networking and SD card need board checks)*
+5. **Board.** *(busybox, networking, SD card on d9cf6c2 done; QSPI host key and SD root file system need board checks)*
    - Same image on 52bece8; tune load speed and timer frequency.
    - Checkpoint: an interactive shell over the UART.
 6. **Later.**

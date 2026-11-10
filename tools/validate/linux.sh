@@ -22,6 +22,9 @@
 #   keystore         Zephyr's QSPI keystore format (a synthetic NVS image)
 #                    through kskey and dropbearconvert: Dropbear's fingerprint
 #                    must equal OpenSSH's for the same key
+#   rootfs           sdinit switches to an ext4 rootfs image (linux/rootfs/
+#                    build-rootfs.sh) loop-mounted from the initramfs
+#                    (the SD card's /linux/rootfs.img on the board)
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -30,9 +33,9 @@
 # Needs linux-ws/linux (linux/fetch.sh).  Exits 1 on any failure.
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
-[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|m3] [emu|board]"
+[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|rootfs|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|net|keystore|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|keystore|rootfs|m3) ;; *) die "unknown mode $MODE" ;; esac
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 case $WHERE in emu|board) ;; *) die "unknown target $WHERE" ;; esac
 "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--uart-prompt' ||
@@ -43,11 +46,11 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ] || [ "$MODE" = rootfs ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
@@ -66,6 +69,14 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       { echo "FAIL keystore test image"; exit 1; }
     KEY_FP=$(ssh-keygen -y -f "$OUT/key.pem" | ssh-keygen -lf - | awk '{print $2}')
     printf 'dir /test 0755 0 0\nfile /test/storage.img %s 0644 0 0\n' "$OUT/storage.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
+  fi
+  if [ "$MODE" = rootfs ]; then
+    # A small rootfs image in the initramfs at /test/rootfs.img, which
+    # sdinit tries before the SD card (the emulator has none).
+    "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 ||
+      { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
+    printf 'dir /test 0755 0 0\nfile /test/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
     export INITRAMFS_EXTRA=$OUT/extra.list
   fi
   export INITRAMFS_PROFILE=busybox
@@ -171,7 +182,7 @@ Linux klausscpu
 hostname
 klausscpu
 ls /etc/init.d
-rcS
+hostkey  rcS
 echo 1 2 3 | wc -w
 3
 mkdir /tmp/t && echo hi > /tmp/t/f && cat /tmp/t/f
@@ -182,6 +193,21 @@ sh -c 'exit 3'; echo status $?
 status 3
 EOF2
   run_step busybox 20000000000 900 '$ '
+elif [ "$MODE" = rootfs ]; then
+  # sdinit loop-mounts the ext4 image and switches to it; busybox init and
+  # rcS then run from the image.
+  cat >"$OUT/rootfs.in" <<'EOF2'
+cut -d' ' -f1 /etc/klausscpu-rootfs
+grep ' / ' /proc/mounts | cut -d' ' -f3
+/usr/bin/musltest | tail -1
+EOF2
+  cat >"$OUT/rootfs.expect" <<'EOF2'
+sdinit: switching to the SD card's root file system
+klausscpu-rootfs
+ext4
+musltest: PASS
+EOF2
+  run_step rootfs 20000000000 900 '$ '
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
   # dropbearconvert converts the PEM, and Dropbear's fingerprint must be
