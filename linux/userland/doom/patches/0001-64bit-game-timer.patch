@@ -1,0 +1,95 @@
+diff --git a/doomgeneric/d_loop.c b/doomgeneric/d_loop.c
+index 1939dbd..d6e53ef 100644
+--- a/doomgeneric/d_loop.c
++++ b/doomgeneric/d_loop.c
+@@ -118,9 +118,9 @@ static int player_class;
+ 
+ static int GetAdjustedTime(void)
+ {
+-    int time_ms;
++    int64_t time_ms;
+ 
+-    time_ms = I_GetTimeMS();
++    time_ms = I_GetTimeMS64();  // KlaussCPU: 64-bit, see i_timer.c
+ 
+     if (new_sync)
+     {
+@@ -130,7 +130,7 @@ static int GetAdjustedTime(void)
+         time_ms += (offsetms / FRACUNIT);
+     }
+ 
+-    return (time_ms * TICRATE) / 1000;
++    return (int)((time_ms * TICRATE) / 1000);
+ }
+ 
+ static boolean BuildNewTic(void)
+diff --git a/doomgeneric/i_timer.c b/doomgeneric/i_timer.c
+index 0a85c72..291e1e1 100644
+--- a/doomgeneric/i_timer.c
++++ b/doomgeneric/i_timer.c
+@@ -40,18 +40,33 @@ int I_GetTicks(void)
+ 	return DG_GetTicksMs();
+ }
+ 
+-int  I_GetTime (void)
++// KlaussCPU: 64-bit milliseconds since the first call.  DG_GetTicksMs() is
++// 32-bit (wraps after 49.7 days); extend it across the wrap.  The stock
++// (ticks * TICRATE) in 32 bits overflowed after ~34 h (and d_loop's signed
++// version after ~17 h), freezing the game: time jumped back and Doom waited
++// for it to catch up while redrawing the same frame.
++int64_t I_GetTimeMS64(void)
+ {
+-    uint32_t ticks;
+-
+-    ticks = I_GetTicks();
+-
+-    if (basetime == 0)
+-        basetime = ticks;
+-
+-    ticks -= basetime;
++    static uint32_t last;
++    static uint64_t high;
++    static uint64_t base64;
++    static int started;
++    uint32_t now = DG_GetTicksMs();
++
++    if (now < last)
++        high += (uint64_t)1 << 32;
++    last = now;
++    if (!started)
++    {
++        started = 1;
++        base64 = high | now;
++    }
++    return (int64_t)((high | now) - base64);
++}
+ 
+-    return (ticks * TICRATE) / 1000;
++int  I_GetTime (void)
++{
++    return (int)((I_GetTimeMS64() * TICRATE) / 1000);
+ }
+ 
+ 
+diff --git a/doomgeneric/i_timer.h b/doomgeneric/i_timer.h
+index 9b3dbb8..454eda0 100644
+--- a/doomgeneric/i_timer.h
++++ b/doomgeneric/i_timer.h
+@@ -20,6 +20,8 @@
+ #ifndef __I_TIMER__
+ #define __I_TIMER__
+ 
++#include <stdint.h>
++
+ #define TICRATE 35
+ 
+ // Called by D_DoomLoop,
+@@ -28,6 +30,8 @@ int I_GetTime (void);
+ 
+ // returns current time in ms
+ int I_GetTimeMS (void);
++// 64-bit milliseconds since start (KlaussCPU: no 32-bit overflow)
++int64_t I_GetTimeMS64 (void);
+ 
+ // Pause for a specified number of ms
+ void I_Sleep(int ms);

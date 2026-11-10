@@ -19,6 +19,10 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
   - the QSPI flash as read-only MTD (`qspi_flash.c`): its opcode check
     allows READ and RDID only, and partitions aren't writable;
   - ext4 and loop devices, for the root file system on the SD card.
+  - the VGA port as `/dev/fb0` (`klausscpu_fb.c`), with DOOM on it
+    (`linux/userland/doom.sh`); emulator-tested with
+    `klausscpu_fb.force=1`, awaiting a board check (see "VGA frame
+    buffer and DOOM").
 - **User space:**
   - musl 1.2.5 (`linux/musl/`), threads included;
   - busybox (init with `/etc/init.d/rcS` and mdev; ash);
@@ -489,6 +493,117 @@ Board check, on a native bitstream:
   `/linux/bench`; the `klausscpu_sd` switches apply to SPI only.
 - Compare with SPI on the same bitstream: rebuild with
   `klausscpu_sd.native=0` in `CONFIG_CMDLINE`.
+
+### VGA frame buffer and DOOM
+
+`arch/klausscpu/kernel/klausscpu_fb.c` (`CONFIG_KLAUSSCPU_FB`, on with
+`CONFIG_FB`) drives the VGA port as `/dev/fb0`. The controller is in every
+`mmu` bitstream since the vga-output merge (8e9a477), so d9cf6c2 has it.
+
+The hardware (klaussCPU MMIO_MAP.md, VGA_PLAN.md):
+- a fixed 640x480 @ 59.5 Hz picture, scanned out of DDR: HEIGHT lines of
+  640 pixels, or of 320 shown twice each way, STRIDE bytes apart from
+  FB_BASE (32-byte aligned), starting at display line VSTART;
+- RGB565 (the display uses the top 4 bits of each channel), or 8-bit
+  indices into a 256-entry RGB444 palette;
+- FB_BASE and the geometry latch at the start of vblank, so a pan is a
+  tear-free flip. The palette changes at once;
+- vsync is interrupt source 3;
+- the scan-out reads DDR, past the CPU's write-back D-cache. The only
+  flush is the whole cache (`CACHE_CTRL` FLUSH, a walk of a few thousand
+  cycles).
+
+The driver:
+- **Memory.** 1200 KiB of ordinary kernel memory (two 640x480 RGB565
+  pages), allocated at boot and mapped into user space by PFN. The
+  display has no fixed address, so nothing is reserved.
+- **Modes** (`FBIOPUT_VSCREENINFO`): xres 640, or 320 (doubled); 8 or
+  16 bpp; any yres up to 480 (240 doubled), centred; `yres_virtual` as far
+  as the buffer allows, for page flips with `FBIOPAN_DISPLAY`. The default
+  is 640x480 RGB565. 8 bpp is `PSEUDOCOLOR`, and the palette is loaded
+  with `FBIOPUTCMAP`.
+- **Coherency.**
+  - While `/dev/fb0` is open or mapped, the vsync interrupt flushes the
+    cache at the start of each vblank, so what a program draws through
+    the mapping shows within a frame.
+  - `write()`, a pan, `FBIO_WAITFORVSYNC` and the last close or unmap
+    also flush.
+  - With nobody using it, the interrupt is off and nothing is flushed.
+- **No controller** (the emulator, older bitstreams): BORDER doesn't
+  read back, and the driver logs `klausscpu-fb: no VGA controller in this
+  bitstream`. `klausscpu_fb.force=1` registers `/dev/fb0` anyway,
+  without touching the display, to test programs on the emulator.
+- `/sys/module/klausscpu_fb/parameters/status` shows the live frame
+  counter, raster line, underflow count, vsync interrupts, flushes and
+  users.
+
+Programs:
+- `fbtest` (`linux/userland/fbtest.c`, in the system image):
+  - `check` sets every mode, writes through the mapping, reads it back
+    with `read()`, pans, and waits for vsync;
+  - `bars [WxHxB]` draws colour bars;
+  - `shot` writes the visible page, and the palette, for
+    `linux/tools/fb2png.py`;
+  - also `info`, `fill`, `cmap` and `vsync [n]`.
+- `linux/tools/fbshot.sh [root@IP] [out.png]` takes a screenshot over
+  SSH. It writes the image at its own resolution, and `out-screen.png`, the
+  640x480 picture as the monitor shows it.
+- `doom`: doomgeneric (pinned e257a09, the Zephyr port's commit, with its
+  64-bit timer patch) with an fbdev backend,
+  `linux/userland/doom/doomgeneric_klausscpu.c`. `linux/userland/doom.sh`
+  builds it (static, -O2, 570 KB). `build-rootfs.sh` installs it when it
+  has been built.
+  - It sets 320x200 at 8 bpp with three pages. Doom renders straight into
+    a page that isn't on screen, then flips to it with a pan, and loads
+    the palette when it changes.
+  - Other frame buffers get converted 16 or 32 bpp frames.
+  - On exit, or on Ctrl-C, it restores the mode.
+  - The WAD: `-iwad FILE`, else `/mnt/DOOM1.WAD`, the SD card's root.
+    None ships in the image.
+  - Keys from the terminal (the UART or SSH): arrows, `z` or `,` to fire,
+    space to open, Enter/Esc for menus, Tab for the map, 1-7 for weapons.
+    A terminal sends no key releases, so a key counts as released when it
+    hasn't repeated for 100-180 ms. Without a terminal, Doom plays its
+    demos.
+  - `DOOM_FPS=1` prints the frame rate every 10 s.
+
+Emulator (no VGA model, `klausscpu_fb.force=1` in `CONFIG_CMDLINE`):
+- `fbtest check` passes.
+- `doom` runs the attract loop, and `doom -timedemo demo1` finishes (5026
+  gametics).
+- A mid-demo `fbtest shot`, converted by `fb2png.py`, is a correct Doom
+  frame.
+- Without `/dev/fb0`, `doom` exits 1 with `no frame buffer`. Without a
+  WAD it says so and exits 1.
+
+Board check (d9cf6c2 or later; the kernel's defconfig has `CONFIG_FB`):
+
+```
+linux/userland/doom.sh
+INITRAMFS_PROFILE=busybox linux/build.sh defconfig vmlinux
+linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 96
+gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 install-rootfs -z -
+klausscc -i linux-ws/build/vmlinux -s -m
+```
+
+On the board:
+1. dmesg shows `fb0: klausscpu-vga 640x480 RGB565, 1200 KiB at ...,
+   vsync IRQ`, and the monitor goes black.
+2. `fbtest vsync 60` prints about 59.5 Hz, and `grep vga
+   /proc/interrupts` shows the count.
+3. `fbtest check` prints `fbtest: PASS`.
+4. `cat /sys/module/klausscpu_fb/parameters/status` shows the frame count
+   rising and `underflows 0`.
+5. `fbtest bars` shows colour bars over a grey ramp. `fbtest bars
+   320x200x8` shows the same bars doubled, centred, from the palette.
+6. From the PC, `linux/tools/fbshot.sh root@192.168.68.59 bars.png`;
+   compare it with the monitor.
+7. `DOOM_FPS=1 doom` plays the demos; from an SSH terminal, the keys
+   play. While it runs, `fbshot.sh` from a second SSH session catches a
+   frame.
+8. `doom -timedemo demo1` prints `timed 5026 gametics in N realtics (F
+   fps)`. Zephyr's VGA build reached 24.7 fps in gameplay.
+9. After Doom exits, `fbtest info` is back at 640x480, 16 bpp.
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
