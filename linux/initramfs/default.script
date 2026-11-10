@@ -1,5 +1,6 @@
 #!/bin/sh
-# udhcpc's default script: apply the lease to the interface.
+# udhcpc's default script: apply the lease to the interface.  DNS servers
+# go to /run/resolv.conf (/etc/resolv.conf links there; / may be read-only).
 case "$1" in
 deconfig)
 	ifconfig "$interface" 0.0.0.0
@@ -13,10 +14,10 @@ bound|renew)
 			break
 		done
 	fi
-	: >/etc/resolv.conf
-	[ -n "$domain" ] && echo "search $domain" >>/etc/resolv.conf
+	: >/run/resolv.conf
+	[ -n "$domain" ] && echo "search $domain" >>/run/resolv.conf
 	for d in $dns; do
-		echo "nameserver $d" >>/etc/resolv.conf
+		echo "nameserver $d" >>/run/resolv.conf
 	done
 	;;
 esac

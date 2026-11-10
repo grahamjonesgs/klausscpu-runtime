@@ -96,7 +96,11 @@ file /www/index.html $HERE/etc/index.html 0644 0 0
 file /bin/musltest $OUT/initramfs/musltest 0755 0 0
 file /usr/bin/kskey $OUT/initramfs/kskey 0755 0 0
 file /usr/bin/install-rootfs $RT/linux/userland/install-rootfs 0755 0 0
+file /usr/bin/install-data $RT/linux/userland/install-data 0755 0 0
 dir /mnt 0755 0 0
+dir /run 0755 0 0
+slink /etc/resolv.conf ../run/resolv.conf 0777 0 0
+slink /etc/dropbear ../run/dropbear 0777 0 0
 LIST
   # Dropbear (linux/userland/dropbear.sh), if built: one multi-call binary.
   if [ -x "$DB" ]; then

@@ -1,5 +1,17 @@
 #!/bin/sh
 # /etc/init.d/rcS: busybox init's sysinit for the KlaussCPU Linux port.
+#
+# On the SD card's system image the root is read-only: what changes at run
+# time goes to tmpfs (/tmp, /run; /var's entries and /etc/resolv.conf and
+# /etc/dropbear link there) or to /data (data.img: /root and /home link
+# into it).  Local settings live in /data/etc:
+#   network   shell variable assignments: HOSTNAME, and IP (a static address
+#             instead of DHCP) with NETMASK, GATEWAY and DNS.  Read in a
+#             subshell, which hands back only those variables: a broken
+#             file gets a warning and the defaults, not a dead boot.
+#   rc.local  run at the end of this script, in its own shell in the
+#             background, so it can't stop or hang the boot
+#
 # The standalone shell runs applets through /proc/self/exe, so /proc goes
 # first, through the binary itself.
 /bin/busybox mount -t proc proc /proc
@@ -7,11 +19,40 @@ mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
 mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
-mount -t tmpfs tmpfs /tmp
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+mount -t tmpfs -o mode=755 tmpfs /run
+mkdir -p /run/log /run/lock /run/dropbear
 # mdev: hotplug for devices that appear later, and a pass over /sys now.
 echo /sbin/mdev > /proc/sys/kernel/hotplug
 mdev -s
-hostname klausscpu
+
+if [ -L /root ] && grep -q '^tmpfs /data ' /proc/mounts; then
+	echo "rcS: WARNING: /data is in RAM (no usable /linux/data.img on the SD card):"
+	echo "rcS: WARNING: /root, /home and /data/etc are lost at reboot"
+fi
+
+HOSTNAME=klausscpu
+IP=
+NETMASK=255.255.255.0
+GATEWAY=
+DNS=
+# The known variables of /data/etc/network, as single-quoted assignments.
+netvars() {
+	. /data/etc/network >/dev/null 2>&1 </dev/null || exit 1
+	for v in HOSTNAME IP NETMASK GATEWAY DNS; do
+		eval "val=\${$v}"
+		printf "%s='%s'\n" "$v" "$(printf %s "$val" | sed "s/'/'\\\\''/g")"
+	done
+}
+if [ -r /data/etc/network ]; then
+	if vars=$(netvars) && [ -n "$vars" ]; then
+		eval "$vars"
+		echo "rcS: settings from /data/etc/network"
+	else
+		echo "rcS: WARNING: /data/etc/network failed to load; using the defaults"
+	fi
+fi
+hostname "$HOSTNAME" || hostname klausscpu
 
 ifconfig lo 127.0.0.1 up
 if [ -e /sys/class/net/eth0 ]; then
@@ -21,18 +62,33 @@ if [ -e /sys/class/net/eth0 ]; then
 	while [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null)" != 1 ] && [ $i -lt 20 ]; do
 		sleep 0.5; i=$((i + 1))
 	done
-	# DHCP (the router reserves 192.168.68.59 for 00:ab:cd:00:00:01),
-	# else that address statically: judged by the address eth0 ends up
-	# with, not udhcpc's status.  udhcpc's output is in /tmp/udhcpc.log.
-	udhcpc -i eth0 -n -q -t 5 -T 2 >/tmp/udhcpc.log 2>&1
-	if ! ifconfig eth0 | grep -q 'inet addr'; then
-		echo "rcS: no DHCP lease (see /tmp/udhcpc.log), using 192.168.68.59"
-		ifconfig eth0 192.168.68.59 netmask 255.255.255.0 up
-		route add default gw 192.168.68.1
+	if [ -n "$IP" ] && ifconfig eth0 "$IP" netmask "$NETMASK" up; then
+		echo "rcS: static address $IP (/data/etc/network)"
+		[ -n "$GATEWAY" ] && route add default gw "$GATEWAY"
+		: >/run/resolv.conf
+		for d in $DNS; do
+			echo "nameserver $d" >>/run/resolv.conf
+		done
+	else
+		[ -n "$IP" ] && echo "rcS: WARNING: static address $IP failed; trying DHCP"
+		# DHCP (the router reserves 192.168.68.59 for 00:ab:cd:00:00:01),
+		# else that address statically: judged by the address eth0 ends up
+		# with, not udhcpc's status.  udhcpc's output is in /tmp/udhcpc.log.
+		udhcpc -i eth0 -n -q -t 5 -T 2 >/tmp/udhcpc.log 2>&1
+		if ! ifconfig eth0 | grep -q 'inet addr'; then
+			echo "rcS: no DHCP lease (see /tmp/udhcpc.log), using 192.168.68.59"
+			ifconfig eth0 192.168.68.59 netmask 255.255.255.0 up
+			route add default gw 192.168.68.1
+		fi
 	fi
 	ifconfig eth0 | grep 'inet addr'
 	if [ -x /usr/sbin/dropbear ]; then
 		dropbear $(/etc/init.d/hostkey) -p 22 && echo "rcS: dropbear on port 22"
 	fi
 	httpd -h /www -p 80 && echo "rcS: httpd on port 80"
+fi
+
+if [ -r /data/etc/rc.local ]; then
+	echo "rcS: running /data/etc/rc.local"
+	sh /data/etc/rc.local </dev/null &
 fi

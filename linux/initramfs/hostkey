@@ -6,12 +6,14 @@
 #  2. else a key on the SD card, /mnt/linux/dropbear_ed25519_host_key,
 #     generated once and kept;
 #  3. else -R (a new key in RAM at the first connection).
-# Messages go to stderr; the option to stdout.
-mkdir -p /etc/dropbear
-k=/etc/dropbear/dropbear_ecdsa_host_key
+# Messages go to stderr; the option to stdout.  The converted key goes to
+# /run/dropbear (tmpfs; /etc/dropbear links there): the root may be
+# read-only, and the key is converted again at every boot.
+mkdir -p /run/dropbear
+k=/run/dropbear/dropbear_ecdsa_host_key
 mtd=$(grep '"storage"' /proc/mtd 2>/dev/null | cut -d: -f1)
-# Convert to a new file and move it over the old one: dropbearconvert won't
-# overwrite, and /etc persists when the root is the SD card's image.
+# Convert to a new file and move it over any old one: dropbearconvert won't
+# overwrite.
 rm -f "$k.new"
 if [ -n "$mtd" ] && kskey "/dev/$mtd" >/tmp/hostkey.pem 2>/dev/null &&
    dropbearconvert openssh dropbear /tmp/hostkey.pem "$k.new" >/dev/null 2>&1 &&

@@ -1,0 +1,80 @@
+#!/bin/sh
+# install-data [-z] [--force] <url>|- : put the persistent data image
+# (linux/rootfs/build-data.sh) on the SD card as /linux/data.img, once.
+# Reading stdin ("-") needs -z: gunzip's CRC-32 and length check is what
+# catches a transfer cut short.
+#
+# data.img holds user data (/root, /home, /data/etc), so an existing one is
+# never replaced unless --force is given.  As with install-rootfs, nothing
+# else on the card is touched, the image is written beside as
+# data.img.new and renamed only when complete, -z unpacks a gzip stream
+# (whose CRC-32 is checked), and "-" reads stdin:
+#   gzip -1c data.img | ssh root@<board> install-data -z -
+# With --force while data.img is mounted, the new image is staged as
+# data.img.next and sdinit swaps it in at the next boot (replacing a file in
+# use on FAT leaks its clusters).  sdinit keeps the old image as
+# /linux/data.img.old (delete it when the new one is right), and puts it
+# back if the new one doesn't mount.
+set -e
+gz=0
+force=0
+while :; do
+	case "${1:-}" in
+	-z) gz=1; shift ;;
+	--force) force=1; shift ;;
+	*) break ;;
+	esac
+done
+url=${1:-}
+[ -n "$url" ] || { echo "usage: install-data [-z] [--force] <url>|-" >&2; exit 2; }
+[ "$url" != - ] || [ $gz = 1 ] || { echo "install-data: reading stdin needs -z (gzip's CRC catches a cut transfer)" >&2; exit 2; }
+[ -b /dev/mmcblk0p1 ] || { echo "install-data: no SD card" >&2; exit 1; }
+mkdir -p /mnt
+grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
+mkdir -p /mnt/linux
+img=/mnt/linux/data.img
+if [ -e "$img" ] && [ $force = 0 ]; then
+	echo "install-data: $img exists and holds user data: not replaced (--force replaces it)" >&2
+	exit 1
+fi
+new=$img.new
+rm -f "$new"
+fail() {
+	echo "install-data: $1; $img is unchanged" >&2
+	rm -f "$new"
+	exit 1
+}
+if [ "$url" = - ]; then
+	echo "install-data: reading the image from stdin"
+	if [ $gz = 1 ]; then
+		gunzip -c >"$new" || fail "gunzip failed (bad CRC or truncated input)"
+	else
+		cat >"$new" || fail "cannot write $new"
+	fi
+else
+	echo "install-data: downloading $url"
+	if [ $gz = 1 ]; then
+		wget -O - "$url" | gunzip -c >"$new" || fail "download or gunzip failed"
+	else
+		wget -O "$new" "$url" || fail "download failed"
+	fi
+fi
+[ $gz = 1 ] && echo "install-data: gzip CRC-32 and length OK"
+# The new image's data reaches the card before its name does.
+sync
+# In use: a loop device holds data.img (mounted at /data, or by hand).
+inuse=0
+for f in /sys/block/loop*/loop/backing_file; do
+	[ -r "$f" ] && grep -q '/linux/data\.img$' "$f" && inuse=1
+done
+if [ -e "$img" ] && [ $inuse = 1 ]; then
+	rm -f "$img.next"
+	mv "$new" "$img.next"
+	sync
+	echo "install-data: staged as /linux/data.img.next; it REPLACES data.img at the next boot (the old one is kept as data.img.old)"
+else
+	rm -f "$img.next"	# a stale staged image must not replace this one later
+	mv -f "$new" "$img"
+	sync
+	echo "install-data: /linux/data.img installed; reboot to use it"
+fi

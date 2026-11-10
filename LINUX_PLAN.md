@@ -26,9 +26,11 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
     loopback passes on the emulator (`linux.sh <out> ssh`). It presents
     Zephyr's `ssh_shell` host key, read from the QSPI keystore (`kskey`,
     `linux.sh <out> keystore`);
-  - `/init` is `sdinit` (`linux/userland/sdinit.c`): it boots an ext4
-    image on the SD card, `/linux/rootfs.img` on the FAT partition, and
-    falls back to the initramfs (`linux.sh <out> rootfs`).
+  - `/init` is `sdinit` (`linux/userland/sdinit.c`): it boots the SD
+    card's read-only system image `/linux/rootfs.img`, with persistent
+    data in `/linux/data.img` at `/data` (`/root`, `/home`, `/data/etc`),
+    and falls back to the initramfs (`linux.sh <out> rootfs`, `sd-spi`,
+    `sd-native`; see "The SD card: system image and data image");
 - **Board-checked (2026-11-10, d9cf6c2):**
   - the richer busybox config is built (vi without regex search; built
     with `-DBB_GLOBAL_CONST=`, see below);
@@ -118,71 +120,146 @@ ssh-keyscan -t ecdsa 192.168.68.59 2>/dev/null | ssh-keygen -lf -
 `ssh root@192.168.68.59` then logs in without a host-key warning, because
 `known_hosts` already holds Zephyr's key.
 
-### Board checks: root file system on the SD card
+### The SD card: system image and data image
 
-The card keeps its single FAT partition and its files. Linux only adds
+The card keeps its single FAT partition and its files. Linux uses only
 the `/linux/` folder:
-- `/linux/rootfs.img`, an ext4 image;
-- `/linux/rootfs.img.new` while an install is in progress;
-- `/linux/dropbear_ed25519_host_key`, only when the QSPI key isn't found.
 
-The boot path:
-- `sdinit`, the initramfs's `/init`, mounts `mmcblk0p1` (vfat) and
-  attaches `/linux/rootfs.img` to a loop device. It mounts the image as
-  ext4 and switches root to it, after which the card is at `/mnt`.
-- Any failure falls back to the initramfs's busybox. The failures are no
-  card, no image, a mount error, or no `/sbin/init`.
-- Its messages start with `sdinit:`.
+| File | What | Written by |
+|---|---|---|
+| `rootfs.img` | the **system**: ext4, no journal, mounted **read-only** at `/` | `install-rootfs`, replaced whole |
+| `data.img` | the **data**: ext4 with a journal, mounted read-write at `/data` | `install-data`, once |
+| `rootfs.img.new`, `data.img.new` | an install in progress | renamed when complete |
+| `rootfs.img.next`, `data.img.next` | an install staged while the old image was in use; `sdinit` swaps it in at the next boot | `install-rootfs`; `install-data --force` |
+| `dropbear_ed25519_host_key` | the SSH host key, only when the QSPI key isn't found | `hostkey` |
 
-Build the image on the PC (busybox, and Dropbear if built; `/etc` comes
-from `linux/initramfs/`):
+Run-time layout of the system image:
+- `/root` → `/data/root` and `/home` → `/data/home` (symlinks).
+- `/data/etc` holds local settings. Examples are in
+  `/data/etc/*.example`.
+  - `network` holds variable assignments: `HOSTNAME`, and `IP`, `NETMASK`,
+    `GATEWAY`, `DNS` for a static address instead of DHCP. rcS reads it
+    in a subshell that hands back only those variables. A broken file
+    gets `rcS: WARNING: /data/etc/network failed to load; using the
+    defaults`, and the boot goes on. A static address that `ifconfig`
+    rejects falls back to DHCP.
+  - `rc.local` is run at the end of rcS, in its own shell, in the
+    background, so it can't stop or hang the boot.
+- The system `/etc` stays as built, so `passwd` doesn't work there.
+- `/tmp` and `/run` are tmpfs.
+- `/var/{run,log,lock}` → `/run/...`, and `/var/tmp` → `/tmp`.
+- `/etc/resolv.conf` → `/run/resolv.conf`, `/etc/dropbear` →
+  `/run/dropbear` (the QSPI host key is converted there at each boot), and
+  `/etc/mtab` → `/proc/mounts`.
+
+`data.img`'s cluster chain on FAT never changes after the install, so
+writes inside it don't touch the FAT. The ext4 journal protects it across
+resets. Errors remount it read-only.
+
+The boot path (`sdinit`, the initramfs's `/init`):
+- It mounts `mmcblk0p1` (vfat), swaps in any staged `.next` image, and
+  loop-mounts `rootfs.img` read-only. An older image whose journal needs
+  recovery mounts with `noload`.
+- It loop-mounts `data.img` read-write on `/data`; the ext4 journal
+  replays at mount, and nothing ever runs fsck on it.
+- It switches root; the card stays at `/mnt`.
+- **No `data.img`, or it doesn't mount:** `/data` becomes a tmpfs with
+  `root/`, `home/` and `etc/`. `sdinit` says why
+  (`sdinit: WARNING: no /mnt/sd/linux/data.img`, or `... does not mount
+  as ext4 (left as it is)`), and rcS warns `/data is in RAM`.
+- **The system image fails** (no card, no image, a mount error, or no
+  `/sbin/init`): it falls back to the initramfs's busybox, as before.
+
+First-time setup (PC, then board):
 
 ```
+# On the PC: build both images
 linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 96
-sha256sum linux-ws/rootfs.img
-cd linux-ws && python3 -m http.server 8000
+linux/rootfs/build-data.sh linux-ws/data.img 256     # size in MiB
+# Board booted from the initramfs or an older SD root, network up:
+gzip -1c linux-ws/data.img   | ssh root@192.168.68.59 install-data -z -
+gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 install-rootfs -z -
+# reload the kernel: klausscc -i linux-ws/build/vmlinux -s -m
 ```
 
-On the board, booted from the initramfs with the network up:
+`install-data` refuses to replace an existing `data.img`
+(`exists and holds user data: not replaced`), and reads stdin only with
+`-z`, so a cut transfer fails gunzip's check.
 
-```
-install-rootfs http://<PC>:8000/rootfs.img <sha256>
-```
+`--force` replaces `data.img`. While a loop device holds it, the
+replacement is staged as `data.img.next`. `sdinit` then keeps the old
+image as `data.img.old` (delete it once the new one is right). If the new
+one doesn't mount, `sdinit` restores the old one and keeps the new one as
+`data.img.bad`.
 
-If the PC's firewall blocks the board's connection (it does on Graham's
-PC: wget times out), push the image from the PC over SSH instead,
-compressed. Raw, 96 MiB at about 120 KiB/s takes about 14 minutes; the
-gzipped image is a few MB:
+Both install scripts `sync` before renaming the new file into place.
+
+Roll back the kernel and both images together. An older `sdinit` mounts
+the new journal-less system image read-write and doesn't mount `/data`.
+A newer `sdinit` mounts an older system image read-only, which has no
+`/data` or `/run` links.
+
+Rebuild and update the system:
 
 ```
 gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 install-rootfs -z -
 ```
 
-`-z` makes install-rootfs unpack the image itself, so gunzip's CRC-32 and
-length check covers the whole transfer; a damaged or truncated stream
-fails and keeps the old image (checked on the board with a truncated
-stream). A SHA-256 argument still works but costs about 2 minutes: it
-re-reads 96 MiB and hashes it in software at about 0.8 MB/s. Times on the
-board for the 96 MiB image (1.1 MB gzipped): SPI raw 22 min; SPI gzip +
-SHA 7 min 20 s; native SD gzip + SHA 4 min; native SD `-z` 78 s.
+From the running SD root, it is staged as `rootfs.img.next` and swapped in
+at the next boot. `install-rootfs` never touches `data.img`. Without SSH,
+`install-rootfs [-z] http://<PC>:8000/rootfs.img [sha256]` downloads it,
+but Graham's PC firewall blocks that.
 
-It downloads to `rootfs.img.new` and checks the SHA-256. Only then does it
-rename the file to `rootfs.img` and `sync`. Then reload the kernel
-(`klausscc -i linux-ws/build/vmlinux -s -m`).
+`-z` makes the install scripts unpack the image themselves, so gunzip's
+CRC-32 and length check covers the whole transfer; a damaged or truncated
+stream fails and keeps the old image. Times on the board for the 96 MiB
+system image (1.1 MB gzipped):
 
-The checks:
-- The console shows `EXT4-fs (loop0): mounted filesystem` and
-  `sdinit: switching to the SD card's root file system`.
+| Path | Time |
+|---|---|
+| SPI, raw | 22 min |
+| SPI, gzip + SHA-256 | 7 min 20 s |
+| native SD, gzip + SHA-256 | 4 min |
+| native SD, `-z` | 78 s |
+
+Board checks:
+- The console shows `sdinit: data.img mounted read-write at /data` and
+  `sdinit: switching to the SD card's root file system (read-only)`.
+- `grep -E ' / | /data ' /proc/mounts` shows `/dev/loop0 / ext4 ro` and
+  `/dev/loop1 /data ext4 rw`.
+- `touch /usr/x` fails (read-only file system), and `ls -l / | grep -E
+  'root|home'` shows the links.
 - `cat /etc/klausscpu-rootfs` prints the build date and runtime commit.
-- `grep ' / ' /proc/mounts` shows ext4 on `/dev/loop0`.
-- `ls /mnt/linux` lists the card's folder.
-- Persistence: `echo x > /root/t; sync`, reload, then `cat /root/t`.
-- Run `sync` before resetting the board, because the image is a file on
-  vfat.
+- **Persistence across a system update:**
+  1. `echo x > /root/t; sync`;
+  2. push a rebuilt `rootfs.img` with `install-rootfs -z -`;
+  3. reload the kernel;
+  4. the new `/etc/klausscpu-rootfs` is there, and `cat /root/t` gives `x`.
+- **Settings:**
+  1. `echo HOSTNAME=klaustest > /data/etc/network`, reload;
+  2. rcS prints `settings from /data/etc/network`, and `hostname` is
+     `klaustest`;
+  3. remove the file again.
+- **A static address:** set `IP=`, `NETMASK=`, `GATEWAY=` and `DNS=` there;
+  rcS then prints `static address ...` instead of running DHCP.
+- `install-data -z - < /dev/null` refuses (data.img exists).
+- Run `sync` before resetting the board. The data image's journal covers
+  a reset, but anything not yet synced is lost.
 
-To update, run `install-rootfs` again from the running system. The old
-image stays open until the next boot. To go back to the initramfs, rename
-`/linux/rootfs.img` on the card, for example from a PC.
+Emulator: `linux.sh sd-spi` and `linux.sh sd-native` run this whole cycle
+on the klausscc SD model:
+- install both images;
+- show the second `install-data` refusing;
+- show `/` read-only and `/data` read-write;
+- write `/root/t`, install a newer system image B, reboot, and find
+  `/root/t` and the `/data/etc` settings still there;
+- boot with a broken `/data/etc/network` (warning, defaults, boot goes
+  on);
+- boot once without `data.img`.
+
+Boot 3 also shows the journal at work: boot 2 ended without an unmount,
+as a board reset does, and boot 3 logs `EXT4-fs (loop1): recovery
+complete` when it mounts `data.img`.
 
 ### Board checks: SD card speed
 

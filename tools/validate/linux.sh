@@ -104,12 +104,21 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
     export INITRAMFS_EXTRA=$OUT/extra.list
   fi
   if [ $SD = 1 ]; then
-    # The rootfs image rides in the initramfs as /seed/rootfs.img (not
-    # /test, which sdinit would boot); the card starts with an empty FAT32
-    # partition at sector 2048, as on the board's card.
-    "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 ||
-      { echo "FAIL rootfs image (see $OUT/rootfs.log)"; exit 1; }
-    printf 'dir /seed 0755 0 0\nfile /seed/rootfs.img %s 0644 0 0\n' "$OUT/rootfs.img" >"$OUT/extra.list"
+    # The images ride in the initramfs under /seed (not /test, which
+    # sdinit would boot): system image A raw, a newer system image B and
+    # a data image gzipped; the card starts with an empty FAT32 partition
+    # at sector 2048, as on the board's card.
+    KLAUSSCPU_ROOTFS_TAG=A "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs.img" 16 >"$OUT/rootfs.log" 2>&1 &&
+      KLAUSSCPU_ROOTFS_TAG=B "$RT/linux/rootfs/build-rootfs.sh" "$OUT/rootfs-b.img" 16 >>"$OUT/rootfs.log" 2>&1 &&
+      "$RT/linux/rootfs/build-data.sh" "$OUT/data.img" 16 >>"$OUT/rootfs.log" 2>&1 &&
+      gzip -1f "$OUT/rootfs-b.img" "$OUT/data.img" ||
+      { echo "FAIL rootfs/data images (see $OUT/rootfs.log)"; exit 1; }
+    {
+      echo 'dir /seed 0755 0 0'
+      echo "file /seed/rootfs.img $OUT/rootfs.img 0644 0 0"
+      echo "file /seed/rootfs-b.img.gz $OUT/rootfs-b.img.gz 0644 0 0"
+      echo "file /seed/data.img.gz $OUT/data.img.gz 0644 0 0"
+    } >"$OUT/extra.list"
     if [ "$MODE" = sd-native ]; then
       # sdcmd: ACMD51/13/22 (8, 64 and 4-byte blocks) through MMC_IOC_CMD.
       # Test-only, since its wtest writes raw sectors.
@@ -140,12 +149,13 @@ cp "$OUT/build/vmlinux" "$OUT/vmlinux"
 
 # expect_in_order <expect> <out>: every line of <expect> is a whole line of
 # <out> (CRs, trailing blanks, a "[ time]" printk prefix and the prompt
-# prefix "$ " ignored), in order.
+# prefix ignored: "$ " or profile's "user@host:dir $ "), in order.
 expect_in_order() {
   awk 'BEGIN { n = 0; i = 0 }
        NR == FNR { sub(/[ \t]+$/, ""); want[n++] = $0; next }
        { sub(/\r$/, ""); sub(/[ \t]+$/, ""); line = $0
-         sub(/^\[ *[0-9]+\.[0-9]+\] /, "", line); while (sub(/^\$ /, "", line)) {}
+         sub(/^\[ *[0-9]+\.[0-9]+\] /, "", line)
+         while (sub(/^[^ ]*@[^ ]*:[^ ]* \$ /, "", line) || sub(/^\$ /, "", line)) {}
          if (i < n && line == want[i]) i++ }
        END { if (i < n) { print "missing: " want[i]; exit 1 } }' "$1" "$2"
 }
@@ -251,7 +261,7 @@ grep ' / ' /proc/mounts | cut -d' ' -f3
 /usr/bin/musltest | tail -1
 EOF2
   cat >"$OUT/rootfs.expect" <<'EOF2'
-sdinit: switching to the SD card's root file system
+sdinit: switching to the SD card's root file system (read-only)
 klausscpu-rootfs
 ext4
 musltest: PASS
@@ -283,6 +293,11 @@ elif [ $SD = 1 ]; then
       echo '/seed/sdcmd scr /dev/mmcblk0; /seed/sdcmd ssr /dev/mmcblk0'
       echo '/seed/sdcmd wtest /dev/mmcblk0 131056'
     fi
+    # The data image, once; a second install must refuse.  System image B
+    # goes on the card for boot 2 to install (the initramfs is gone then).
+    echo 'install-data -z - < /seed/data.img.gz'
+    echo 'install-data -z - < /seed/data.img.gz; echo status $?'
+    echo 'cp /seed/rootfs-b.img.gz /mnt/linux/; sync'
     echo 'umount /mnt; head -c 8388608 /dev/mmcblk0 | sha256sum | cut -c1-16'
   } >"$OUT/sd1.in"
   {
@@ -313,6 +328,10 @@ elif [ $SD = 1 ]; then
       echo 'acmd22: 8 blocks written'
       echo 'wtest: read back same'
     fi
+    echo 'install-data: gzip CRC-32 and length OK'
+    echo 'install-data: /linux/data.img installed; reboot to use it'
+    echo 'install-data: /mnt/linux/data.img exists and holds user data: not replaced (--force replaces it)'
+    echo 'status 1'
   } >"$OUT/sd1.expect"
   run_step sd1 100000000000 3000 '$ '
   # The raw read of the card's first 8 MiB, against the image file.
@@ -326,23 +345,97 @@ elif [ $SD = 1 ]; then
     grep -aq '^ssr: ' "$OUT/sd1.out" || bad "sd1: sdcmd ssr (ACMD13, 64 bytes)"
   fi
 
-  # Boot 2: sdinit switches to the card's image.
+  # Boot 2: sdinit mounts system image A read-only and data.img at /data.
   cat >"$OUT/sd2.in" <<'EOF2'
-cut -d' ' -f1 /etc/klausscpu-rootfs
-grep ' / ' /proc/mounts | cut -d' ' -f1,3
-ls /mnt/linux/rootfs.img
+cut -d' ' -f1,6 /etc/klausscpu-rootfs
+grep ' / ' /proc/mounts | cut -d' ' -f1,3,4 | cut -d, -f1
+grep ' /data ' /proc/mounts | cut -d' ' -f1,3,4 | cut -d, -f1
+touch /usr/x 2>/dev/null && echo usr writable || echo usr read-only
 echo persist > /root/t; sync; cat /root/t
+ls /mnt/linux/rootfs.img
 /usr/bin/musltest | tail -1
+echo HOSTNAME=klaustest > /data/etc/network; echo 'echo rc.local ran' > /data/etc/rc.local; sync
+install-rootfs -z - < /mnt/linux/rootfs-b.img.gz
 EOF2
   cat >"$OUT/sd2.expect" <<'EOF2'
-sdinit: switching to the SD card's root file system
-klausscpu-rootfs
-/dev/loop0 ext4
-/mnt/linux/rootfs.img
+sdinit: data.img mounted read-write at /data
+sdinit: switching to the SD card's root file system (read-only)
+klausscpu-rootfs A
+/dev/loop0 ext4 ro
+/dev/loop1 ext4 rw
+usr read-only
 persist
+/mnt/linux/rootfs.img
 musltest: PASS
+install-rootfs: staged as /linux/rootfs.img.next; it replaces rootfs.img at the next boot
 EOF2
   run_step sd2 60000000000 2400 '$ '
+
+  # Boot 3: sdinit swaps in system image B; /root and the settings in
+  # /data/etc survive.  Then a broken /data/etc/network for boot 4.
+  cat >"$OUT/sd3.in" <<'EOF2'
+cut -d' ' -f1,6 /etc/klausscpu-rootfs
+cat /root/t
+hostname
+touch /usr/x 2>/dev/null && echo usr writable || echo usr read-only
+printf 'IP="192.168\n' > /data/etc/network; sync; echo broken
+EOF2
+  cat >"$OUT/sd3.expect" <<'EOF2'
+sdinit: installed the staged /linux/rootfs.img.next
+sdinit: data.img mounted read-write at /data
+rcS: settings from /data/etc/network
+rcS: running /data/etc/rc.local
+rc.local ran
+klausscpu-rootfs B
+persist
+klaustest
+usr read-only
+broken
+EOF2
+  run_step sd3 60000000000 2400 '$ '
+
+  # Boot 4: the broken settings file gets a warning and the defaults; the
+  # boot goes on.  Then data.img is renamed away for boot 5.
+  cat >"$OUT/sd4.in" <<'EOF2'
+hostname
+cat /root/t
+mv /mnt/linux/data.img /mnt/linux/data.img.off; sync; echo moved
+EOF2
+  cat >"$OUT/sd4.expect" <<'EOF2'
+sdinit: data.img mounted read-write at /data
+rcS: WARNING: /data/etc/network failed to load; using the defaults
+rcS: running /data/etc/rc.local
+klausscpu
+persist
+moved
+EOF2
+  run_step sd4 60000000000 2400 '$ '
+
+  # Boot 5: no data.img: still boots, /data (so /root) in RAM, warned.
+  cat >"$OUT/sd5.in" <<'EOF2'
+cut -d' ' -f1,6 /etc/klausscpu-rootfs
+grep ' /data ' /proc/mounts | cut -d' ' -f1,3
+echo x > /root/y && cat /root/y
+hostname
+EOF2
+  cat >"$OUT/sd5.expect" <<'EOF2'
+sdinit: WARNING: no /mnt/sd/linux/data.img
+sdinit: WARNING: /data is a tmpfs: /root, /home and /data/etc are lost at reboot
+sdinit: switching to the SD card's root file system (read-only)
+rcS: WARNING: /data is in RAM (no usable /linux/data.img on the SD card):
+klausscpu-rootfs B
+tmpfs tmpfs
+x
+klausscpu
+EOF2
+  run_step sd5 60000000000 2400 '$ '
+  # The emulator stops with the card mounted (the system image lives on
+  # it), as a board reset would: clear vfat's dirty flag (boot sector byte
+  # 0x41) in the copy, so fsck.fat reports only real damage.
+  dd if="$CARD" of="$OUT/part.img" bs=512 skip=2048 status=none
+  printf '\0' | dd of="$OUT/part.img" bs=1 seek=65 conv=notrunc status=none
+  fsck.fat -n "$OUT/part.img" >"$OUT/fsck5.log" 2>&1 || bad "sd5: fsck.fat after the boots (see $OUT/fsck5.log)"
+  rm -f "$OUT/part.img"
 
   # Fault boots (klausscc --sd-fault; transient: a retry succeeds).  Each
   # starts from the empty card, so sdinit stays in the initramfs and boot
