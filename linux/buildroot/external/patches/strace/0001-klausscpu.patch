@@ -1,0 +1,248 @@
+From: KlaussCPU Linux port
+Subject: [PATCH] Add the KlaussCPU architecture
+
+A linux/klausscpu port: the generic 64-bit syscall table, the general
+registers as PTRACE_GETREGSET NT_PRSTATUS (struct user_regs_struct:
+r0-r15, sp, pc, flags), arguments in r0-r5 and the result in r12.
+The syscall number is read and changed with PTRACE_GET/SET_SYSCALL_INFO,
+since the kernel sets r12 to -ENOSYS at entry and keeps the number
+aside.  configure is patched along with configure.ac (no autoreconf).
+
+diff -ruN a/configure b/configure
+--- a/configure	2026-11-10 19:10:08.802641650 +0200
++++ b/configure	2026-11-10 19:10:08.814821629 +0200
+@@ -6493,6 +6493,13 @@
+ 		esac
+ 	fi
+ 	;;
++klausscpu*)
++	arch=klausscpu
++	karch=klausscpu
++
++printf "%s\n" "#define KLAUSSCPU 1" >>confdefs.h
++
++	;;
+ riscv64*)
+ 	arch=riscv64
+ 	karch=riscv
+diff -ruN a/configure.ac b/configure.ac
+--- a/configure.ac	2026-11-10 19:10:08.802605573 +0200
++++ b/configure.ac	2026-11-10 19:10:08.813863204 +0200
+@@ -168,6 +168,11 @@
+ 		esac
+ 	fi
+ 	;;
++klausscpu*)
++	arch=klausscpu
++	karch=klausscpu
++	AC_DEFINE([KLAUSSCPU], 1, [Define for the KlaussCPU architecture.])
++	;;
+ riscv64*)
+ 	arch=riscv64
+ 	karch=riscv
+diff -ruN a/src/linux/klausscpu/arch_defs_.h b/src/linux/klausscpu/arch_defs_.h
+--- a/src/linux/klausscpu/arch_defs_.h	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/arch_defs_.h	2026-11-10 19:10:08.815166157 +0200
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/* EM_KLAUSSCPU 0x4B43, 64-bit, little-endian (the kernel's AUDIT_ARCH_KLAUSSCPU). */
++#define AUDIT_ARCH_KLAUSSCPU 0xc0004b43
++#define PERSONALITY0_AUDIT_ARCH { AUDIT_ARCH_KLAUSSCPU, 0 }
++/* The result register (r12) is also the syscall-number register. */
++#define ARCH_NEEDS_SET_ERROR_FOR_SCNO_TAMPERING 1
+diff -ruN a/src/linux/klausscpu/arch_regs.c b/src/linux/klausscpu/arch_regs.c
+--- a/src/linux/klausscpu/arch_regs.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/arch_regs.c	2026-11-10 19:10:08.815187937 +0200
+@@ -0,0 +1,17 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/*
++ * The general registers (PTRACE_GETREGSET NT_PRSTATUS): struct
++ * user_regs_struct of <sys/user.h>, r0-r15, sp, pc, flags (the layout of
++ * the kernel's struct user_pt_regs).
++ * The syscall ABI: number in r12, arguments in r0-r5, result in r12.
++ */
++static struct user_regs_struct klausscpu_regs;
++#define ARCH_REGS_FOR_GETREGSET klausscpu_regs
++#define ARCH_PC_REG klausscpu_regs.pc
++#define ARCH_SP_REG klausscpu_regs.sp
+diff -ruN a/src/linux/klausscpu/get_error.c b/src/linux/klausscpu/get_error.c
+--- a/src/linux/klausscpu/get_error.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/get_error.c	2026-11-10 19:10:08.815247237 +0200
+@@ -0,0 +1,19 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++#include "negated_errno.h"
++
++static void
++arch_get_error(struct tcb *tcp, const bool check_errno)
++{
++	if (check_errno && is_negated_errno(klausscpu_regs.r[12])) {
++		tcp->u_rval = -1;
++		tcp->u_error = -klausscpu_regs.r[12];
++	} else {
++		tcp->u_rval = klausscpu_regs.r[12];
++	}
++}
+diff -ruN a/src/linux/klausscpu/get_scno.c b/src/linux/klausscpu/get_scno.c
+--- a/src/linux/klausscpu/get_scno.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/get_scno.c	2026-11-10 19:10:08.815209257 +0200
+@@ -0,0 +1,21 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/*
++ * At a syscall-entry stop the kernel has already set r12 to -ENOSYS and
++ * keeps the number aside (as arm64 does), so the registers don't give it:
++ * the number comes from PTRACE_GET_SYSCALL_INFO (Linux >= 5.3), which
++ * get_scno uses at every entry stop.  This fallback is for stops without
++ * that information.
++ */
++static int
++arch_get_scno(struct tcb *tcp)
++{
++	error_msg("pid %d: the syscall number needs PTRACE_GET_SYSCALL_INFO",
++		  tcp->pid);
++	return 0;
++}
+diff -ruN a/src/linux/klausscpu/get_syscall_args.c b/src/linux/klausscpu/get_syscall_args.c
+--- a/src/linux/klausscpu/get_syscall_args.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/get_syscall_args.c	2026-11-10 19:10:08.815228482 +0200
+@@ -0,0 +1,19 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/* Return -1 on error or 1 on success (never 0!). */
++static int
++arch_get_syscall_args(struct tcb *tcp)
++{
++	tcp->u_arg[0] = klausscpu_regs.r[0];
++	tcp->u_arg[1] = klausscpu_regs.r[1];
++	tcp->u_arg[2] = klausscpu_regs.r[2];
++	tcp->u_arg[3] = klausscpu_regs.r[3];
++	tcp->u_arg[4] = klausscpu_regs.r[4];
++	tcp->u_arg[5] = klausscpu_regs.r[5];
++	return 1;
++}
+diff -ruN a/src/linux/klausscpu/ioctls_arch0.h b/src/linux/klausscpu/ioctls_arch0.h
+--- a/src/linux/klausscpu/ioctls_arch0.h	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/ioctls_arch0.h	2026-11-10 19:10:08.815296548 +0200
+@@ -0,0 +1 @@
++/* Generated by ioctls_gen.sh from definitions found in $linux/arch/klausscpu/include tree. */
+diff -ruN a/src/linux/klausscpu/ioctls_inc0.h b/src/linux/klausscpu/ioctls_inc0.h
+--- a/src/linux/klausscpu/ioctls_inc0.h	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/ioctls_inc0.h	2026-11-10 19:10:08.815307839 +0200
+@@ -0,0 +1 @@
++#include "../64/ioctls_inc.h"
+diff -ruN a/src/linux/klausscpu/set_error.c b/src/linux/klausscpu/set_error.c
+--- a/src/linux/klausscpu/set_error.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/set_error.c	2026-11-10 19:10:08.815258618 +0200
+@@ -0,0 +1,20 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++static int
++arch_set_error(struct tcb *tcp)
++{
++	klausscpu_regs.r[12] = -tcp->u_error;
++	return set_regs(tcp->pid);
++}
++
++static int
++arch_set_success(struct tcb *tcp)
++{
++	klausscpu_regs.r[12] = tcp->u_rval;
++	return set_regs(tcp->pid);
++}
+diff -ruN a/src/linux/klausscpu/set_scno.c b/src/linux/klausscpu/set_scno.c
+--- a/src/linux/klausscpu/set_scno.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/set_scno.c	2026-11-10 19:10:08.815269598 +0200
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/*
++ * The kernel keeps the syscall number outside the general registers, so
++ * it can only be changed with PTRACE_SET_SYSCALL_INFO (Linux >= 6.16),
++ * which set_scno tries first; this fallback can't.
++ */
++static int
++arch_set_scno(struct tcb *tcp, kernel_ulong_t scno)
++{
++	errno = ENOSYS;
++	return -1;
++}
+diff -ruN a/src/linux/klausscpu/syscallent.h b/src/linux/klausscpu/syscallent.h
+--- a/src/linux/klausscpu/syscallent.h	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/syscallent.h	2026-11-10 19:10:08.815281080 +0200
+@@ -0,0 +1,9 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/* The kernel uses the generic 64-bit syscall table (scripts/syscall.tbl). */
++#include "../64/syscallent.h"
+diff -ruN a/src/linux/klausscpu/arch_sigreturn.c b/src/linux/klausscpu/arch_sigreturn.c
+--- a/src/linux/klausscpu/arch_sigreturn.c	1970-01-01 02:00:00.000000000 +0200
++++ b/src/linux/klausscpu/arch_sigreturn.c	2026-11-10 19:18:37.244756714 +0200
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2026 The strace developers.
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: LGPL-2.1-or-later
++ */
++
++/*
++ * At rt_sigreturn the stack pointer is at the kernel's struct rt_sigframe:
++ * the siginfo (128 bytes), then the ucontext in the asm-generic layout,
++ * whose signal mask comes last (musl's ucontext_t matches it).
++ */
++static void
++arch_sigreturn(struct tcb *tcp)
++{
++	kernel_ulong_t sp;
++	uint32_t mask[NSIG_BYTES / sizeof(uint32_t)];
++
++	if (!get_stack_pointer(tcp, &sp))
++		return;
++	const kernel_ulong_t addr = sp + 128 + offsetof(ucontext_t, uc_sigmask);
++	if (umove_or_printaddr(tcp, addr, &mask))
++		return;
++	tprintsigmask_addr(mask);
++}

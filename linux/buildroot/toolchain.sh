@@ -15,7 +15,7 @@
 #     only warns, which -Werror packages would trip on);
 #   - for --sysroot=X (Buildroot's staging) they also search X/usr/include
 #     and X/usr/lib, where packages install, besides clang's X/include and
-#     X/lib;
+#     X/lib, after the package's own directories, as gcc does;
 #   - always -static (musl, static only), and -ffunction-sections
 #     -fdata-sections: a .text bigger than the branch range can't get
 #     range-extension thunks inside it (SQLite hit this).
@@ -52,12 +52,13 @@ for a in "\$@"; do
 	esac
 done
 pre=(--target=klausscpu-unknown-linux-musl --sysroot="\$sysroot")
-[ "\$mode" = cpp ] && exec "$B/clang" "\${pre[@]}" -isystem "\$sysroot/usr/include" -E "\${args[@]}"
+[ "\$mode" = cpp ] && exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" -E "\${args[@]}"
 [ "\$mode" = as ] && exec "$B/clang" "\${pre[@]}" -c -x assembler "\${args[@]}"
-# The sysroot's -L goes last: -L order is search order, and a package's
-# own -L (its freshly built libraries) must win over what staging holds,
-# as with gcc's sysroot directories.
-exec "$B/clang" "\${pre[@]}" -isystem "\$sysroot/usr/include" \\
+# The sysroot's directories come last, as gcc's do: -idirafter after every
+# -I/-isystem (strace's bundled kernel headers must win over the sysroot's
+# newer ones), and -L after the package's own (its freshly built libraries
+# must win over what staging holds).
+exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" \\
 	-static -ffunction-sections -fdata-sections -Wno-unused-command-line-argument \\
 	"\${args[@]}" -L"\$sysroot/usr/lib"
 EOF

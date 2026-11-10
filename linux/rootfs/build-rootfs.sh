@@ -139,6 +139,17 @@ if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
     mkdir -p "$(dirname "$d")"
     rm -f "$d"
     cp -a "$X/$f" "$d"
+    # The package's program replaces busybox's applet of that name in the
+    # other bin directories too, which may come first in PATH (/bin/less).
+    case $f in
+    bin/*|sbin/*|usr/bin/*|usr/sbin/*)
+      for b in bin sbin usr/bin usr/sbin; do
+        o=$ST/$b/${f##*/}
+        if [ "$o" != "$d" ] && [ -L "$o" ]; then
+          case $(readlink "$o") in *busybox) rm -f "$o" ;; esac
+        fi
+      done ;;
+    esac
   done
   echo "buildroot: merged $(tar -tf "$BRT" | grep -c -E '^\./(usr/)?s?bin/[^/]+$') programs from $BRT"
   install -m 755 "$RT/linux/userland/tests/buildroot-test.sh" "$T/"

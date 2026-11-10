@@ -1,0 +1,22 @@
+package/strace: bundled kernel headers on KlaussCPU
+
+The KlaussCPU toolchain carries the 7.3 kernel headers, newer than
+strace 6.19 expects (its io_uring decoder no longer compiles), so
+configure strace with --enable-bundled=yes there.
+
+diff -ruN a/package/strace/strace.mk b/package/strace/strace.mk
+--- a/package/strace/strace.mk	2026-11-10 19:11:04.835794279 +0200
++++ b/package/strace/strace.mk	2026-11-10 19:11:04.846960160 +0200
+@@ -12,6 +12,12 @@
+ STRACE_CPE_ID_VALID = YES
+ STRACE_CONF_OPTS = --enable-mpers=no
+ 
++# KlaussCPU's toolchain has the 7.3 kernel headers, newer than strace
++# expects (io_uring structures changed): use strace's bundled uapi headers.
++ifeq ($(BR2_klausscpu),y)
++STRACE_CONF_OPTS += --enable-bundled=yes
++endif
++
+ ifeq ($(BR2_PACKAGE_LIBUNWIND),y)
+ STRACE_DEPENDENCIES += libunwind
+ STRACE_CONF_OPTS += --with-libunwind

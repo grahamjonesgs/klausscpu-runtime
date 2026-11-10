@@ -333,6 +333,111 @@ curl -sS https://example.com/ | head    # https with the CA bundle
   processes.
 - `tlbmiss` runs up to 64 pages.
 
+### Buildroot packages
+
+Packages are a Buildroot config switch rather than a hand port each.
+Buildroot builds only the packages. `linux/build.sh` still builds the
+kernel, and our initramfs, `sdinit`, `rcS` and layout stay.
+
+**Files:**
+
+| File | What |
+|---|---|
+| `linux/buildroot/fetch.sh` | Buildroot 2026.02.3 (LTS, SHA-256 pinned) into `linux-ws/buildroot`, with `linux/buildroot/patches/*` applied |
+| `patches/0001-gnuconfig-klausscpu.patch` | `support/gnuconfig/config.sub` knows `klausscpu`. Buildroot copies it into every autotools package, so they configure as `--host=klausscpu-buildroot-linux-musl` |
+| `patches/0002-arch-klausscpu.patch` | `BR2_klausscpu`: 64-bit little-endian, MMU, soft float, readelf name `KlaussCPU` (EM 0x4B43) |
+| `patches/0003-htop-static.patch` | htop with `BR2_STATIC_LIBS`: htop's own `--enable-static`, without its dlopen() features |
+| `patches/0004-strace-bundled-headers.patch` | strace on KlaussCPU uses its bundled uapi headers (our 7.3 headers are newer than strace 6.19 expects) |
+| `linux/buildroot/toolchain.sh` | `linux-ws/br-toolchain`: gcc-named wrappers around our clang and the LLVM tools, and a usr/-layout copy of the musl sysroot with the 7.3 headers |
+| `linux/buildroot/external/` | the BR2_EXTERNAL tree: `configs/klausscpu_defconfig` and `patches/strace/0001-klausscpu.patch` (strace's KlaussCPU port) |
+| `linux/buildroot/build.sh [targets]` | build into `linux-ws/br-output` (downloads in `linux-ws/br-dl`); the result is `images/rootfs.tar` |
+
+**The toolchain wrapper.** `klausscpu-linux-musl-gcc` runs clang
+`--target=klausscpu-unknown-linux-musl`:
+- It answers `-dumpversion` with 14.2.0, since the defconfig selects
+  GCC 14.
+- It drops `-msoft-float`.
+- It links statically, with `-ffunction-sections` by default.
+- For Buildroot's `--sysroot=<staging>` it adds `usr/include` with
+  `-idirafter` and `usr/lib` last, after the package's own directories,
+  as gcc's sysroot directories come. Both orders mattered:
+  - with the sysroot `-L` first, ncurses linked staging's older
+    `libncurses.a`;
+  - with the sysroot includes first, strace saw the sysroot's
+    `io_uring.h` instead of its bundled one.
+
+**The defconfig:**
+- external custom toolchain, musl, static libs;
+- headers 6.19, Buildroot's latest, which makes the 7.3 check loose;
+- no SSP, no init, no `/bin/sh`, no busybox;
+- `rootfs.tar`;
+- `BR2_GLOBAL_PATCH_DIR` pointing at the external `patches/`.
+
+**Into the system image:**
+
+```
+linux/buildroot/build.sh                       # all packages
+ROOTFS_BUILDROOT=1 linux/rootfs/build-rootfs.sh linux-ws/rootfs.img 96
+```
+
+This merges `bin`, `sbin` and `usr` from `rootfs.tar`:
+- A package's program replaces busybox's applet of that name in every
+  bin directory (`/bin/less` would otherwise shadow `/usr/bin/less`).
+- It never replaces one of our own files.
+- Buildroot's `/etc`, headers and static libraries stay out.
+
+**Emulator check.** `tools/validate/linux.sh <out> buildroot` boots that
+image, as the ports mode does, and runs `tests/buildroot-test.sh`. All
+10/10 pass. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output`, and
+`LINUX_BUILDROOT_EXPECT=N` requires at least N packages.
+
+**Applets win in the shell.** The busybox shell is built with
+`FEATURE_PREFER_APPLETS`, so typing `less` runs busybox's applet even
+though `/usr/bin/less` is installed. The test therefore calls each
+package by its real path. To make packages win interactively, drop the
+overlapping applets from `busybox.config`, or turn
+`FEATURE_PREFER_APPLETS` off; the system image has applet links, so it
+doesn't need the setting.
+
+| Package | Version | Check |
+|---|---|---|
+| zlib | 1.3.2 | `file -z` on a gzip stream |
+| ncurses | 6.6 | `infocmp vt100` (cols#80), `tput clear` |
+| nano | 8.7 | `--version` |
+| file | 5.46 | `file` on an ELF and a script |
+| less | 692 | the real less (not busybox's), `-F` on a pipe |
+| tree | 2.2.1 | a small tree's summary |
+| jq | 1.8.1 | `.a\|map(.*2)` |
+| htop | 3.4.1 | `--version` |
+| tmux | 3.6a (libevent 2.1.12) | a detached session, `ls`, `kill-server` |
+| strace | 6.19 | see below |
+
+**strace.**
+- The kernel gained `PTRACE_GETREGSET`/`SETREGSET` (`NT_PRSTATUS`) and
+  `PTRACE_PEEKUSR`/`POKEUSR`, over r0–r15, sp, pc and flags
+  (`arch/klausscpu/kernel/ptrace.c`, `HAVE_ARCH_TRACEHOOK`).
+- The uapi register struct is now `struct user_pt_regs`, as on arm64.
+  It was `user_regs_struct`, which is the C library's name
+  (`<sys/user.h>`) and clashed in programs that include both. The layout
+  is unchanged.
+- strace reads the syscall number and arguments with
+  `PTRACE_GET_SYSCALL_INFO`, and changes them with `PTRACE_SET_SYSCALL_INFO`.
+  At entry r12 already reads -ENOSYS, as on arm64.
+- strace's `linux/klausscpu/` port uses the generic 64-bit syscall table,
+  arguments r0–r5, and the result in r12.
+- Checks:
+  - `strace -f /bin/true` and `strace ls /`;
+  - an ENOENT `openat`;
+  - `-e inject=uname:error=EPERM` (`(INJECTED)`).
+- strace 6.19 also needed:
+  - an `arch_sigreturn` decoder, which prints the rt_sigframe's mask;
+    with clang's -Wunused-function, strace's `-Werror` build fails on
+    the generic empty one;
+  - its bundled uapi headers (patch 0004).
+- On the emulator, `strace /bin/echo hi` shows `execve`,
+  `set_tid_address`, `brk`, `mmap(... MAP_PRIVATE|MAP_ANONYMOUS ...)`,
+  `write(1, "hi\n", 3) = 3` and `exit_group(0)`.
+
 ### Board results (2026-11-10, release bitstream from QSPI)
 
 Measured on the board (klaussCPU master 2743116, mmu-sd 5648f75 LEAN,

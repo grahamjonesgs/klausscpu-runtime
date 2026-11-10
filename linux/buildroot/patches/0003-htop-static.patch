@@ -1,0 +1,40 @@
+package/htop: allow static-only toolchains
+
+With BR2_STATIC_LIBS, use htop's own --enable-static, which builds a
+static binary without the features it would dlopen() (sensors,
+systemd), instead of hiding the package.
+
+diff -ruN a/package/htop/Config.in b/package/htop/Config.in
+--- a/package/htop/Config.in	2026-11-10 19:02:35.501522630 +0200
++++ b/package/htop/Config.in	2026-11-10 19:02:35.509021270 +0200
+@@ -1,14 +1,9 @@
+ config BR2_PACKAGE_HTOP
+ 	bool "htop"
+ 	depends on BR2_USE_MMU # fork()
+-	depends on !BR2_STATIC_LIBS # dlopen()
+ 	select BR2_PACKAGE_NCURSES
+ 	help
+ 	  htop is an interactive text-mode process viewer for Linux.
+ 	  It aims to be a better top.
+ 
+ 	  https://htop.dev/
+-
+-comment "htop needs a toolchain w/ dynamic library"
+-	depends on BR2_USE_MMU
+-	depends on BR2_STATIC_LIBS
+diff -ruN a/package/htop/htop.mk b/package/htop/htop.mk
+--- a/package/htop/htop.mk	2026-11-10 19:02:35.501553497 +0200
++++ b/package/htop/htop.mk	2026-11-10 19:02:35.509093343 +0200
+@@ -27,6 +27,12 @@
+ HTOP_CONF_OPTS += --disable-static
+ endif
+ 
++# A static-only toolchain: htop's own static build, which leaves out the
++# features it loads with dlopen().
++ifeq ($(BR2_STATIC_LIBS),y)
++HTOP_CONF_OPTS += --enable-static
++endif
++
+ ifeq ($(BR2_PACKAGE_HWLOC),y)
+ HTOP_CONF_OPTS += --enable-hwloc
+ HTOP_DEPENDENCIES += hwloc
