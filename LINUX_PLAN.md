@@ -155,8 +155,16 @@ compressed. Raw, 96 MiB at about 120 KiB/s takes about 14 minutes; the
 gzipped image is a few MB:
 
 ```
-gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 'gunzip | install-rootfs - <sha256>'
+gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 install-rootfs -z -
 ```
+
+`-z` makes install-rootfs unpack the image itself, so gunzip's CRC-32 and
+length check covers the whole transfer; a damaged or truncated stream
+fails and keeps the old image (checked on the board with a truncated
+stream). A SHA-256 argument still works but costs about 2 minutes: it
+re-reads 96 MiB and hashes it in software at about 0.8 MB/s. Times on the
+board for the 96 MiB image (1.1 MB gzipped): SPI raw 22 min; SPI gzip +
+SHA 7 min 20 s; native SD gzip + SHA 4 min; native SD `-z` 78 s.
 
 It downloads to `rootfs.img.new` and checks the SHA-256. Only then does it
 rename the file to `rootfs.img` and `sync`. Then reload the kernel

@@ -1,36 +1,61 @@
 #!/bin/sh
-# install-rootfs <url>|- [sha256]: put a root file system image on the SD
-# card as /linux/rootfs.img, over the network, without touching anything
+# install-rootfs [-z] <url>|- [sha256]: put a root file system image on the
+# SD card as /linux/rootfs.img, over the network, without touching anything
 # else on the card (its single FAT partition and its files stay as they
 # are).  With "-" the image comes on stdin, e.g. pushed from a PC whose
-# firewall won't let the board connect to it.  Compress it: the image is
-# mostly free space, and the board's SSH runs at about 120 KiB/s
-# (software crypto at 100 MHz), so 96 MiB raw takes about 14 minutes:
-#   gzip -1c rootfs.img | ssh root@<board> 'gunzip | install-rootfs - <sha256>'
-# The image is downloaded beside the old one and renamed only when it is
+# firewall won't let the board connect to it.
+#
+# -z: the image is gzip-compressed and install-rootfs unpacks it.  The image
+# is mostly free space, so it shrinks about 90x, and gunzip verifies the
+# CRC-32 and length of everything it unpacks, so a damaged or truncated
+# transfer fails and leaves the old image alone.  That is the recommended
+# way; the SHA-256 is then optional (it re-reads 96 MiB and hashes it in
+# software at about 0.8 MB/s, two minutes on the board):
+#   gzip -1c rootfs.img | ssh root@<board> install-rootfs -z -
+# The image is written beside the old one and renamed only when it is
 # complete (and its SHA-256 matches, when given).  Reboot to use it.
 set -e
-url=$1
+gz=0
+if [ "${1:-}" = -z ]; then
+	gz=1
+	shift
+fi
+url=${1:-}
 want=${2:-}
-[ -n "$url" ] || { echo "usage: install-rootfs <url>|- [sha256]" >&2; exit 2; }
+[ -n "$url" ] || { echo "usage: install-rootfs [-z] <url>|- [sha256]" >&2; exit 2; }
 [ -b /dev/mmcblk0p1 ] || { echo "install-rootfs: no SD card" >&2; exit 1; }
 mkdir -p /mnt
 grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
 mkdir -p /mnt/linux
-rm -f /mnt/linux/rootfs.img.new
+new=/mnt/linux/rootfs.img.new
+rm -f "$new"
+fail() {
+	echo "install-rootfs: $1, keeping the old image" >&2
+	rm -f "$new"
+	exit 1
+}
 if [ "$url" = - ]; then
 	echo "install-rootfs: reading the image from stdin"
-	cat >/mnt/linux/rootfs.img.new
+	if [ $gz = 1 ]; then
+		gunzip -c >"$new" || fail "gunzip failed (bad CRC or truncated input)"
+	else
+		cat >"$new" || fail "cannot write $new"
+	fi
 else
 	echo "install-rootfs: downloading $url"
-	wget -O /mnt/linux/rootfs.img.new "$url"
+	if [ $gz = 1 ]; then
+		# The pipeline's status is gunzip's: a failed download ends the
+		# stream early, which gunzip reports as truncated input.
+		wget -O - "$url" | gunzip -c >"$new" || fail "download or gunzip failed"
+	else
+		wget -O "$new" "$url" || fail "download failed"
+	fi
 fi
+[ $gz = 1 ] && echo "install-rootfs: gzip CRC-32 and length OK"
 if [ -n "$want" ]; then
 	got=$(sha256sum /mnt/linux/rootfs.img.new | cut -d' ' -f1)
 	if [ "$got" != "$want" ]; then
-		echo "install-rootfs: SHA-256 mismatch ($got), keeping the old image" >&2
-		rm -f /mnt/linux/rootfs.img.new
-		exit 1
+		fail "SHA-256 mismatch ($got)"
 	fi
 fi
 if grep -q '^/dev/loop[0-9]* / ' /proc/mounts; then
