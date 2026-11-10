@@ -31,6 +31,16 @@ cp "$BB" "$ST/bin/busybox"
 ln -s busybox "$ST/bin/sh"
 ln -s ../bin/busybox "$ST/sbin/init"
 ln -s ../bin/busybox "$ST/sbin/mdev"
+# A link for every applet (busybox.links: /bin/ls, /usr/bin/awk, ...), so
+# programs that look commands up on PATH find them, not only ash's
+# standalone shell.  Existing files (sh, init, mdev, Dropbear's) win.
+if [ -f "$WS/busybox-build/busybox.links" ]; then
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    d=$ST$(dirname "$l"); mkdir -p "$d"
+    [ -e "$ST$l" ] || [ -L "$ST$l" ] || ln -s "$(realpath -m --relative-to="$(dirname "$l")" /bin/busybox)" "$ST$l"
+  done <"$WS/busybox-build/busybox.links"
+fi
 "${CC[@]}" "$RT/linux/userland/keystore/kskey.c" -o "$ST/usr/bin/kskey"
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"

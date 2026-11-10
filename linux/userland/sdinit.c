@@ -108,6 +108,17 @@ int main(void)
 		mkdir("/mnt/sd", 0755);
 		if (mount("/dev/mmcblk0p1", "/mnt/sd", "vfat", 0, "utf8") == 0) {
 			sd = 1;
+			/* An update staged by install-rootfs while this image was
+			 * in use: swap it in now, before anything opens the old
+			 * one (replacing an open file on FAT leaks its clusters). */
+			if (access("/mnt/sd/linux/rootfs.img.next", R_OK) == 0) {
+				unlink("/mnt/sd/linux/rootfs.img");
+				if (rename("/mnt/sd/linux/rootfs.img.next", "/mnt/sd/linux/rootfs.img") == 0)
+					msg("installed the staged /linux/rootfs.img.next");
+				else
+					msg("cannot rename /linux/rootfs.img.next");
+				sync();
+			}
 			if (try_root("/mnt/sd/linux/rootfs.img")) {
 				msg("no usable /linux/rootfs.img on the SD card");
 				umount("/mnt/sd");

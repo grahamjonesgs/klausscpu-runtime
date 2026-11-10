@@ -28,5 +28,5 @@ while IFS= read -r line; do
   echo "$line" >>"$OUT/.config"
 done <"$HERE/busybox.config"
 { yes "" || true; } | "${MK[@]}" oldconfig >>"$OUT/config.log" 2>&1
-"${MK[@]}" -j"${JOBS:-$(nproc)}" busybox >"$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; exit 1; }
+"${MK[@]}" -j"${JOBS:-$(nproc)}" busybox busybox.links >"$OUT/build.log" 2>&1 || { tail -30 "$OUT/build.log"; exit 1; }
 echo "busybox: $OUT/busybox"

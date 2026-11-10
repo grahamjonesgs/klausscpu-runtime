@@ -33,6 +33,15 @@ if [ -n "$want" ]; then
 		exit 1
 	fi
 fi
-mv /mnt/linux/rootfs.img.new /mnt/linux/rootfs.img
-sync
-echo "install-rootfs: /linux/rootfs.img installed; reboot to use it"
+if grep -q '^/dev/loop[0-9]* / ' /proc/mounts; then
+	# Running from the card's image: don't replace a file that is in use
+	# (on FAT that leaks its clusters).  sdinit swaps it in at the next boot.
+	rm -f /mnt/linux/rootfs.img.next
+	mv /mnt/linux/rootfs.img.new /mnt/linux/rootfs.img.next
+	sync
+	echo "install-rootfs: staged as /linux/rootfs.img.next; it replaces rootfs.img at the next boot"
+else
+	mv /mnt/linux/rootfs.img.new /mnt/linux/rootfs.img
+	sync
+	echo "install-rootfs: /linux/rootfs.img installed; reboot to use it"
+fi
