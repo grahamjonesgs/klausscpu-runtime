@@ -68,6 +68,12 @@ if [ -x "$DB" ]; then
     ln -s ../sbin/dropbearmulti "$ST/usr/bin/$p"
   done
 fi
+# fbtest (/dev/fb0 checks and screenshots), and DOOM (linux/userland/doom.sh)
+# when built; its WAD stays on the card (/mnt/DOOM1.WAD).
+"${CC[@]}" "$RT/linux/userland/fbtest.c" -o "$ST/usr/bin/fbtest"
+if [ -x "$WS/doom-build/doom" ]; then
+  cp "$WS/doom-build/doom" "$ST/usr/bin/doom"
+fi
 # Ports (linux/userland/<pkg>.sh), each when built, and their self-tests in
 # /usr/share/klausscpu/tests (linux/userland/tests; run them on the board).
 T=$ST/usr/share/klausscpu/tests
@@ -83,6 +89,14 @@ if [ -x "$WS/sqlite-build/sqlite3" ]; then
   cp "$WS/sqlite-build/sqlite3" "$ST/usr/bin/"
   install -m 755 "$RT/linux/userland/tests/sqlite-test.sh" "$T/"
   cp "$RT/linux/userland/tests/sqlite-test.sql" "$RT/linux/userland/tests/sqlite-test.expected" "$T/"
+fi
+if [ -x "$WS/coremark-build/coremark" ] && [ -x "$WS/lmbench-build/tlbmiss" ]; then
+  cp "$WS/coremark-build/coremark" "$WS/lmbench-build/tlbmiss" "$ST/usr/bin/"
+  mkdir -p "$ST/usr/libexec/lmbench"
+  for b in lat_syscall lat_proc lat_ctx lat_pagefault bw_mem lat_mem_rd tlb hello; do
+    cp "$WS/lmbench-build/$b" "$ST/usr/libexec/lmbench/"
+  done
+  install -m 755 "$RT/linux/userland/tests/bench.sh" "$T/"
 fi
 cp "$INI/inittab" "$INI/profile" "$ST/etc/"
 cp "$INI/rcS" "$INI/hostkey" "$ST/etc/init.d/"

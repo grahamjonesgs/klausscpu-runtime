@@ -110,7 +110,8 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
   fi
   if [ "$MODE" = ports ]; then
     # Each port: linux/userland/<pkg>.sh, run if its binary isn't built.
-    for p in lua:lua-build/lua sqlite:sqlite-build/sqlite3; do
+    for p in lua:lua-build/lua sqlite:sqlite-build/sqlite3 coremark:coremark-build/coremark \
+             lmbench:lmbench-build/tlbmiss; do
       if [ ! -x "$RT/linux-ws/${p#*:}" ]; then
         "$RT/linux/userland/${p%%:*}.sh" >"$OUT/${p%%:*}.log" 2>&1 ||
           { echo "FAIL ${p%%:*} build (see $OUT/${p%%:*}.log)"; exit 1; }
@@ -513,18 +514,37 @@ EOF2
     echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
   fi
 elif [ "$MODE" = ports ]; then
-  # One boot per built port; each self-test ends with known lines.
-  if [ -x "$RT/linux-ws/lua-build/lua" ]; then
+  # One boot per built port (LINUX_PORTS="lua sqlite ..." picks some);
+  # each self-test ends with known lines.
+  want() { [ -z "${LINUX_PORTS:-}" ] || case " $LINUX_PORTS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+  if want lua && [ -x "$RT/linux-ws/lua-build/lua" ]; then
     echo /usr/share/klausscpu/tests/lua-tests.sh >"$OUT/lua.in"
     printf '%s\n' 'sdinit: data.img mounted read-write at /data' \
       'lua-tests: 19/19 passed' 'lua-selftest: PASS' 'luac lua-selftest: PASS' >"$OUT/lua.expect"
     run_step lua 60000000000 2400 '$ '
   fi
-  if [ -x "$RT/linux-ws/sqlite-build/sqlite3" ]; then
+  if want sqlite && [ -x "$RT/linux-ws/sqlite-build/sqlite3" ]; then
     echo /usr/share/klausscpu/tests/sqlite-test.sh >"$OUT/sqlite.in"
     printf '%s\n' 'sdinit: data.img mounted read-write at /data' \
       "sqlite-test: PASS ($(wc -l <"$RT/linux/userland/tests/sqlite-test.expected") lines)" >"$OUT/sqlite.expect"
     run_step sqlite 60000000000 2400 '$ '
+  fi
+  if want bench && [ -x "$RT/linux-ws/coremark-build/coremark" ] && [ -x "$RT/linux-ws/lmbench-build/tlbmiss" ]; then
+    echo '/usr/share/klausscpu/tests/bench.sh quick' >"$OUT/bench.in"
+    # CoreMark's CRCs for the performance seeds (a 20-iteration run is too
+    # short to score, so CoreMark itself reports "Errors detected").
+    printf '%s\n' '[0]crclist       : 0xe714' '[0]crcmatrix     : 0x1fd7' '[0]crcstate      : 0x8e3a' \
+      'bench: done' >"$OUT/bench.expect"
+    run_step bench 120000000000 3600 '$ '
+    # Each benchmark printed a result (the numbers are for the board).
+    for re in 'Simple syscall: [0-9.]+ microseconds' 'Simple read: [0-9.]+' 'Simple stat: [0-9.]+' \
+              'Process fork\+exit: [0-9.]+' 'Process fork\+execve: [0-9.]+' 'Process fork\+/bin/sh -c: [0-9.]+' \
+              '^2 [0-9.]+' 'Pagefaults on /tmp/pf: [0-9.]+' '^rd [0-9.]+ [0-9.]+' '^bcopy [0-9.]+ [0-9.]+' \
+              '^0\.0[0-9]+ [0-9.]+' 'tlb: [0-9]+ pages' 'pages +64 +ns/access +[0-9.]+'; do
+      grep -aEq "$re" "$OUT/bench.out" || bad "bench: no line matching /$re/"
+    done
+    grep -aq '\]ERROR!' "$OUT/bench.out" && bad "bench: CoreMark CRC error"
+    true
   fi
 elif [ "$MODE" = keystore ]; then
   # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
