@@ -140,6 +140,18 @@ config KLAUSSCPU_QSPI
 	  (partitions bitstream, storage, scratch).  The driver issues only
 	  RDID and READ commands: there is no write or erase path.
 
+config KLAUSSCPU_FB
+	bool "VGA output as a frame buffer (/dev/fb0)"
+	depends on FB=y
+	select FB_SYSMEM_HELPERS
+	default y
+	help
+	  The board's VGA port (640x480, RGB565 or 8-bit palette, 320-pixel
+	  modes doubled), scanned out of a buffer in DDR.  The cache is
+	  flushed at each vsync while /dev/fb0 is in use.  The probe finds
+	  nothing on an emulator or bitstream without the controller;
+	  klausscpu_fb.force=1 registers it there anyway, for tests.
+
 config KLAUSSCPU_EARLY_UART
 	bool "Early console on the polled UART"
 	default y

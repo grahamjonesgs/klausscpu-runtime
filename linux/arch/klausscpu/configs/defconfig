@@ -68,3 +68,5 @@ CONFIG_PRINTK_TIME=y
 CONFIG_CMDLINE="console=hvc0 rdinit=/init"
 CONFIG_MMC=y
 CONFIG_MMC_BLOCK=y
+# The VGA port as /dev/fb0 (KLAUSSCPU_FB).
+CONFIG_FB=y
