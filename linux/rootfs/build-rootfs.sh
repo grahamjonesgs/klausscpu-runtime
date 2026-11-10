@@ -79,6 +79,11 @@ if [ -x "$WS/lua-build/lua" ]; then
   install -m 755 "$RT/linux/userland/tests/lua-tests.sh" "$T/"
   cp "$RT/linux/userland/tests/lua-selftest.lua" "$T/"
 fi
+if [ -x "$WS/sqlite-build/sqlite3" ]; then
+  cp "$WS/sqlite-build/sqlite3" "$ST/usr/bin/"
+  install -m 755 "$RT/linux/userland/tests/sqlite-test.sh" "$T/"
+  cp "$RT/linux/userland/tests/sqlite-test.sql" "$RT/linux/userland/tests/sqlite-test.expected" "$T/"
+fi
 cp "$INI/inittab" "$INI/profile" "$ST/etc/"
 cp "$INI/rcS" "$INI/hostkey" "$ST/etc/init.d/"
 cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"
