@@ -16,9 +16,17 @@ hostname klausscpu
 ifconfig lo 127.0.0.1 up
 if [ -e /sys/class/net/eth0 ]; then
 	ifconfig eth0 up
+	# The PHY needs a few seconds to link; DHCP before that just times out.
+	i=0
+	while [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null)" != 1 ] && [ $i -lt 20 ]; do
+		sleep 0.5; i=$((i + 1))
+	done
 	# DHCP (the router reserves 192.168.68.59 for 00:ab:cd:00:00:01),
-	# else that address statically.
-	if ! udhcpc -i eth0 -n -q -t 5 -T 2 >/dev/null 2>&1; then
+	# else that address statically: judged by the address eth0 ends up
+	# with, not udhcpc's status.  udhcpc's output is in /tmp/udhcpc.log.
+	udhcpc -i eth0 -n -q -t 5 -T 2 >/tmp/udhcpc.log 2>&1
+	if ! ifconfig eth0 | grep -q 'inet addr'; then
+		echo "rcS: no DHCP lease (see /tmp/udhcpc.log), using 192.168.68.59"
 		ifconfig eth0 192.168.68.59 netmask 255.255.255.0 up
 		route add default gw 192.168.68.1
 	fi
