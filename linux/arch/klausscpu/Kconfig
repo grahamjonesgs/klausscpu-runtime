@@ -90,6 +90,14 @@ config CMDLINE
 	help
 	  The klausscc loader passes no command line; this is it.
 
+config KLAUSSCPU_SD
+	bool "SD card (SPI-mode controller) as mmcblk0"
+	depends on BLOCK
+	default y
+	help
+	  The board's SD card slot.  Polled; the probe finds nothing on an
+	  emulator without the controller.
+
 config KLAUSSCPU_EARLY_UART
 	bool "Early console on the polled UART"
 	default y

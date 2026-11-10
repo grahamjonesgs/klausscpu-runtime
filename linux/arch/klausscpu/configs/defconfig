@@ -24,7 +24,12 @@ CONFIG_EMBEDDED=y
 # CONFIG_VM_EVENT_COUNTERS is not set
 # CONFIG_COMPAT_BRK is not set
 # CONFIG_SWAP is not set
-# CONFIG_BLOCK is not set
+CONFIG_MSDOS_PARTITION=y
+CONFIG_VFAT_FS=y
+CONFIG_FAT_DEFAULT_UTF8=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ISO8859_1=y
+CONFIG_NLS_UTF8=y
 # CONFIG_MODULES is not set
 CONFIG_BINFMT_ELF=y
 CONFIG_BINFMT_SCRIPT=y
@@ -44,4 +49,7 @@ CONFIG_DEVTMPFS_MOUNT=y
 CONFIG_TMPFS=y
 # CONFIG_MISC_FILESYSTEMS is not set
 CONFIG_PRINTK_TIME=y
+# klausscpu-llvm's clang 23 snapshot lacks the capability attributes on
+# function-pointer parameters that blkdev.h uses with this on.
+# CONFIG_WARN_CONTEXT_ANALYSIS is not set
 CONFIG_CMDLINE="console=hvc0 rdinit=/init"
