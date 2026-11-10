@@ -26,7 +26,7 @@ LOG_MODULE_REGISTER(disk_klausscpu_sd, CONFIG_DISK_KLAUSSCPU_SD_LOG_LEVEL);
 #define REG_SD_STATUS     REG(SD_BASE + 0x0010u)
 
 #define SD_STATUS_BUSY    (1u << 0)
-#define SD_STATUS_CARD    (1u << 1)
+#define SD_STATUS_NOCARD  (1u << 1)	/* raw card-detect pin, active low: 0 = card in (unused) */
 
 #define SD_CTRL_CLKDIV(d) ((uint32_t)((d) & 0xFFFFu))
 #define SD_CTRL_CS_HI     (1u << 16)

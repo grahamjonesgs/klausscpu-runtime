@@ -41,7 +41,7 @@
 
 /* SD_STATUS bit fields */
 #define SD_STATUS_BUSY      (1u << 0)
-#define SD_STATUS_CARD      (1u << 1)
+#define SD_STATUS_NOCARD    (1u << 1)   /* raw card-detect pin, ACTIVE LOW: 0 = a card is in */
 
 /* SCK frequency = 100 MHz / (2 × (clk_div + 1)) */
 #define SD_CLK_INIT   249u   /* ~200 kHz — safe for SD init */

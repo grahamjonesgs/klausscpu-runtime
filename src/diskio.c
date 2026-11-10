@@ -20,7 +20,7 @@ DSTATUS disk_initialize(BYTE pdrv) {
 DSTATUS disk_status(BYTE pdrv) {
     if (pdrv != 0) return STA_NOINIT;
     if (!sd_is_ready()) return STA_NOINIT;
-    if (!(REG_SD_STATUS & SD_STATUS_CARD)) return STA_NODISK;
+    if (REG_SD_STATUS & SD_STATUS_NOCARD) return STA_NODISK;   /* active low */
     return 0;
 }
 
