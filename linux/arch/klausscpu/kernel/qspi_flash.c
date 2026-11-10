@@ -129,7 +129,7 @@ static int __init kl_qspi_init(void)
 		return -ENOMEM;
 	mtd->name = "klausscpu-qspi";
 	mtd->type = MTD_ROM;
-	mtd->flags = MTD_CAP_ROM;		/* never writeable */
+	mtd->flags = MTD_CAP_ROM | MTD_NO_ERASE;	/* never writeable, no erase op */
 	mtd->size = FLASH_SIZE;
 	mtd->erasesize = 0x10000;
 	mtd->writesize = 1;
