@@ -1,22 +1,56 @@
 # Linux on KlaussCPU — plan
 
-**Status (2026-11-09): milestones 0–3 are done on the klausscc emulator,
-and milestone 4 is done except for busybox.**
-- v7.3.3 builds with klausscpu-llvm (`linux/build.sh`) and boots through
-  `start_kernel` to user space. The console is `hvc0` on the polled UART.
-- musl 1.2.5 is ported (`linux/musl/`). klausscpu-llvm `fc94ed9f` adds the
-  `klausscpu-unknown-linux-musl` triple and its static link.
-- `minish` (`linux/userland/minish.c`), a small musl shell, runs as
-  `/init` with typed input (`klausscc --uart-in`). It forks and execs
-  programs; `/proc` and tmpfs work.
-- `tools/validate/linux.sh` checks this (`shell` mode) and milestone 3
-  (`m3` mode).
+**Status (2026-11-10): milestones 0–5 are done.** Linux runs busybox
+init and ash on the emulator and on the board (klaussCPU `mmu` d9cf6c2,
+the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
+- **Kernel:**
+  - ASIDs, LR/SC atomics, cmpxchg and futex ops;
+  - GENERIC_BUG, stack traces with KALLSYMS, and the exception table
+    sorted at build time;
+  - `hvc0` console, the SD card as `mmcblk0` (vfat), LiteEth as `eth0`,
+    and the TRNG as `hwrng`.
+- **User space:**
+  - musl 1.2.5 (`linux/musl/`), threads included;
+  - busybox (init with `/etc/init.d/rcS` and mdev; ash);
+  - Dropbear 2026.94 (`linux/userland/dropbear.sh`): an SSH login over
+    loopback passes on the emulator (`linux.sh <out> ssh`).
+- **Not yet built here:** the richer busybox config (vi, top, networking
+  applets, mdev, fdisk/mkfs.vfat). This session's permission classifier
+  refuses to run busybox's build.
+- **Board-only:** SD card, Ethernet and TRNG. The emulator models none of
+  them, and each driver's probe finds nothing there.
 
-Busybox (`linux/userland/busybox.sh`, `busybox.config`, initramfs profile
-`busybox`) is written but has not been run: building it compiles and runs
-busybox's host tools, which this session's permission classifier refused.
-Next after busybox: milestone 5 (the board; a milestone-3 `vmlinux` is
-waiting for its first try).
+### Board checks (networking, SSH, SD card)
+
+Build with the busybox profile, which picks up Dropbear when
+`linux/userland/dropbear.sh` has built it:
+
+```
+linux/musl/build.sh && linux/userland/busybox.sh && linux/userland/dropbear.sh
+INITRAMFS_PROFILE=busybox linux/build.sh defconfig vmlinux
+klausscc -i linux-ws/build/vmlinux -s -m
+```
+
+On the console, rcS:
+- prints `eth0`'s address: from DHCP, which reserves 192.168.68.59 for
+  MAC 00:ab:cd:00:00:01, or else 192.168.68.59/24 statically with gateway
+  .1;
+- starts `dropbear` on 22 and `httpd` on 80.
+
+The dmesg lines to look for: `klausscpu-eth: ... LiteEth ..., PHY BMSR`,
+`eth0: link up`, `klausscpu-sd: mmcblk0, N MiB`.
+
+From the PC:
+- `ping 192.168.68.59`
+- `wget -O- http://192.168.68.59/` (the "Linux on KlaussCPU" page)
+- `ssh root@192.168.68.59`, password `klausscpu`. The host key is
+  generated on the first connection, which takes several seconds.
+
+On the board:
+- `ping -c 3 192.168.68.1`, `wget -O /tmp/x http://<PC>/file`
+- `mount -t vfat /dev/mmcblk0p1 /mnt` (after `mkdir /mnt`), then `ls /mnt`
+- `cat /proc/interrupts` (the `eth0` count rises with traffic)
+- `dmesg | grep -i 'trng\|random'`
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
@@ -258,6 +292,15 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
   idle loop is `ei; wait`.
 - **`fbr`/`fbri` can't branch to a global symbol** (no relocation for
   them), so asm uses a local label.
+- **busybox's standalone shell runs applets through `/proc/self/exe`**, so
+  rcS mounts `/proc` with `/bin/busybox mount` first.
+- **`__clone` in musl is variadic**, so with this ABI its stack arguments
+  start after the 32-byte home area (+40).
+- **`WARN()` in `__exit` code puts `__bug_table` entries in
+  `.exit.text`**, so the linker script keeps `.exit.text` and `.exit.data`.
+- **klausscpu-llvm's clang 23 snapshot can't build with
+  WARN_CONTEXT_ANALYSIS**: it rejects capability attributes on
+  function-pointer parameters (blkdev.h). The option is off.
 - **`INT_MASK` stays 0xF**, and a source is enabled by setting its
   `INT_VECn` (as in the Zephyr port). That way IRET never restores a
   stale mask from an old frame.
@@ -283,10 +326,10 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
    - A static libc-less `/init` in the initramfs (`write`, `getpid`,
      `fork`, `wait4`, `exit`) prints and loops.
    - Checkpoint: its output, and `fork` working.
-4. **busybox.** *(musl and a shell done; busybox not yet built)*
+4. **busybox.** *(done: musl, busybox init and ash, Dropbear)*
    - musl and the clang Linux toolchain.
    - Checkpoint: a busybox shell on the emulator, scripted with `--uart-in`.
-5. **Board.**
+5. **Board.** *(busybox on d9cf6c2 done; networking and SD card need board checks)*
    - Same image on 52bece8; tune load speed and timer frequency.
    - Checkpoint: an interactive shell over the UART.
 6. **Later.**

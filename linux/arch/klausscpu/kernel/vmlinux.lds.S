@@ -40,6 +40,9 @@ SECTIONS
 	__init_begin = .;
 	INIT_TEXT_SECTION(PAGE_SIZE)
 	INIT_DATA_SECTION(16)
+	/* Kept, not discarded: __bug_table entries can point into exit code. */
+	.exit.text : { EXIT_TEXT }
+	.exit.data : { EXIT_DATA }
 	PERCPU_SECTION(32)
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;

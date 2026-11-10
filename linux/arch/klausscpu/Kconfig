@@ -115,6 +115,11 @@ config KLAUSSCPU_ETH
 	  The board's LiteEth MAC and LAN8720A PHY.  The probe finds nothing
 	  on an emulator without the MAC.
 
+config KLAUSSCPU_TRNG
+	bool "TRNG as a hardware random source"
+	depends on HW_RANDOM
+	default y
+
 config KLAUSSCPU_EARLY_UART
 	bool "Early console on the polled UART"
 	default y
