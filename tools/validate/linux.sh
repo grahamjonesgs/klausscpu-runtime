@@ -19,6 +19,9 @@
 #                    the httpd page and logs in over SSH (root/klausscpu)
 #                    while the board's shell sleeps.  BOARD_IP (default
 #                    192.168.68.59, the DHCP reservation for its MAC).
+#   keystore         Zephyr's QSPI keystore format (a synthetic NVS image)
+#                    through kskey and dropbearconvert: Dropbear's fingerprint
+#                    must equal OpenSSH's for the same key
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -27,9 +30,9 @@
 # Needs linux-ws/linux (linux/fetch.sh).  Exits 1 on any failure.
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
-[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|m3] [emu|board]"
+[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|keystore|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|net|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|keystore|m3) ;; *) die "unknown mode $MODE" ;; esac
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 case $WHERE in emu|board) ;; *) die "unknown target $WHERE" ;; esac
 "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--uart-prompt' ||
@@ -40,18 +43,30 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
     "$RT/linux/userland/busybox.sh" >"$OUT/busybox.log" 2>&1 || { echo "FAIL busybox build (see $OUT/busybox.log)"; exit 1; }
   fi
-  if [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
+  if [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" = keystore ]; then
     "$RT/linux/userland/dropbear.sh" >"$OUT/dropbear.log" 2>&1 || { echo "FAIL dropbear build (see $OUT/dropbear.log)"; exit 1; }
+  fi
+  if [ "$MODE" = keystore ]; then
+    # A test key in a synthetic Zephyr NVS keystore image, and its
+    # fingerprint as OpenSSH computes it.
+    openssl ecparam -name prime256v1 -genkey -noout -outform DER -out "$OUT/key.der" 2>/dev/null &&
+      openssl ec -inform DER -in "$OUT/key.der" -out "$OUT/key.pem" 2>/dev/null &&
+      chmod 600 "$OUT/key.pem" &&
+      python3 -I "$RT/linux/userland/keystore/mknvs.py" "$OUT/storage.img" newest "$OUT/key.der" ||
+      { echo "FAIL keystore test image"; exit 1; }
+    KEY_FP=$(ssh-keygen -y -f "$OUT/key.pem" | ssh-keygen -lf - | awk '{print $2}')
+    printf 'dir /test 0755 0 0\nfile /test/storage.img %s 0644 0 0\n' "$OUT/storage.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
   fi
   export INITRAMFS_PROFILE=busybox
 elif [ "$MODE" = m3 ]; then
@@ -167,6 +182,17 @@ sh -c 'exit 3'; echo status $?
 status 3
 EOF2
   run_step busybox 20000000000 900 '$ '
+elif [ "$MODE" = keystore ]; then
+  # Zephyr's keystore -> Dropbear: kskey reads the synthetic NVS image,
+  # dropbearconvert converts the PEM, and Dropbear's fingerprint must be
+  # OpenSSH's for the same key.
+  cat >"$OUT/keystore.in" <<'EOF2'
+kskey /test/storage.img > /tmp/k.pem
+dropbearconvert openssh dropbear /tmp/k.pem /tmp/k.db
+dropbearkey -y -f /tmp/k.db | grep Fingerprint
+EOF2
+  printf 'Fingerprint: %s\n' "$KEY_FP" >"$OUT/keystore.expect"
+  run_step keystore 20000000000 900 '$ '
 elif [ "$MODE" = ssh ]; then
   # Dropbear over loopback: host key, server, a password login with dbclient
   # (the emulator has no Ethernet).  musltest brings lo up.

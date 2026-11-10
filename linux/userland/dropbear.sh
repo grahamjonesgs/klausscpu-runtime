@@ -27,6 +27,7 @@ CFLAGS=(-Os -ffunction-sections -fdata-sections -Wno-unused-command-line-argumen
         -I"$OUT/inc" -I"$SRC/src" -I"$SRC/libtomcrypt/src/headers" -I"$SRC/libtommath"
         -DLOCALOPTIONS_H_EXISTS -DDROPBEAR_MULTI -DDROPBEAR_SERVER -DDROPBEAR_CLIENT
         -DDBMULTI_dropbear -DDBMULTI_dropbearkey -DDBMULTI_dbclient -DDBMULTI_scp
+        -DDBMULTI_dropbearconvert
         -DPROGRESS_METER)
 jobs=${JOBS:-$(nproc)}
 compile() { # <out dir> <extra flags> <sources...>
@@ -51,7 +52,8 @@ DB_SRCS="dbutil buffer dbhelpers dss bignum signkey rsa dbrandom queue atomicio 
   termcodes loginrec tcp-accept listener process-packet dh_groups common-runopts
   circbuffer list netio chachapoly gcm kex-x25519 kex-dh kex-ecdh kex-pqhybrid
   sntrup761 mlkem768
-  dropbearkey scp progressmeter scpmisc dbmulti"
+  dropbearkey scp progressmeter scpmisc dbmulti
+  dropbearconvert keyimport signkey_ossh"
 compile "$OUT/obj/db" "" $(for s in $DB_SRCS; do echo "src/$s.c"; done)
 "${CC[@]}" -static -Wl,--gc-sections -o "$OUT/dropbearmulti" \
   "$OUT"/obj/db/*.o "$OUT"/obj/ltc/*.o "$OUT"/obj/ltm/*.o -lcrypt

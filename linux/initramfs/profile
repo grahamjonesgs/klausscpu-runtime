@@ -1,2 +1,2 @@
-export PATH=/bin:/sbin
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PS1='$ '

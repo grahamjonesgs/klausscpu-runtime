@@ -1,0 +1,39 @@
+#!/bin/sh
+# /etc/init.d/hostkey: print the dropbear option for the SSH host key.
+#  1. Zephyr's ssh_shell key from the QSPI keystore (NVS on the flash's
+#     "storage" partition; kskey reads it, dropbearconvert converts it), so
+#     Linux and Zephyr present the same host key;
+#  2. else a key on the SD card, /mnt/linux/dropbear_ed25519_host_key,
+#     generated once and kept;
+#  3. else -R (a new key in RAM at the first connection).
+# Messages go to stderr; the option to stdout.
+mkdir -p /etc/dropbear
+k=/etc/dropbear/dropbear_ecdsa_host_key
+mtd=$(grep '"storage"' /proc/mtd 2>/dev/null | cut -d: -f1)
+if [ -n "$mtd" ] && kskey "/dev/$mtd" >/tmp/hostkey.pem 2>/dev/null &&
+   dropbearconvert openssh dropbear /tmp/hostkey.pem "$k" >/dev/null 2>&1; then
+	rm -f /tmp/hostkey.pem
+	echo "hostkey: Zephyr's key from the QSPI keystore ($mtd)" >&2
+	echo "-r $k"
+	exit 0
+fi
+rm -f /tmp/hostkey.pem
+if [ -b /dev/mmcblk0p1 ]; then
+	mkdir -p /mnt
+	grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt 2>/dev/null
+	if grep -q " /mnt " /proc/mounts; then
+		k=/mnt/linux/dropbear_ed25519_host_key
+		if [ ! -s "$k" ]; then
+			mkdir -p /mnt/linux && dropbearkey -t ed25519 -f "$k" >/dev/null 2>&1
+			sync
+			echo "hostkey: generated $k" >&2
+		fi
+		if [ -s "$k" ]; then
+			echo "hostkey: $k (SD card)" >&2
+			echo "-r $k"
+			exit 0
+		fi
+	fi
+fi
+echo "hostkey: none found, dropbear -R" >&2
+echo "-R"

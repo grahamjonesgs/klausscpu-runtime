@@ -8,6 +8,7 @@
 #                      busybox: busybox init (rcS, mdev, eth0 up), ash,
 #                               and Dropbear if linux/userland/dropbear.sh
 #                               has built it (musl)
+# INITRAMFS_EXTRA     a file of extra gen_init_cpio lines, appended
 # The musl profiles need linux/musl/build.sh's sysroot (linux-ws/sysroot),
 # busybox also linux/userland/busybox.sh's binary.
 set -euo pipefail
@@ -57,6 +58,8 @@ busybox)
   DB=$WS/dropbear-build/dropbearmulti
   "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
     "$RT/linux/userland/musltest.c" -o "$OUT/initramfs/musltest"
+  "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
+    "$RT/linux/userland/keystore/kskey.c" -o "$OUT/initramfs/kskey"
   cat >>"$LIST" <<LIST
 dir /bin 0755 0 0
 dir /sbin 0755 0 0
@@ -79,6 +82,7 @@ slink /sbin/mdev ../bin/busybox 0777 0 0
 slink /init bin/busybox 0777 0 0
 file /etc/inittab $HERE/inittab 0644 0 0
 file /etc/init.d/rcS $HERE/rcS 0755 0 0
+file /etc/init.d/hostkey $HERE/hostkey 0755 0 0
 file /etc/profile $HERE/profile 0644 0 0
 file /etc/passwd $HERE/etc/passwd 0644 0 0
 file /etc/shadow $HERE/etc/shadow 0600 0 0
@@ -86,6 +90,7 @@ file /etc/group $HERE/etc/group 0644 0 0
 file /usr/share/udhcpc/default.script $HERE/default.script 0755 0 0
 file /www/index.html $HERE/etc/index.html 0644 0 0
 file /bin/musltest $OUT/initramfs/musltest 0755 0 0
+file /usr/bin/kskey $OUT/initramfs/kskey 0755 0 0
 LIST
   # Dropbear (linux/userland/dropbear.sh), if built: one multi-call binary.
   if [ -x "$DB" ]; then
@@ -95,9 +100,14 @@ slink /usr/sbin/dropbear dropbearmulti 0777 0 0
 slink /usr/bin/dropbearkey ../sbin/dropbearmulti 0777 0 0
 slink /usr/bin/dbclient ../sbin/dropbearmulti 0777 0 0
 slink /usr/bin/scp ../sbin/dropbearmulti 0777 0 0
+slink /usr/bin/dropbearconvert ../sbin/dropbearmulti 0777 0 0
 LIST
   fi
   ;;
 *) echo "unknown INITRAMFS_PROFILE $PROFILE" >&2; exit 1 ;;
 esac
+# INITRAMFS_EXTRA: a file of more gen_init_cpio lines (tests).
+if [ -n "${INITRAMFS_EXTRA:-}" ]; then
+  cat "$INITRAMFS_EXTRA" >>"$LIST"
+fi
 echo "initramfs ($PROFILE): $LIST"
