@@ -1,5 +1,4 @@
-# busybox init: mount the pseudo file systems, then a shell on the console.
-::sysinit:/bin/busybox mount -t proc proc /proc
-::sysinit:/bin/busybox mount -t sysfs sysfs /sys
-::sysinit:/bin/busybox mount -t tmpfs tmpfs /tmp
+# busybox init: rcS, then a shell on the console.
+::sysinit:/etc/init.d/rcS
 ::respawn:-/bin/sh
+::shutdown:/bin/busybox umount -a -r

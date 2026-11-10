@@ -1,0 +1,31 @@
+#!/bin/sh
+# /etc/init.d/rcS: busybox init's sysinit for the KlaussCPU Linux port.
+# The standalone shell runs applets through /proc/self/exe, so /proc goes
+# first, through the binary itself.
+/bin/busybox mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /tmp
+# mdev: hotplug for devices that appear later, and a pass over /sys now.
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+mdev -s
+hostname klausscpu
+
+ifconfig lo 127.0.0.1 up
+if [ -e /sys/class/net/eth0 ]; then
+	ifconfig eth0 up
+	# DHCP (the router reserves 192.168.68.59 for 00:ab:cd:00:00:01),
+	# else that address statically.
+	if ! udhcpc -i eth0 -n -q -t 5 -T 2 >/dev/null 2>&1; then
+		ifconfig eth0 192.168.68.59 netmask 255.255.255.0 up
+		route add default gw 192.168.68.1
+	fi
+	ifconfig eth0 | grep 'inet addr'
+	if [ -x /usr/sbin/dropbear ]; then
+		mkdir -p /etc/dropbear
+		dropbear -R -p 22 && echo "rcS: dropbear on port 22"
+	fi
+	httpd -h /www -p 80 && echo "rcS: httpd on port 80"
+fi

@@ -5,7 +5,9 @@
 #                      musltest: /init = linux/userland/musltest.c (musl)
 #                      minish: /init = linux/userland/minish.c, a small
 #                              musl shell, with /bin/musltest
-#                      busybox: /init and /bin/sh from busybox (musl)
+#                      busybox: busybox init (rcS, mdev, eth0 up), ash,
+#                               and Dropbear if linux/userland/dropbear.sh
+#                               has built it (musl)
 # The musl profiles need linux/musl/build.sh's sysroot (linux-ws/sysroot),
 # busybox also linux/userland/busybox.sh's binary.
 set -euo pipefail
@@ -52,20 +54,49 @@ LIST
   ;;
 busybox)
   BB=$WS/busybox-build/busybox
+  DB=$WS/dropbear-build/dropbearmulti
   "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
     "$RT/linux/userland/musltest.c" -o "$OUT/initramfs/musltest"
   cat >>"$LIST" <<LIST
 dir /bin 0755 0 0
 dir /sbin 0755 0 0
+dir /usr 0755 0 0
+dir /usr/bin 0755 0 0
+dir /usr/sbin 0755 0 0
+dir /usr/share 0755 0 0
+dir /usr/share/udhcpc 0755 0 0
 dir /etc 0755 0 0
+dir /etc/init.d 0755 0 0
 dir /root 0700 0 0
+dir /var 0755 0 0
+dir /var/run 0755 0 0
+dir /var/log 0755 0 0
+dir /www 0755 0 0
 file /bin/busybox $BB 0755 0 0
 slink /bin/sh busybox 0777 0 0
+slink /sbin/init ../bin/busybox 0777 0 0
+slink /sbin/mdev ../bin/busybox 0777 0 0
 slink /init bin/busybox 0777 0 0
 file /etc/inittab $HERE/inittab 0644 0 0
+file /etc/init.d/rcS $HERE/rcS 0755 0 0
 file /etc/profile $HERE/profile 0644 0 0
+file /etc/passwd $HERE/etc/passwd 0644 0 0
+file /etc/shadow $HERE/etc/shadow 0600 0 0
+file /etc/group $HERE/etc/group 0644 0 0
+file /usr/share/udhcpc/default.script $HERE/default.script 0755 0 0
+file /www/index.html $HERE/etc/index.html 0644 0 0
 file /bin/musltest $OUT/initramfs/musltest 0755 0 0
 LIST
+  # Dropbear (linux/userland/dropbear.sh), if built: one multi-call binary.
+  if [ -x "$DB" ]; then
+    cat >>"$LIST" <<LIST
+file /usr/sbin/dropbearmulti $DB 0755 0 0
+slink /usr/sbin/dropbear dropbearmulti 0777 0 0
+slink /usr/bin/dropbearkey ../sbin/dropbearmulti 0777 0 0
+slink /usr/bin/dbclient ../sbin/dropbearmulti 0777 0 0
+slink /usr/bin/scp ../sbin/dropbearmulti 0777 0 0
+LIST
+  fi
   ;;
 *) echo "unknown INITRAMFS_PROFILE $PROFILE" >&2; exit 1 ;;
 esac
