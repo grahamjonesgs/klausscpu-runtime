@@ -13,6 +13,12 @@
 #                    linux/userland/busybox.sh), a scripted session
 #   ssh              initramfs "busybox" with Dropbear (linux/userland/
 #                    dropbear.sh): key, server and an SSH login over loopback
+#   net              (board only) the busybox profile with Dropbear: boots,
+#                    waits for rcS to bring eth0 up (DHCP) and start httpd
+#                    and dropbear, then from this PC pings the board, fetches
+#                    the httpd page and logs in over SSH (root/klausscpu)
+#                    while the board's shell sleeps.  BOARD_IP (default
+#                    192.168.68.59, the DHCP reservation for its MAC).
 #   m3               the libc-free milestone-3 /init (no input)
 # LINUX_BUSYBOX_PREBUILT=1 reuses linux-ws/busybox-build/busybox instead of
 # running linux/userland/busybox.sh.
@@ -21,9 +27,10 @@
 # Needs linux-ws/linux (linux/fetch.sh).  Exits 1 on any failure.
 set -uo pipefail
 . "$(dirname "$0")/common.sh"
-[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|m3] [emu|board]"
+[ $# -ge 1 ] || die "usage: linux.sh <outdir> [shell|busybox|ssh|net|m3] [emu|board]"
 OUT=$(realpath -m "$1"); MODE=${2:-shell}; WHERE=${3:-emu}
-case $MODE in shell|busybox|ssh|m3) ;; *) die "unknown mode $MODE" ;; esac
+case $MODE in shell|busybox|ssh|net|m3) ;; *) die "unknown mode $MODE" ;; esac
+[ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 case $WHERE in emu|board) ;; *) die "unknown target $WHERE" ;; esac
 "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--uart-prompt' ||
   die "$KLAUSSCC has no --uart-prompt: build klausscc's mmu branch and set KLAUSSCC"
@@ -33,17 +40,17 @@ fail=0
 bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 
 export KLAUSSCPU_LLVM_BIN=$LLVM_BIN
-if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ]; then
+if [ "$MODE" = shell ] || [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
   "$RT/linux/musl/build.sh" >"$OUT/musl.log" 2>&1 || { echo "FAIL musl build (see $OUT/musl.log)"; exit 1; }
   export INITRAMFS_PROFILE=minish
 fi
-if [ "$MODE" = busybox ] || [ "$MODE" = ssh ]; then
+if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
   if [ "${LINUX_BUSYBOX_PREBUILT:-0}" = 1 ] && [ -x "$RT/linux-ws/busybox-build/busybox" ]; then
     echo "busybox: reusing linux-ws/busybox-build/busybox (LINUX_BUSYBOX_PREBUILT=1)"
   else
     "$RT/linux/userland/busybox.sh" >"$OUT/busybox.log" 2>&1 || { echo "FAIL busybox build (see $OUT/busybox.log)"; exit 1; }
   fi
-  if [ "$MODE" = ssh ]; then
+  if [ "$MODE" = ssh ] || [ "$MODE" = net ]; then
     "$RT/linux/userland/dropbear.sh" >"$OUT/dropbear.log" 2>&1 || { echo "FAIL dropbear build (see $OUT/dropbear.log)"; exit 1; }
   fi
   export INITRAMFS_PROFILE=busybox
@@ -178,7 +185,7 @@ ssh-ok
 klausscpu
 EOF2
   run_step ssh 40000000000 1500 '$ '
-else
+elif [ "$MODE" = m3 ]; then
   cat >"$OUT/m3.expect" <<'EOF2'
 Run /init as init process
 init: hello from user space
@@ -190,6 +197,28 @@ init: parent still sees data_word = 1235
 init: milestone 3 done, idling
 EOF2
   run_step m3 600000000 600
+fi
+
+if [ "$MODE" = net ]; then
+  IP=${BOARD_IP:-192.168.68.59}
+  printf 'sleep 120\nuptime\n' >"$OUT/net.in"
+  printf 'eth0: link up\nrcS: dropbear on port 22\nrcS: httpd on port 80\n' >"$OUT/net.expect"
+  run_step net 0 120 '$ ' &
+  step=$!
+  timeout 180 bash -c "until grep -aq 'rcS: httpd' '$OUT/net.out' 2>/dev/null; do sleep 2; done" ||
+    bad "net: rcS did not start httpd"
+  ping -c 3 -W 2 "$IP" >"$OUT/ping.txt" 2>&1 && echo "net: ping ok" || bad "net: ping $IP"
+  curl -s -m 10 "http://$IP/" >"$OUT/http.txt" 2>&1
+  grep -q 'Linux on KlaussCPU' "$OUT/http.txt" && echo "net: http ok" || bad "net: http page"
+  SSH_ASKPASS="$RT/tools/validate/zephyr/askpass.sh" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 KLAUSSCPU_SSH_PASS=klausscpu \
+    timeout 90 setsid ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=60 -o PreferredAuthentications=password "root@$IP" 'uname -nm' \
+    </dev/null >"$OUT/ssh.txt" 2>&1
+  grep -q '^klausscpu klausscpu' "$OUT/ssh.txt" && echo "net: ssh ok" || bad "net: ssh login"
+  wait "$step"
+  # run_step ran in the background, so check its console here.
+  why=$(expect_in_order "$OUT/net.expect" "$OUT/net.out") || bad "net: $why"
+  grep -aq 'Script done' "$OUT/net.out" || bad "net: the board session did not finish"
 fi
 
 if [ $fail -eq 0 ]; then echo "linux $MODE $WHERE: PASS"; else echo "linux $MODE $WHERE: $fail failure(s)"; fi

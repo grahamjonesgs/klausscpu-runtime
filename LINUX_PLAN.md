@@ -14,11 +14,25 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
   - busybox (init with `/etc/init.d/rcS` and mdev; ash);
   - Dropbear 2026.94 (`linux/userland/dropbear.sh`): an SSH login over
     loopback passes on the emulator (`linux.sh <out> ssh`).
-- **Not yet built here:** the richer busybox config (vi, top, networking
-  applets, mdev, fdisk/mkfs.vfat). This session's permission classifier
-  refuses to run busybox's build.
-- **Board-only:** SD card, Ethernet and TRNG. The emulator models none of
-  them, and each driver's probe finds nothing there.
+- **Board-checked (2026-11-10, d9cf6c2):**
+  - the richer busybox config is built (vi without regex search; built
+    with `-DBB_GLOBAL_CONST=`, see below);
+  - SD card: `mmcblk0` (60 GB card) mounts as vfat;
+  - Ethernet: DHCP from the router (192.168.68.59/22, route, DNS); from
+    the PC, ping, busybox httpd and an SSH login to Dropbear all work
+    (`tools/validate/linux.sh <out> net board`).
+- **Bugs found on the board:**
+  - Console input was lost. The UART has no RX interrupt and a 16-byte
+    FIFO, and HVC's khvcd polling backs off to 2 s when idle. The timer
+    tick now drains the FIFO into a ring and kicks khvcd (`hvc_uart.c`).
+  - busybox's `*const` global pointers: clang hoists the load of a const
+    global above its assignment (httpd stored to NULL+0x18).
+    `CONFIG_EXTRA_CFLAGS="-DBB_GLOBAL_CONST="`.
+  - `allnoconfig` left `CONFIG_UDHCPC_DEFAULT_SCRIPT` empty, so leases
+    were never applied. rcS now also waits for the carrier and checks
+    the address it ends up with.
+- **Emulator:** SD card, Ethernet and TRNG aren't modelled there, and
+  each driver's probe finds nothing.
 
 ### Board checks (networking, SSH, SD card)
 
