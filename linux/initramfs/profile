@@ -1,2 +1,5 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PS1='\u@\h:\w $ '
+# The time zone, from /data/etc/TZ (a POSIX TZ string such as SAST-2); UTC
+# without it.
+[ -r /data/etc/TZ ] && export TZ="$(cat /data/etc/TZ)"

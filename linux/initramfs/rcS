@@ -5,12 +5,17 @@
 # time goes to tmpfs (/tmp, /run; /var's entries and /etc/resolv.conf and
 # /etc/dropbear link there) or to /data (data.img: /root and /home link
 # into it).  Local settings live in /data/etc:
-#   network   shell variable assignments: HOSTNAME, and IP (a static address
+#   network   shell variable assignments: HOSTNAME, NTP_SERVER (default
+#             pool.ntp.org; "none" turns ntpd off), and IP (a static address
 #             instead of DHCP) with NETMASK, GATEWAY and DNS.  Read in a
 #             subshell, which hands back only those variables: a broken
 #             file gets a warning and the defaults, not a dead boot.
 #   rc.local  run at the end of this script, in its own shell in the
 #             background, so it can't stop or hang the boot
+#   TZ        the time zone as a POSIX TZ string, e.g. SAST-2 (UTC if absent;
+#             read by /etc/profile)
+# There is no real-time clock: the clock starts at 1970 and ntpd sets it from
+# the network once eth0 is up.
 #
 # The standalone shell runs applets through /proc/self/exe, so /proc goes
 # first, through the binary itself.
@@ -36,10 +41,11 @@ IP=
 NETMASK=255.255.255.0
 GATEWAY=
 DNS=
+NTP_SERVER=pool.ntp.org
 # The known variables of /data/etc/network, as single-quoted assignments.
 netvars() {
 	. /data/etc/network >/dev/null 2>&1 </dev/null || exit 1
-	for v in HOSTNAME IP NETMASK GATEWAY DNS; do
+	for v in HOSTNAME IP NETMASK GATEWAY DNS NTP_SERVER; do
 		eval "val=\${$v}"
 		printf "%s='%s'\n" "$v" "$(printf %s "$val" | sed "s/'/'\\\\''/g")"
 	done
@@ -82,6 +88,11 @@ if [ -e /sys/class/net/eth0 ]; then
 		fi
 	fi
 	ifconfig eth0 | grep 'inet addr'
+	# No RTC: ntpd steps the clock at its first answer and keeps it right.
+	# It runs in the background, so a boot without a network isn't held up.
+	if [ -n "$NTP_SERVER" ] && [ "$NTP_SERVER" != none ]; then
+		ntpd -p "$NTP_SERVER" && echo "rcS: ntpd ($NTP_SERVER)"
+	fi
 	if [ -x /usr/sbin/dropbear ]; then
 		dropbear $(/etc/init.d/hostkey) -p 22 && echo "rcS: dropbear on port 22"
 	fi
