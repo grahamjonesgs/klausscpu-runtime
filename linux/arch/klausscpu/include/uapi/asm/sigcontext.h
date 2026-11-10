@@ -6,7 +6,7 @@
 
 /* No FPU or vector state: floating point is soft float. */
 struct sigcontext {
-	struct user_regs_struct regs;
+	struct user_pt_regs regs;
 	unsigned long oldmask;
 };
 

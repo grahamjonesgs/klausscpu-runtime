@@ -16,7 +16,13 @@
 
 #include <linux/types.h>
 
-struct user_regs_struct {
+/*
+ * Named user_pt_regs, as on arm64: struct user_regs_struct is the C
+ * library's (<sys/user.h>, musl's bits/user.h has the same layout), and a
+ * uapi struct of that name would clash with it in programs that include
+ * both, such as strace.
+ */
+struct user_pt_regs {
 	unsigned long r[16];	/* r0-r15; r12 = syscall number/result, r15 = P */
 	unsigned long sp;	/* user stack pointer */
 	unsigned long pc;

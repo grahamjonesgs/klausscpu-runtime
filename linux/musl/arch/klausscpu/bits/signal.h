@@ -7,7 +7,7 @@
 #endif
 
 /*
- * The kernel's struct sigcontext: user_regs_struct (r0-r15, sp, pc, flags)
+ * The kernel's struct sigcontext: user_pt_regs (r0-r15, sp, pc, flags)
  * then oldmask.  No floating-point state (soft float).
  */
 typedef struct mcontext_t {

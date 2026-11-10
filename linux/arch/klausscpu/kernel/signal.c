@@ -17,7 +17,7 @@ struct rt_sigframe {
 
 static int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
-	struct user_regs_struct u;
+	struct user_pt_regs u;
 
 	if (__copy_from_user(&u, &sc->regs, sizeof(u)))
 		return -EFAULT;
@@ -56,7 +56,7 @@ badframe:
 static int setup_rt_frame(struct ksignal *ksig, sigset_t *set, struct pt_regs *regs)
 {
 	struct rt_sigframe __user *frame;
-	struct user_regs_struct u;
+	struct user_pt_regs u;
 	unsigned long sp, *ret;
 	int err = 0;
 

@@ -1,4 +1,4 @@
-/* The kernel's struct user_regs_struct (arch/klausscpu/include/uapi/asm/ptrace.h). */
+/* The layout of the kernel's struct user_pt_regs (arch/klausscpu/include/uapi/asm/ptrace.h). */
 struct user_regs_struct {
 	unsigned long r[16];
 	unsigned long sp;

@@ -98,7 +98,7 @@ unsigned long __get_wchan(struct task_struct *p)
 
 void klausscpu_elf_core_copy_regs(elf_gregset_t dest, struct pt_regs *regs)
 {
-	struct user_regs_struct *u = (struct user_regs_struct *)dest;
+	struct user_pt_regs *u = (struct user_pt_regs *)dest;
 
 	memcpy(u->r, regs->r, sizeof(u->r));
 	u->sp = regs->sp;
