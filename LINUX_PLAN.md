@@ -9,6 +9,9 @@ the stage 3 release; `tools/validate/linux.sh <out> busybox board`).
     sorted at build time;
   - `hvc0` console, the SD card as `mmcblk0` (vfat), LiteEth as `eth0`,
     and the TRNG as `hwrng`;
+  - SD transfers ported from Zephyr: a multi-block command per request
+    (CMD18/CMD25, up to 64 KiB) and pipelined byte loops; `sd_spi.c`
+    carries the protocol, host-tested by `linux/tools/sd_spi_test/`;
   - the QSPI flash as read-only MTD (`qspi_flash.c`): its opcode check
     allows READ and RDID only, and partitions aren't writable;
   - ext4 and loop devices, for the root file system on the SD card.
@@ -168,6 +171,88 @@ The checks:
 To update, run `install-rootfs` again from the running system. The old
 image stays open until the next boot. To go back to the initramfs, rename
 `/linux/rootfs.img` on the card, for example from a PC.
+
+### Board checks: SD card speed
+
+The driver (`sdcard.c` over `sd_spi.c`) sends each request, up to 64 KiB,
+as one multi-block command:
+- reads: CMD18, then CMD12;
+- writes: ACMD23 and CMD25, with 0xFC block tokens and the 0xFD stop
+  token, waiting for busy after each block.
+
+The data loops are pipelined, as in Zephyr's driver: a read starts byte
+i+1 before reading byte i. The clock stays at 25 MHz, and the init
+sequence is unchanged.
+
+A read that may have lost a byte is detected and redone with the plain
+loop. A multi-block command that keeps failing is redone with one command
+per sector, and logs `klausscpu-sd: multi-block ... retrying per block`.
+
+Both switches are on by default, for A/B comparisons, and there are
+counters beside them:
+
+```
+/sys/module/klausscpu_sd/parameters/{multiblock,pipeline}
+/sys/module/klausscpu_sd/parameters/{late_reads,multi_fallbacks,retries}
+```
+
+Write 0 to a switch to turn it off. On the kernel command line, the
+switches are `klausscpu_sd.multiblock=0` and `klausscpu_sd.pipeline=0`.
+The boot line shows both:
+`klausscpu-sd: mmcblk0, N MiB (SDHC/SDXC), multiblock 1, pipeline 1`.
+
+Host test, no board needed:
+
+```
+linux/tools/sd_spi_test/run.sh [ops] [seed]
+```
+
+It runs `sd_spi.c` against a model of the controller and a card. The
+model has a latched DATA register, stalls, CMD12, busy periods, and a
+stop token that is ignored while busy. It injects faults: rejected
+commands, error tokens, rejected writes.
+
+The test checks every read against the expected data. After each
+operation it also checks that the card's contents match, so no write
+lands outside the request. Three deliberately broken versions of
+`sd_spi.c` each fail it:
+- no late check;
+- no busy wait before the stop token;
+- no CMD12.
+
+The benchmark needs a busybox with `dd`: busybox.config now has it, so
+rebuild with `linux/userland/busybox.sh`.
+
+The benchmark reads only, except for one 16 MiB test file,
+`/linux/bench`, which it writes through vfat and then deletes. Run it
+from the SD root file system, where the card's partition is at `/mnt`.
+From the initramfs, first run `mkdir -p /mnt; mount -t vfat
+/dev/mmcblk0p1 /mnt`.
+
+```
+P=/sys/module/klausscpu_sd/parameters
+bench() {
+	echo "multiblock $(cat $P/multiblock) pipeline $(cat $P/pipeline)"
+	sync; echo 3 > /proc/sys/vm/drop_caches
+	time dd if=/dev/mmcblk0 of=/dev/null bs=64k count=256
+	time sh -c 'dd if=/dev/zero of=/mnt/linux/bench bs=64k count=256 && sync'
+	rm /mnt/linux/bench; sync
+}
+bench
+echo 0 > $P/pipeline; bench
+echo 0 > $P/multiblock; bench
+echo 1 > $P/pipeline; bench
+echo 1 > $P/multiblock
+cat $P/late_reads $P/multi_fallbacks $P/retries
+```
+
+How to read the results:
+- The read test reads raw blocks (16 MiB from the start of the card).
+  `drop_caches` makes each run go to the card.
+- For writes, `time` includes the `sync`. dd's own rate stops at the page
+  cache.
+- `late_reads` above zero means the pipelined read loop sometimes reads
+  late. Each such block costs one plain retry.
 
 Goal: mainline Linux (`ARCH=klausscpu`) on the stage 3 release bitstream,
 klaussCPU `mmu` 52bece8 LEAN:
@@ -446,7 +531,7 @@ See `linux/toolchain-tests/RESULTS.md` (`run.sh` regenerates it). As of
 4. **busybox.** *(done: musl, busybox init and ash, Dropbear)*
    - musl and the clang Linux toolchain.
    - Checkpoint: a busybox shell on the emulator, scripted with `--uart-in`.
-5. **Board.** *(busybox, networking, SD card on d9cf6c2 done; QSPI host key and SD root file system need board checks)*
+5. **Board.** *(busybox, networking, SD card on d9cf6c2 done; QSPI host key and SD root file system need board checks; SD speed needs measuring)*
    - Same image on 52bece8; tune load speed and timer frequency.
    - Checkpoint: an interactive shell over the UART.
 6. **Later.**
