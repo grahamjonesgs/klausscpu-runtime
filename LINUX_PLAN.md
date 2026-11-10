@@ -265,6 +265,61 @@ Boot 3 also shows the journal at work: boot 2 ended without an unmount,
 as a board reset does, and boot 3 logs `EXT4-fs (loop1): recovery
 complete` when it mounts `data.img`.
 
+### Ported programs
+
+Each program has a script in `linux/userland/<pkg>.sh`. The script
+fetches a pinned upstream release into `linux-ws/<pkg>`, checks its hash,
+and builds a static musl binary in `linux-ws/<pkg>-build`.
+`build-rootfs.sh` installs whatever has been built. The self-tests go to
+`/usr/share/klausscpu/tests`, so they can be run on the board too.
+
+`tools/validate/linux.sh <out> ports` builds any port that is missing.
+It boots a 24 MiB system image and an 8 MiB data image through `sdinit`
+from the initramfs, so `/data` is real ext4. It runs one boot per port.
+`LINUX_PORTS="lua sqlite bench"` picks some of them.
+
+| Port | Version | Installed | Self-test (emulator result) |
+|---|---|---|---|
+| Lua | 5.4.9 | `lua`, `luac` | `tests/lua-tests.sh`: 19 of Lua's own test files plus `lua-selftest.lua` (also as luac bytecode): 19/19, PASS |
+| SQLite | 3.54.1 amalgamation | `sqlite3` | `tests/sqlite-test.sh`: a 64-line known-answer test on `/data/sqlite-test.db`, reopened by a second process: PASS at -O2, and also at -O3 and -Os |
+| CoreMark | eembc 1f483d5 | `coremark` | in `tests/bench.sh quick`: the CRCs for the performance seeds |
+| lmbench 3 (subset) | intel/lmbench 27b43ae | `/usr/libexec/lmbench/`: `lat_syscall`, `lat_proc`, `lat_ctx`, `lat_pagefault`, `bw_mem`, `lat_mem_rd`, `tlb` | `tests/bench.sh quick`: each prints a result |
+| tlbmiss | ours (`linux/userland/tlbmiss.c`) | `tlbmiss` | ns per access through N pages, one page (64 KiB) apart |
+
+Notes:
+- **SQLite and branch range.** It needs `-ffunction-sections`.
+  `sqlite3.o`'s `.text` alone is beyond KlaussCPU's branch range, and lld
+  places range-extension thunks only between input sections. Without the
+  flag the link fails with `InputSection too large for range extension
+  thunk`. Any very large single-file program will hit the same limit.
+- **musl and locales.** musl's `setlocale` accepts any locale name, but
+  keeps the C number format. `lua-tests.sh` therefore refuses non-C
+  locales, as a C library without them does; otherwise `literals.lua`'s
+  pt_BR block fails.
+- **CoreMark's 10 s rule.** CoreMark counts any run shorter than 10 s as
+  an error. The emulator's 20-iteration run is checked by its CRCs
+  instead.
+- **TLB on the emulator.** `tlbmiss` jumps between 8 and 16 pages, and
+  `tlb` reports 15 pages: the 16-entry TLB, less the entries the code and
+  stack use.
+
+On the board, after `install-rootfs` with an image that has them:
+
+```
+/usr/share/klausscpu/tests/lua-tests.sh
+/usr/share/klausscpu/tests/sqlite-test.sh            # uses /data
+/usr/share/klausscpu/tests/bench.sh | tee /data/bench-$(date +%F).txt
+```
+
+`bench.sh` without `quick`:
+- CoreMark sizes its own run to at least 10 s. The score is the
+  `Iterations/Sec` line, and `Correct operation validated` means it is a
+  valid result.
+- lmbench runs with its default repetitions: `bw_mem` 8 MB,
+  `lat_mem_rd` up to 32 MB at stride 64, `lat_ctx` with 2–16
+  processes.
+- `tlbmiss` runs up to 64 pages.
+
 ### Board checks: SD card speed
 
 The driver (`sdcard.c` over `sd_spi.c`) sends each request, up to 64 KiB,
