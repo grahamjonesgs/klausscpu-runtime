@@ -142,6 +142,15 @@ On the board, booted from the initramfs with the network up:
 install-rootfs http://<PC>:8000/rootfs.img <sha256>
 ```
 
+If the PC's firewall blocks the board's connection (it does on Graham's
+PC: wget times out), push the image from the PC over SSH instead,
+compressed. Raw, 96 MiB at about 120 KiB/s takes about 14 minutes; the
+gzipped image is a few MB:
+
+```
+gzip -1c linux-ws/rootfs.img | ssh root@192.168.68.59 'gunzip | install-rootfs - <sha256>'
+```
+
 It downloads to `rootfs.img.new` and checks the SHA-256. Only then does it
 rename the file to `rootfs.img` and `sync`. Then reload the kernel
 (`klausscc -i linux-ws/build/vmlinux -s -m`).
