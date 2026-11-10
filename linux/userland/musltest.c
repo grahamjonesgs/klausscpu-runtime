@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /* A hosted (musl) smoke test for the KlaussCPU Linux port. */
+#include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
@@ -7,9 +8,28 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <sched.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t got;
+static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+static long locked_count;
+static int atomic_count;
+
+static void *worker(void *arg)
+{
+	int i;
+
+	for (i = 0; i < 2000; i++) {
+		pthread_mutex_lock(&mu);
+		locked_count++;
+		pthread_mutex_unlock(&mu);
+		__atomic_fetch_add(&atomic_count, 1, __ATOMIC_SEQ_CST);
+		if ((i & 255) == 0)
+			sched_yield();
+	}
+	return arg;
+}
 static jmp_buf jb;
 
 static void on_usr1(int sig, siginfo_t *si, void *uc)
@@ -56,6 +76,23 @@ int main(int argc, char **argv)
 	waitpid(pid, &status, 0);
 	printf("musltest: child exited with %d\n", WEXITSTATUS(status));
 	fails += WEXITSTATUS(status) != 5;
+
+	/* Threads: clone, TP, futex wait/wake under a contended mutex. */
+	{
+		pthread_t t[4];
+		void *r;
+		int i, bad = 0;
+
+		for (i = 0; i < 4; i++)
+			pthread_create(&t[i], NULL, worker, (void *)(long)i);
+		for (i = 0; i < 4; i++) {
+			pthread_join(t[i], &r);
+			bad += r != (void *)(long)i;
+		}
+		printf("musltest: 4 threads: mutex count %ld, atomic count %d\n",
+		       locked_count, atomic_count);
+		fails += bad || locked_count != 8000 || atomic_count != 8000;
+	}
 
 	/* 300 short-lived address spaces: ASID generations roll over. */
 	{

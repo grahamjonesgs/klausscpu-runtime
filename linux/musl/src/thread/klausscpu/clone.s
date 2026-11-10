@@ -1,5 +1,6 @@
-# int __clone(func, stack, flags, arg, ptid, tls, ctid)
-#              r0     r1     r2    r3  [sp+8] [sp+16] [sp+24]
+# int __clone(func, stack, flags, arg, ...): variadic, so the caller has
+# reserved a 32-byte home area for r0-r3 and ptid, tls, ctid are at
+# [sp+40], [sp+48], [sp+56] (klausscpu-llvm ABI).
 # syscall(SYS_clone, flags, stack, ptid, ctid, tls)   (no CLONE_BACKWARDS)
 #              r12    r0     r1     r2    r3    r4
 .global __clone
@@ -11,9 +12,9 @@ __clone:
 	stidx64 r0, r1, 0		# func and arg for the child, on its stack
 	stidx64 r3, r1, 8
 	getsp r8
-	ldidx64 r9, r8, 8		# ptid
-	ldidx64 r10, r8, 16		# tls
-	ldidx64 r11, r8, 24		# ctid
+	ldidx64 r9, r8, 40		# ptid
+	ldidx64 r10, r8, 48		# tls
+	ldidx64 r11, r8, 56		# ctid
 	push r4				# r4 is callee-saved
 	copy r0, r2
 	copy r2, r9

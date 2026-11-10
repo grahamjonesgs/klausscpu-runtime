@@ -60,4 +60,8 @@ SHARED_LIBS =
 MAK
 make -C "$SRC" -j"${JOBS:-$(nproc)}" >"$WS/musl-build.log" 2>&1 || { tail -30 "$WS/musl-build.log"; exit 1; }
 make -C "$SRC" install-headers install-libs >>"$WS/musl-build.log" 2>&1
+# The kernel's UAPI headers (linux/*.h, asm/*.h) beside musl's: busybox
+# needs them (linux/vt.h, ...).
+LINUX_BUILD=$WS/build-headers KLAUSSCPU_LLVM_BIN=$B "$RT/linux/build.sh" \
+  headers_install INSTALL_HDR_PATH="$SYSROOT" >>"$WS/musl-build.log" 2>&1
 echo "musl: sysroot $SYSROOT"
