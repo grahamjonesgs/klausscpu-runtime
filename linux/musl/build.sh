@@ -28,6 +28,11 @@ WS=${LINUX_WS:-$RT/linux-ws}
 KWS=${LINUX_KERNEL_WS:-$WS}
 B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 SHARED=${MUSL_SHARED:-0}
+# The shared build has a workspace of its own: its libc.a, libc.so and
+# sysroot must not mix with the default static one.
+if [ "$SHARED" = 1 ] && [ "$(realpath -m "$WS")" = "$(realpath -m "$RT/linux-ws")" ]; then
+  echo "musl: MUSL_SHARED=1 needs LINUX_WS set to a workspace of its own"; exit 1
+fi
 SRC=$WS/musl
 SYSROOT=$WS/sysroot
 TAG=v1.2.5
@@ -39,15 +44,16 @@ for d in "$HERE"/src/*/klausscpu; do
   rel=${d#"$HERE"/}
   ln -sfn "$d" "$SRC/$rel"
 done
-# The patches own the musl tree: when the series changes (or on the first
-# build) every tracked file goes back to $TAG (local edits are lost; the
-# port's symlinks, config.mak and obj/ are untracked and stay) and the whole
-# series is applied again.  The stamp keeps an unchanged series from
-# touching the files (and so from rebuilding what includes them).
+# The patches own the musl tree: when the series changes, on the first
+# build, or when the tree has lost them, every tracked file goes back to $TAG
+# (local edits are lost; the port's symlinks and config.mak are untracked and
+# stay) and the whole series is applied again.  The stamp keeps an unchanged
+# series from touching the files (and so from rebuilding what includes them).
 PATCHES=("$HERE"/patches/*.patch)
 STAMP=$SRC/.klausscpu-patches
 want=$(cat "${PATCHES[@]}" | sha256sum | cut -d' ' -f1)
-if [ "$(cat "$STAMP" 2>/dev/null)" != "$want" ]; then
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$want" ] ||
+   ! git -C "$SRC" apply --reverse --check "${PATCHES[@]}" 2>/dev/null; then
   git -C "$SRC" checkout -q "$TAG" -- .
   git -C "$SRC" apply --check "${PATCHES[@]}"
   git -C "$SRC" apply "${PATCHES[@]}"
@@ -61,12 +67,11 @@ if [ "$SHARED" = 1 ]; then
   [ -f "$BUILTINS" ] || { echo "musl: no Linux builtins at $BUILTINS (build-builtins.sh)"; exit 1; }
   # musl's configure flags for libc.so (tryldflag; lld takes them all).
   LDFLAGS_AUTO="-Wl,--sort-section,alignment -Wl,--sort-common -Wl,--gc-sections -Wl,--hash-style=both -Wl,--no-undefined -Wl,--exclude-libs=ALL -Wl,--dynamic-list=./dynamic.list"
-  # Until the clang driver links -shared for the Linux triple (it still
-  # makes every link -static), say it to lld directly.
-  if ! "$B/clang" --target=klausscpu-unknown-linux-musl -nostdlib -shared -### 2>&1 \
-      | grep -q '"-shared"'; then
-    LDFLAGS_AUTO="$LDFLAGS_AUTO -Wl,-shared -Wl,-z,now"
-  fi
+  # The driver must link -shared for the Linux triple (klausscpu-llvm
+  # dynlink f97f22d; older drivers made every link -static).
+  "$B/clang" --target=klausscpu-unknown-linux-musl -nostdlib -shared -x c /dev/null -### 2>&1 |
+    grep -q '"-shared"' ||
+    { echo "musl: $B/clang does not link -shared for klausscpu-unknown-linux-musl"; exit 1; }
 else
   BUILTINS=$("$B/clang" --target=klausscpu-unknown-elf -rtlib=compiler-rt -print-libgcc-file-name)
 fi
@@ -110,15 +115,22 @@ ADD_CFI = no
 MALLOC_DIR = mallocng
 WRAPCC_GCC = \$(CC)
 MAK
-# Shared: libc.a from non-PIC objects, libc.so from -fPIC ones (configure's
-# choice when the compiler does not default to PIC).
+# libc.a from non-PIC objects in both modes (configure's choice when the
+# compiler does not default to PIC; until 2026-11-11 the static build used
+# the -fPIC ones, which the Linux PIC code generation would now send through
+# the GOT), libc.so from -fPIC ones.
 if [ "$SHARED" != 1 ]; then
-  cat <<MAK
-AOBJS = \$(LOBJS)
-SHARED_LIBS =
-MAK
+  echo "SHARED_LIBS ="
 fi
-} >"$SRC/config.mak"
+} >"$SRC/config.mak.new"
+# Nothing in musl's Makefile depends on config.mak or on <link.h>, so a
+# changed configuration or patch series rebuilds everything.
+cfg=$( { cat "$SRC/config.mak.new"; echo "$want"; } | sha256sum | cut -d' ' -f1)
+if [ "$(cat "$SRC/.klausscpu-config" 2>/dev/null)" != "$cfg" ]; then
+  rm -rf "$SRC/obj" "$SRC/lib"
+  echo "$cfg" >"$SRC/.klausscpu-config"
+fi
+mv "$SRC/config.mak.new" "$SRC/config.mak"
 make -C "$SRC" -j"${JOBS:-$(nproc)}" >"$WS/musl-build.log" 2>&1 || { tail -30 "$WS/musl-build.log"; exit 1; }
 make -C "$SRC" install-headers install-libs >>"$WS/musl-build.log" 2>&1
 if [ "$SHARED" = 1 ]; then

@@ -7,3 +7,4 @@ dlsym:
 	getsp r2
 	ldidx64 r2, r2, 0
 	tail __dlsym
+	.size dlsym, . - dlsym
