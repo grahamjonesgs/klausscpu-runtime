@@ -522,8 +522,8 @@ What it took:
   code that stores through unaligned pointers gets SIGBUS.
 - The system image is now 256 MiB (about 160 MiB used; static binaries).
 - Not packaged: rt-tests (Buildroot excludes musl; cyclictest), Python 3 and
-  MicroPython (shared libraries only; Python also needs libffi, which has no
-  KlaussCPU port), Perl, gdb (no KlaussCPU target in gdb), and anything in
+  MicroPython (shared libraries only: Python 3 is in the shared-library
+  build, DYNLINK_PLAN M7, with ctypes since libffi was ported), Perl, gdb (no KlaussCPU target in gdb), and anything in
   C++ (no C++ runtime).
 
 **strace.**

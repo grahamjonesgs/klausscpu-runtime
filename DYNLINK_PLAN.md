@@ -129,7 +129,7 @@ independent review with no blockers. Items for M4 and the kernel:
 | M4 | done, reviewed, merged to runtime main (52999f1): `linux/musl/patches/` (ELF32 dynamic structures with LP64 pointers, gated on `DL_ELFCLASS`; arch ELF header check; `<link.h>` `__ELFW_ADDR`), `MUSL_SHARED=1` build in its own workspace; the static `libc.a` is now non-PIC (it was built from the -fPIC objects) and `dl_iterate_phdr` reads Elf32_Phdr |
 | M5 | done on the emulator: `linux/userland/tests/dynlink/run.sh`, 185 checks pass (library data/functions/function pointers/RELRO, protected/weak/interposed symbols, constructors and destructors in order, TLS GD/IE/LE with 4 threads, `dl_iterate_phdr`/`dladdr`/`r_debug`, `dlopen`/`dlsym`/`RTLD_NEXT`/`RTLD_GLOBAL` with TLS in threads made before and after, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `$ORIGIN`, setjmp/signals across modules, bad ELF files refused). Start-up per program (fork+exec+wait, emulator): static 4.9 ms, dynamic 9.0 ms, dynamic + one library 12.9 ms. It found a kernel race (an interrupt in the page fault return path zeroed r12; fixed in 03b354c) |
 | M6 | the board (perf-hw c1874cf): `linux/userland/tests/dynlink/board.sh` runs run.sh's programs in a chroot on /tmp (the system image has no /lib yet); all 141 guest checks pass. Start-up (fork+exec+wait, 500 runs): static 18.4 ms, dynamic 32.8 ms, + one library 48.5 ms; see below |
-| M7 | Buildroot with shared libraries: `BR_SHARED=1 linux/buildroot/build.sh` (linux-ws/br-output-dyn), every package of the static build plus Python 3.14 with zlib, ssl/hashlib, sqlite3, bz2, lzma, readline, curses; no `_ctypes` (no libffi port: Buildroot patch 0005). Image: `ROOTFS_BUILDROOT=1 ROOTFS_BUILDROOT_TAR=linux-ws/br-output-dyn/images/rootfs.tar linux/rootfs/build-rootfs.sh linux-ws/rootfs-dyn.img 256`. On the board, in a chroot of that image from the SD card's `/linux/rootfs-dyn.img`: buildroot-test 40/40, the Python checks pass (threads, subprocess, sqlite3, HTTPS with the CA bundle) |
+| M7 | Buildroot with shared libraries: `BR_SHARED=1 linux/buildroot/build.sh` (linux-ws/br-output-dyn), every package of the static build plus Python 3.14 with zlib, ssl/hashlib, sqlite3, bz2, lzma, readline, curses, and `_ctypes` (the libffi port, below). Image: `ROOTFS_BUILDROOT=1 ROOTFS_BUILDROOT_TAR=linux-ws/br-output-dyn/images/rootfs.tar linux/rootfs/build-rootfs.sh linux-ws/rootfs-dyn.img 256`. On the board, in a chroot of that image from the SD card's `/linux/rootfs-dyn.img`: buildroot-test 40/40, the Python checks pass (threads, subprocess, sqlite3, HTTPS with the CA bundle) |
 
 M6, per start-up (perfstat over 200 runs):
 
@@ -158,8 +158,48 @@ M7 measurements (board, perf-hw a5d20f2):
   16-entry TLB (1 MiB with 64 KiB pages) can't hold libpython's eval loop,
   its heap and libc.so. A bigger TLB or a hardware page-table walker would
   help interpreters most (raised with the klaussCPU session).
-- Not done: a libffi port (Python ctypes), the shared image as the board's
-  default system, the driver defaulting to PIE for the Linux triple.
+- Not done: the shared image as the board's default system, the driver
+  defaulting to PIE for the Linux triple.
+
+libffi (after M7): a KlaussCPU port of libffi 3.4.8,
+`linux/buildroot/external/patches/libffi/0001-klausscpu.patch`
+(`src/klausscpu`: ffi_call, variadic calls, closures, `_Complex`; no Go
+closures, no static trampolines), so Buildroot's Python has `_ctypes`
+(Buildroot patch 0005, which left libffi out, is gone; `external.mk` tells
+Python's configure that libffi has complex types, which it can't run a
+program to find out when cross-compiling).
+- Closures use dynamic trampolines (32 bytes: `leapc`, two loads, `jmpr`,
+  then the addresses of `ffi_closure_SYSV` and the closure) in the W+X
+  anonymous pages libffi's `closures.c` maps; the kernel allows W+X
+  (`protection_map`), there is no SELinux or PaX. The I-cache snoops the
+  core's own stores (klaussCPU CPU_ARCHITECTURE.md §3.2: tag-checked per
+  line, the fetch window and prefetch buffer too), so a trampoline written
+  through the address it runs from needs no maintenance; user code has no
+  way to do any (`CACHE_CTRL.ICACHE_INV` is supervisor MMIO, there is no
+  cacheflush system call, and compiler-rt's `__clear_cache` is not built
+  for the target, OPEN_ITEMS 28). Code written through a second mapping
+  would need `ICACHE_INV` (MMU_PLAN §11.3); libffi only does that if W+X
+  mappings are refused, which they are not here.
+- A non-variadic call gets at least 32 bytes of stack area, as clang's
+  calls without a prototype do: a variadic C function called through a
+  non-variadic cif (ctypes without `argtypes`) works when its arguments
+  fit R0-R3, instead of overwriting `ffi_call_SYSV`'s frame.
+- `linux/userland/tests/libffi/run.sh` (emulator): libffi's testsuite
+  (libffi.call, libffi.closures, libffi.complex at -O0 and -O2, the
+  libffi.bhaible programs) and `abi.c` (200 checks of libffi's argument
+  and result words against clang's, through an assembly function that
+  records the registers and stack slots, and closures called by compiled
+  code): 398 programs pass, none fail; unsupported: the 2 C++ tests (no
+  C++ runtime) and the 2 Go-closure tests. Nine deliberate bugs in
+  `ffi.c` (unsigned int zero-extended, no home area, ...) each made it
+  fail; three of them (32-bit and 8-bit extension of arguments and
+  closure results) only `abi.c` noticed. Then Python 3.14 in the
+  initramfs runs `ctypes_smoke.py`: strlen, snprintf (variadic, with and
+  without argtypes), pow/powf/powl/ldexp/fmaf, div/ldiv (struct results
+  in R12, R12/R11), inet_ntoa (struct argument), qsort with a CFUNCTYPE
+  callback, callbacks with a 24-byte struct, pointers, errno and
+  `c_double_complex`: 28 checks pass.
+- Not checked on the board yet (another session had it).
 
 The dynlink branch work merged to llvm `main` (M2+M3, 432b009); the
 `build-dynlink` directory is no longer needed.
