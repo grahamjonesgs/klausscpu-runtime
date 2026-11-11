@@ -23,7 +23,7 @@ AR="$LLVM_BIN/llvm-ar"
 # Fork root = parent of build/bin; compiler-rt sits alongside the build dir.
 LLVM_ROOT="$(cd "$LLVM_BIN/../.." && pwd)"
 B="$LLVM_ROOT/compiler-rt/lib/builtins"
-TRIPLE="klausscpu-unknown-elf"
+TRIPLE="${BUILTINS_TRIPLE:-klausscpu-unknown-elf}"
 
 [ -x "$CLANG" ] || { echo "clang not found at $CLANG — build the LLVM toolchain first"; exit 1; }
 
@@ -37,6 +37,10 @@ mkdir -p "$(dirname "$DEST")"
 # own build uses: the driver no longer implies it, and the builtins must not be
 # turned into C library calls.
 FLAGS=(--target="$TRIPLE" -O1 -fPIC -nostdlibinc -ffreestanding -I"$B" -D__SOFTFP__)
+# Linux (BUILTINS_TRIPLE=klausscpu-unknown-linux-musl): every module (libc.so,
+# other .so, PIE) links its own hidden copy, as with libgcc.a.  compiler-rt's
+# int_lib.h keys COMPILER_RT_ABI off VISIBILITY_HIDDEN, so both are needed.
+case "$TRIPLE" in *-linux-*) FLAGS+=(-fvisibility=hidden -DVISIBILITY_HIDDEN) ;; esac
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
