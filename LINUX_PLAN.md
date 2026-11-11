@@ -717,6 +717,60 @@ startup: musl's `__init_tls` before the Elf32_Phdr fix (the binaries on the
 card predate it), which the hardware used to answer with the wrong
 doubleword. Relinking them against the fixed musl removes that.
 
+### TLB size and refill: the estimate (2026-11-11)
+
+For the klaussCPU session's TLB plan. Board: perf-hw a5d20f2, 100 MHz.
+Model: klausscc `KLAUSSCC_TLBSIM=1` (branch `tlbsim`), which simulates
+other TLB shapes beside the real one, windowed by perfstat. Its 16-entry
+round-robin case equals the kernel's `tlb_refills` in every window.
+Runner: `linux-ws/tlbsim/run.sh`; tables in `linux-ws/tlbsim/results.md`.
+Microbenchmarks: `~/.cache/tlbmeas` (`dchase`, `dchase2`, `ichase`).
+
+- **Refill cost:**
+  - 110 cycles on the data side and 115-117 on the instruction side, with
+    the handler's data hot. The handler is 32 instructions; the rest is
+    exception entry, `TLBWI` and `IRET`.
+  - 373-391 cycles with everything the handler touches cold in the
+    D-cache (about 5.5 extra misses per refill).
+- **Share of cycles in refills:**
+
+  | Workload | Share |
+  |---|---|
+  | `python3 -S -c pass` | 43% (1.40M refills, 16 per 1000 instructions) |
+  | the `s+=i*i` loop | 65% (8.34M refills) |
+  | sqlite3 on the Buildroot test | 3.4% |
+  | lua | 1.2% |
+  | fork, exec, fault | under 0.5% |
+
+  Fork, exec and fault misses are all compulsory, so no TLB shape helps
+  them.
+- **Misses by TLB shape:**
+
+  | TLB | python `-c pass` | the loop | sqlite |
+  |---|---|---|---|
+  | 16 entries, round-robin (today) | 1.39M | 8.33M | 0.94M |
+  | 32 entries, round-robin | 346K | 339K | 12K |
+  | 64 entries, round-robin | 16K | 16K | 7.8K |
+  | 128 entries, 4-way, LRU | 2.5K | 2.6K | 7.8K |
+  | compulsory | 2.2K | 2.3K | 7.8K |
+
+  2-way at 64 entries is poor (3.4M misses on the loop). Random
+  replacement is 15-90% worse than LRU. The 1-entry micro-ITLB misses
+  78-125 times per 1000 user fetches in Python.
+- **Estimated time change:**
+
+  | Option | python `-c pass` | the loop |
+  |---|---|---|
+  | 32 entries, software refill | -32% | -63% |
+  | 64 entries, software refill | -42% | -65% |
+  | 16 entries + a 15-30-cycle walker | -31 to -37% | -48 to -57% |
+  | 32 entries + a walker | -40 to -42% | -65% |
+  | no refills at all (the ceiling) | -43% | -65% |
+
+  sqlite gains 3.4% from any of them.
+- **The cheapest step:** 32 entries, +470 LUTs per the klaussCPU session.
+  It needs no kernel change: `tlbex.S` already masks the index with 31.
+
 ### Swap
 
 The kernel has `CONFIG_SWAP`. `install-swap [MiB]` writes
