@@ -105,8 +105,26 @@ static int ma_decode(struct pt_regs *regs, struct ma_insn *in)
 	in->bytes = 1 << size;
 	in->sgn = !in->store && (w0 & BIT(23));
 	in->rd = (w0 >> 8) & 0xf;
-	/* LR/SC: one word, MODE 00, [12] set (ISA_ENCODING_V2_MAP §9.2). */
-	if (in->len == 1 && mode == 0 && (w0 & BIT(12)))
+	/*
+	 * LR/SC (one word, MODE 00, [12] set, ISA_ENCODING_V2_MAP §9.2) and
+	 * DCBZ ([13] set, HW_PERF_PLAN.md §1) are not plain loads or stores.
+	 */
+	if (in->len == 1 && mode == 0 && (w0 & (BIT(12) | BIT(13))))
+		return -EINVAL;
+	/*
+	 * What the CPU decodes as ILLEGAL (klausscc exec.rs mem_legal): the
+	 * word may not be the one that ran (rewritten since), so check it.
+	 * [19:12] only in the short form; no SGN on a store; A only on a
+	 * 64-bit access; MODE 10 only as two words, MODE 00/11 only as one;
+	 * rs2 zero in MODE 00/01, [7:0] zero in MODE 10.
+	 */
+	if (((w0 >> 12) & 0xff) && !(in->len == 1 && mode == 1))
+		return -EINVAL;
+	if ((in->store && (w0 & BIT(23))) || ((w0 & BIT(20)) && size != 3))
+		return -EINVAL;
+	if (in->len == 1 ? mode == 2 : !(mode == 1 || mode == 2))
+		return -EINVAL;
+	if ((mode <= 1 && (w0 & 0xf)) || (mode == 2 && (w0 & 0xff)))
 		return -EINVAL;
 	/* Bytes never trap; 64-bit only with MAL64. */
 	if (in->bytes == 1 || (in->bytes == 8 && !mal64_on))
@@ -188,7 +206,9 @@ static void ma_segv(unsigned long addr)
 
 /*
  * From klausscpu_do_exception for a user-mode MISALIGNED_LOAD/STORE.
- * Returns false (nothing done) when the caller should send SIGBUS.
+ * Returns false (nothing done) when the caller should send SIGBUS: only
+ * for prctl(PR_SET_UNALIGN, PR_UNALIGN_SIGBUS); an access it can't emulate
+ * gets its SIGBUS here.
  */
 bool klausscpu_misaligned_user(struct pt_regs *regs, unsigned long cause)
 {
@@ -204,9 +224,20 @@ bool klausscpu_misaligned_user(struct pt_regs *regs, unsigned long cause)
 	state = irqentry_enter(regs);
 	local_irq_enable();
 	perf_sw_event(PERF_COUNT_SW_ALIGNMENT_FAULTS, 1, regs, regs->eaddr);
-	if (ma_decode(regs, &in) || in.store != (cause == EXC_MISALIGNED_STORE))
-		goto out;
 	done = true;
+	if (ma_decode(regs, &in) || in.store != (cause == EXC_MISALIGNED_STORE)) {
+		/*
+		 * Not emulated: SIGBUS now, inside this entry/exit, so that no
+		 * other signal is delivered first and moves the PC it reports.
+		 */
+		if (show_unhandled_signals)
+			pr_info_ratelimited("%s[%d]: misaligned %s at pc %08lx eaddr %08lx\n",
+					    current->comm, task_pid_nr(current),
+					    cause == EXC_MISALIGNED_STORE ? "store" : "load",
+					    instruction_pointer(regs), regs->eaddr);
+		force_sig_fault(SIGBUS, BUS_ADRALN, (void __user *)instruction_pointer(regs));
+		goto out;
+	}
 	if (ma_access(regs, &in, &bad)) {
 		if (show_unhandled_signals)
 			pr_info_ratelimited("%s[%d]: segfault at %08lx in emulated misaligned %s at pc %08lx\n",

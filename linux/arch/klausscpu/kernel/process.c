@@ -43,6 +43,8 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 	struct pt_regs *childregs = task_pt_regs(p);
 
 	memset(&p->thread, 0, sizeof(p->thread));
+	/* prctl(PR_SET_UNALIGN) is inherited across fork and clone. */
+	p->thread.align_ctl = current->thread.align_ctl;
 	if (unlikely(args->fn)) {
 		memset(childregs, 0, sizeof(*childregs));
 		childregs->syscallno = -1;

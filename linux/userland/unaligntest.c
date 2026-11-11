@@ -417,6 +417,24 @@ static void sigbus_ctl64(void)
 	st64a_m0((unsigned long)ua_buf + 4, 0, 0);
 }
 
+/* The setting is inherited: a grandchild forked after it gets SIGBUS too. */
+static void sigbus_inherit(void)
+{
+	pid_t pid;
+	int st;
+
+	if (prctl(PR_SET_UNALIGN, PR_UNALIGN_SIGBUS))
+		_exit(1);
+	pid = fork();
+	if (pid == 0) {
+		ld16_m0((unsigned long)ua_buf + 1, 0, 0);
+		_exit(0);	/* emulated: the setting was lost */
+	}
+	if (pid < 0 || waitpid(pid, &st, 0) < 0 || !WIFEXITED(st))
+		_exit(2);
+	_exit(WEXITSTATUS(st));	/* the grandchild's on_sig status */
+}
+
 static void test_faults(void)
 {
 	int s;
@@ -450,6 +468,8 @@ static void test_faults(void)
 	CHECK(s == SIGBUS, "misaligned sc32: signal %d", s);
 	s = in_child(sigbus_ctl, 0);
 	CHECK(s == SIGBUS, "prctl(PR_SET_UNALIGN, PR_UNALIGN_SIGBUS): signal %d", s);
+	s = in_child(sigbus_inherit, 0);
+	CHECK(s == SIGBUS, "PR_UNALIGN_SIGBUS inherited across fork: signal %d", s);
 	if (mal64) {
 		s = in_child(sigbus_ctl64, 0);
 		CHECK(s == SIGBUS, "PR_UNALIGN_SIGBUS, 64-bit store: signal %d", s);
