@@ -67,6 +67,10 @@ BR2_PACKAGE_WHETSTONE=y
 BR2_PACKAGE_GIT=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_OPENSSL=y
+# OpenSSL's 64-bit C P-256 (needs __int128, little-endian): an OpenSSH login
+# 4.42 -> 3.12 s on the board (LINUX_PLAN "SSH servers").  no-asm: no
+# assembly for KlaussCPU.
+BR2_PACKAGE_LIBOPENSSL_TARGET_ARCH="linux-generic64 no-asm enable-ec_nistp_64_gcc_128"
 BR2_PACKAGE_OPENSSH=y
 BR2_PACKAGE_OPENSSH_CLIENT=y
 BR2_PACKAGE_OPENSSH_SERVER=y

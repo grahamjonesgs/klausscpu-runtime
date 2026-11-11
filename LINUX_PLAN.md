@@ -140,6 +140,22 @@ EC check), which would change the fingerprint, and shared libraries
 (DYNLINK_PLAN), which make the execs cheaper. Dropbear stays on 2222 until
 OpenSSH is the only server.
 
+OpenSSL's fast 64-bit C P-256 (`enable-ec_nistp_64_gcc_128`, in
+klausscpu_defconfig since 2026-11-11; Buildroot's generic 64-bit target
+otherwise uses the slow generic bignum code) on a5d20f2, the old and new
+binaries side by side from /tmp with the same config and key:
+
+| | generic P-256 | `ec_nistp_64_gcc_128` |
+|---|---|---|
+| `ssh true`, mean of 5 | 4.42 s | 3.12 s |
+| `sshd -t` with the ECDSA host key | 1.00 s | 0.66 s |
+| `sshd -t` with an Ed25519 key | 0.39 s | 0.39 s |
+
+Dropbear: 1.49 s. No misaligned accesses emulated. The EC key now costs
+about 0.27 s per process; the remaining ~0.39 s per process (three per
+login) is not the key: user-space start-up of the static 4.7 MB binary
+and OpenSSL's initialisation, not yet profiled.
+
 Host tests: `linux/userland/keystore/test_kskey.sh` (synthetic NVS images:
 newest-wins, torn write, sector rollover, wrap, deleted, bad CRC; plus an
 `ssh-keygen` fingerprint round trip).
