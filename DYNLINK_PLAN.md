@@ -125,11 +125,29 @@ independent review with no blockers. Items for M4 and the kernel:
 |---|---|
 | M1 | done: ABI.md "Dynamic linking" on klausscpu-llvm `dynlink` (505579e, `<link.h>` ElfW(Addr) wording 9e5fefc) |
 | M2 | done, reviewed: codegen + MC (505579e..a25b4bb); non-PIC and non-Linux output byte-identical; Linux C++ exception tables change (indirect pcrel personality) |
-| M3 | implemented (lld, driver `-shared`/`-pie`), independent review: no blockers, 1 major (non-PIC address of a library symbol in a PIE now an error) and 4 minor being fixed |
+| M3 | done, reviewed (1 major, 4 minor fixed): lld `-shared`/PIE, GOT/PLT, dynamic relocations, TLS IE/GD, 64 KiB pages and `-z now` for dynamic outputs; driver `-shared`/`-pie`. M2+M3 fast-forwarded to llvm `main` (432b009); `build/` rebuilt, the Linux builtins in it (`BUILTINS_TRIPLE=klausscpu-unknown-linux-musl ./build-builtins.sh`); bare-metal objects byte-identical to the pre-M2 toolchain |
 | M4 | done, reviewed, merged to runtime main (52999f1): `linux/musl/patches/` (ELF32 dynamic structures with LP64 pointers, gated on `DL_ELFCLASS`; arch ELF header check; `<link.h>` `__ELFW_ADDR`), `MUSL_SHARED=1` build in its own workspace; the static `libc.a` is now non-PIC (it was built from the -fPIC objects) and `dl_iterate_phdr` reads Elf32_Phdr |
 | M5 | done on the emulator: `linux/userland/tests/dynlink/run.sh`, 185 checks pass (library data/functions/function pointers/RELRO, protected/weak/interposed symbols, constructors and destructors in order, TLS GD/IE/LE with 4 threads, `dl_iterate_phdr`/`dladdr`/`r_debug`, `dlopen`/`dlsym`/`RTLD_NEXT`/`RTLD_GLOBAL` with TLS in threads made before and after, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `$ORIGIN`, setjmp/signals across modules, bad ELF files refused). Start-up per program (fork+exec+wait, emulator): static 4.9 ms, dynamic 9.0 ms, dynamic + one library 12.9 ms. It found a kernel race (an interrupt in the page fault return path zeroed r12; fixed in 03b354c) |
+| M6 | the board (perf-hw c1874cf): `linux/userland/tests/dynlink/board.sh` runs run.sh's programs in a chroot on /tmp (the system image has no /lib yet); all 141 guest checks pass. Start-up (fork+exec+wait, 500 runs): static 18.4 ms, dynamic 32.8 ms, + one library 48.5 ms; see below |
 
-M2 and M3 merge to llvm `main` together, after M3's fixes and M5.
+M6, per start-up (perfstat over 200 runs):
+
+| | static | dynamic | + libdt1.so |
+|---|---|---|---|
+| instructions | 231k | 451k | 670k |
+| cycles | 1.87M | 3.36M | 4.91M |
+| D-cache lines zeroed (DCBZ: page clearing, memset) | 10.6k | 19.7k | 33.1k |
+| D-cache read / write misses | 19.6k / 12.3k | 33.6k / 23.2k | 50.0k / 34.2k |
+
+Each module costs ~1.5M cycles (15 ms): about 220k instructions of
+relocation and symbol lookup, and ~4-7 freshly zeroed 64 KiB pages (its
+writable data, bss, GOT and RELRO each start a page; ~9-13k zeroed lines,
+2048 per page). Ideas, not done: no separate RELRO page for small
+libraries (one writable page instead of two), prelinking-style symbol
+caches, and fewer, bigger libraries (busybox-style) in M7.
+
+The dynlink branch work merged to llvm `main` (M2+M3, 432b009); the
+`build-dynlink` directory is no longer needed.
 
 Notes from M5:
 - `-fPIC` through the driver means `-fhalf-no-semantic-interposition`:
@@ -146,7 +164,7 @@ Notes from M5:
 
 ## Working rules
 
-- **klausscpu-llvm**: branch `dynlink`, built in a **separate build
+- **klausscpu-llvm** (until the merge on 2026-11-11): branch `dynlink`, built in a **separate build
   directory** (`build-dynlink`): everything else (the kernel, Buildroot,
   the runtime) keeps using `build/` from `main` until the branch is
   reviewed and merged. Commits stay local until review; the runtime

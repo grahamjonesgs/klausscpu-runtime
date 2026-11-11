@@ -18,7 +18,7 @@
 #                       -fPIC objects, musl's configure link flags and the
 #                       Linux-triple (hidden, PIC) compiler-rt builtins.
 #                       Needs a toolchain with dynamic linking
-#                       (klausscpu-llvm dynlink, build-dynlink) and a
+#                       (klausscpu-llvm main from 432b009) and a
 #                       workspace of its own (LINUX_WS): the default static
 #                       build is unchanged.
 set -euo pipefail

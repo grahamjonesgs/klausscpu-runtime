@@ -8,7 +8,7 @@
 # boots it on klausscc, types the test commands at minish and checks the
 # output.  Exit 0 only if every check passes.
 #
-#   DYN_BIN       dynlink toolchain (default ../klausscpu-llvm/build-dynlink/bin)
+#   DYN_BIN       toolchain with dynamic linking (default ../klausscpu-llvm/build/bin)
 #   DYN_SYSROOT   musl sysroot with lib/libc.so, Scrt1.o (default
 #                 linux-ws/dyn/sysroot)
 #   KLAUSSCPU_LLVM_BIN  toolchain for the kernel and minish (default
@@ -23,7 +23,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../../../.." && pwd)
 SRC=$(cd "$RT/.." && pwd)
-DYN_BIN=${DYN_BIN:-$SRC/klausscpu-llvm/build-dynlink/bin}
+DYN_BIN=${DYN_BIN:-$SRC/klausscpu-llvm/build/bin}
 DYN_SYSROOT=${DYN_SYSROOT:-$RT/linux-ws/dyn/sysroot}
 export KLAUSSCPU_LLVM_BIN=${KLAUSSCPU_LLVM_BIN:-$SRC/klausscpu-llvm/build/bin}
 export LINUX_BUILD=${LINUX_BUILD:-$RT/linux-ws/build-dynlink-m5}
