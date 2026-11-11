@@ -660,6 +660,26 @@ accesses after boot and the suites, from two per program start).  On the board a
 victim and ~16 with a dirty one, against ~40/53 for four stores to a
 missing line (klaussCPU's measurement).
 
+**16 KiB I-cache, perf-hw c1874cf** against 88acc21 (8 KiB), loaded in
+turn into the same board with the same kernel (DCBZ on) and system image,
+two runs each, averages (per iteration; the counters are global):
+
+| | 88acc21 | c1874cf | |
+|---|---|---|---|
+| I-cache misses: fork / exec / fault | 16.7k / 41.0k / 4.64k | 14.4k / 35.6k / 3.91k | -14% / -13% / -16% |
+| `sysloop fork` / `exec` / `fault` | 9.82 / 22.04 / 1.93 ms | 9.46 / 21.48 / 1.80 ms | -3.6% / -2.5% / -7.1% |
+| lmbench fork+exit / fork+execve / fork+sh -c | 10.68 / 20.00 / 37.56 ms | 10.41 / 19.59 / 36.39 ms | -2.5% / -2.0% / -3.1% |
+| lmbench page fault (vim) | 64.7 us | 58.9 us | -9.1% |
+
+Misses fall as estimated (-13 to -20%), time less than estimated (-4 to
+-6%) except for page faults: I-fill cycles fall only 6-9%, because the
+misses that remain cost more each (fork: 20.8 -> 22.5 fill cycles per
+miss), and D-cache stalls are still over half of every cycle. Run-to-run
+spread is about 2-3% on fork. The first 16 KiB bitstream (be78350)
+panicked Linux in early boot: a CALL whose return-address push the new
+I-cache tag guard refused skipped the callee (klaussCPU c1874cf);
+`baremetal` `test_icall` is its regression test.
+
 LiteEth, the same kernel with `liteeth.rx_slots=2` and without (8):
 
 | iperf3, 15 s | 2 slots | 8 slots (two runs) |
