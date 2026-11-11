@@ -13,24 +13,60 @@
 #     GCC 14 (clang 23 takes what GCC 14 does) and Buildroot checks it;
 #   - -msoft-float is dropped (KlaussCPU code is always soft-float; clang
 #     only warns, which -Werror packages would trip on);
+#   - a run-together -zKEYWORD (Buildroot's -ztext for musl with shared
+#     libraries) becomes -Wl,-z,KEYWORD, which clang's driver takes;
 #   - for --sysroot=X (Buildroot's staging) they also search X/usr/include
 #     and X/usr/lib, where packages install, besides clang's X/include and
 #     X/lib, after the package's own directories, as gcc does;
 #   - always -static (musl, static only), and -ffunction-sections
 #     -fdata-sections: a .text bigger than the branch range can't get
 #     range-extension thunks inside it (SQLite hit this).
+# BR_SHARED=1 (DYNLINK_PLAN M7): linux-ws/br-toolchain-dyn instead, from the
+# MUSL_SHARED=1 sysroot (linux-ws/dyn/sysroot: libc.so and
+# ld-musl-klausscpu.so.1 beside libc.a), and the wrappers default to PIE, as
+# gcc does on most distributions: -fPIE first (a package's -fPIC, -fno-pie
+# or -fno-PIC after it wins) and -pie unless the link is -shared, -static,
+# -r or -no-pie; and -Wl,--undefined-version, as GNU ld (lld's default
+# refuses a version script naming a symbol the library doesn't define:
+# zlib's names ones its configure leaves out).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../.." && pwd)
 WS=${LINUX_WS:-$RT/linux-ws}
 B=$(realpath "${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}")
-OUT=$WS/br-toolchain
+SHARED=${BR_SHARED:-0}
+if [ "$SHARED" = 1 ]; then
+  OUT=$WS/br-toolchain-dyn
+  SR=$WS/dyn/sysroot
+  [ -f "$SR/lib/libc.so" ] || { echo "no shared musl sysroot: MUSL_SHARED=1 LINUX_WS=$WS/dyn linux/musl/build.sh" >&2; exit 1; }
+else
+  OUT=$WS/br-toolchain
+  SR=$WS/sysroot
+fi
 P=klausscpu-linux-musl
-[ -f "$WS/sysroot/lib/libc.a" ] || { echo "no musl sysroot: run linux/musl/build.sh" >&2; exit 1; }
-[ -f "$WS/sysroot/include/linux/version.h" ] || { echo "no kernel headers in the musl sysroot" >&2; exit 1; }
+[ -f "$SR/lib/libc.a" ] || { echo "no musl sysroot: run linux/musl/build.sh" >&2; exit 1; }
+[ -f "$SR/include/linux/version.h" ] || { echo "no kernel headers in the musl sysroot" >&2; exit 1; }
 rm -rf "$OUT"; mkdir -p "$OUT/bin" "$OUT/sysroot/usr"
-cp -a "$WS/sysroot/include" "$OUT/sysroot/usr/include"
-cp -a "$WS/sysroot/lib" "$OUT/sysroot/usr/lib"
+cp -a "$SR/include" "$OUT/sysroot/usr/include"
+cp -a "$SR/lib" "$OUT/sysroot/usr/lib"
+if [ "$SHARED" = 1 ]; then
+  LINKMODE='link=(-pie -Wl,--undefined-version)
+inputs=0
+for a in "${args[@]}"; do
+	case "$a" in
+	-shared) link=(-Wl,--undefined-version) ;;
+	-static|-r|-no-pie|-c|-S|-E) link=() ;;
+	-*) ;;
+	*) inputs=1 ;;
+	esac
+done
+# Nothing to link (-v, --version, -print-*): no linker flags, or clang links.
+[ $inputs = 1 ] || link=()
+pic=(-fPIE)'
+else
+  LINKMODE='link=(-static)
+pic=()'
+fi
 ln -s usr/include "$OUT/sysroot/include"
 ln -s usr/lib "$OUT/sysroot/lib"
 # An empty libatomic.a: KlaussCPU's atomics are inline (LR/SC) or musl's
@@ -51,6 +87,7 @@ for a in "\$@"; do
 	case "\$a" in
 	-dumpversion|-dumpfullversion) echo 14.2.0; exit 0 ;;
 	-msoft-float) ;;
+	-z?*) args+=("-Wl,-z,\${a#-z}") ;;
 	--sysroot=*) sysroot=\${a#--sysroot=} ;;
 	--sysroot) next_sysroot=1 ;;
 	*) args+=("\$a") ;;
@@ -63,8 +100,9 @@ pre=(--target=klausscpu-unknown-linux-musl --sysroot="\$sysroot")
 # -I/-isystem (strace's bundled kernel headers must win over the sysroot's
 # newer ones), and -L after the package's own (its freshly built libraries
 # must win over what staging holds).
+$LINKMODE
 exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" \\
-	-static -ffunction-sections -fdata-sections -Wno-unused-command-line-argument \\
+	"\${link[@]}" "\${pic[@]}" -ffunction-sections -fdata-sections -Wno-unused-command-line-argument \\
 	"\${args[@]}" -L"\$sysroot/usr/lib"
 EOF
 chmod +x "$OUT/bin/$P-gcc"

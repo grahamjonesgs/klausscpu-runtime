@@ -130,17 +130,25 @@ echo "klausscpu-rootfs $(date -u +%Y-%m-%dT%H:%MZ) from runtime $(git -C "$RT" r
   >"$ST/etc/klausscpu-rootfs"
 
 # Buildroot's packages (linux/buildroot/build.sh), with ROOTFS_BUILDROOT=1:
-# bin, sbin and usr of its rootfs.tar.  A package's file replaces a busybox
+# bin, sbin, usr and lib of its rootfs.tar (ROOTFS_BUILDROOT_TAR, default
+# linux-ws/br-output/images/rootfs.tar; the shared-library build's is
+# linux-ws/br-output-dyn/images/rootfs.tar, whose lib holds musl's
+# ld-musl-klausscpu.so.1 and libc.so).  A package's file replaces a busybox
 # applet link (a real less over the applet), never one of our own files;
 # its /etc (Buildroot's skeleton), headers and static libraries stay out,
 # so our init, rcS and layout are untouched.
 if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
-  BRT=$WS/br-output/images/rootfs.tar
+  BRT=${ROOTFS_BUILDROOT_TAR:-$WS/br-output/images/rootfs.tar}
   [ -f "$BRT" ] || { echo "no $BRT: run linux/buildroot/build.sh" >&2; exit 1; }
   X=$WS/br-merge
   rm -rf "$X"; mkdir -p "$X"
   tar -xf "$BRT" -C "$X"
-  (cd "$X" && find bin sbin usr \( -type f -o -type l \) 2>/dev/null) | while IFS= read -r f; do
+  # Buildroot copies the dynamic linker and libc.so as two files: one is
+  # enough (musl's own install makes the first a link to the second).
+  for l in "$X"/lib/ld-musl-*.so.1; do
+    [ -f "$l" ] && [ ! -L "$l" ] && cmp -s "$l" "$X/lib/libc.so" && ln -sf libc.so "$l"
+  done
+  (cd "$X" && find bin sbin usr lib \( -type f -o -type l \) 2>/dev/null) | while IFS= read -r f; do
     case $f in usr/include/*|*.a|*.la|usr/lib/pkgconfig/*|usr/share/aclocal/*|usr/share/man/*|usr/share/doc/*) continue ;; esac
     d=$ST/$f
     if [ -e "$d" ] && [ ! -L "$d" ]; then

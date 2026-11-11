@@ -28,3 +28,11 @@ GIT_MAKE_OPTS += SKIP_DASHED_BUILT_INS=YesPlease INSTALL_SYMLINKS=YesPlease
 LIBCURL_CONF_OPTS += --without-zstd
 GIT_CONF_ENV_LIBS += -lcurl -lssl -lcrypto -lz -lpthread
 GIT_MAKE_OPTS += CURL_LDFLAGS="-lcurl -lssl -lcrypto -lz -lpthread"
+
+# sqlite (python3's _sqlite3 in the shared-library build) configures with
+# autosetup and its own config.sub, which Buildroot's config.sub update
+# doesn't reach: give it Buildroot's, which knows klausscpu.
+define SQLITE_KLAUSSCPU_CONFIG_SUB
+	cp $(TOPDIR)/support/gnuconfig/config.sub $(@D)/autosetup/autosetup-config.sub
+endef
+SQLITE_POST_PATCH_HOOKS += SQLITE_KLAUSSCPU_CONFIG_SUB
