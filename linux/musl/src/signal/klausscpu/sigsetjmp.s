@@ -10,7 +10,7 @@
 sigsetjmp:
 __sigsetjmp:
 	fbri r1, 0, 8, 1f		# NE: save the mask too
-	jmp setjmp
+	tail setjmp
 1:	pop r2
 	stidx64 r2, r0, 64
 	stidx64 r4, r0, 80
@@ -21,4 +21,4 @@ __sigsetjmp:
 	ldidx64 r4, r0, 80
 	ldidx64 r2, r0, 64
 	push r2
-	jmp __sigsetjmp_tail
+	tail __sigsetjmp_tail

@@ -14,6 +14,8 @@ repository and in klausscc with them:
   zephyr-ws/.../arch/klausscpu/core/elf.c  R_KLAUSSCPU_* (all handled), bias
   zephyr-ws/.../arch/klausscpu/llext.h     EM_KLAUSSCPU, the e_flags ABI version
                                              and mask
+  linux/musl/arch/klausscpu/reloc.h        REL_* = R_KLAUSSCPU_* (dynamic linker),
+                                             EM_KLAUSSCPU, ABI version and mask
   debug/klausscpu_rtos.py                  register names, DWARF and generic numbers
   klausscpu.ld                             == klausscpu-llvm's rust/klausscpu.ld
   src/setjmp.S                             saves and restores exactly the
@@ -137,6 +139,24 @@ def check_runtime(em, relocs, abi, llvm):
            abi["ABIVersion"])
     expect("Zephyr llext.h KLAUSSCPU_EF_ABI_MASK",
            defines(zl, "KLAUSSCPU_EF_ABI_MASK").get("KLAUSSCPU_EF_ABI_MASK"),
+           abi["EFlagsABIMask"])
+
+    # musl's dynamic linker: each REL_* names its R_KLAUSSCPU_* type in a
+    # comment, and map_library checks the machine and the ABI version.
+    mr = read(os.path.join(HERE, "linux", "musl", "arch", "klausscpu", "reloc.h"))
+    rels = re.findall(r"^#define\s+(REL_\w+)\s+(\d+)\s*/\*\s*(R_KLAUSSCPU_\w+)\s*\*/",
+                      mr, re.M)
+    if len(rels) != len(re.findall(r"^#define\s+REL_\w+", mr, re.M)):
+        fail("musl reloc.h: a REL_* define without its /* R_KLAUSSCPU_* */ comment")
+    for macro, num, name in rels:
+        expect("musl reloc.h %s (%s)" % (macro, name), int(num), relocs.get(name))
+    expect("musl reloc.h EM_KLAUSSCPU",
+           defines(mr, "EM_KLAUSSCPU").get("EM_KLAUSSCPU"), em)
+    expect("musl reloc.h KLAUSSCPU_ABI_VERSION",
+           defines(mr, "KLAUSSCPU_ABI_VERSION").get("KLAUSSCPU_ABI_VERSION"),
+           abi["ABIVersion"])
+    expect("musl reloc.h KLAUSSCPU_EF_ABI_MASK",
+           defines(mr, "KLAUSSCPU_EF_ABI_MASK").get("KLAUSSCPU_EF_ABI_MASK"),
            abi["EFlagsABIMask"])
 
     # The lldb OS plugin's register layout (it mirrors klausscc's target XML).

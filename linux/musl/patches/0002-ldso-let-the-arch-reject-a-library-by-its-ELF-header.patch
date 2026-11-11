@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 11 Nov 2026 15:39:07 +0200
+Subject: [PATCH 2/3] ldso: let the arch reject a library by its ELF header
+
+map_library checked only e_type. ARCH_EHDR_REJECT(eh), 0 unless the
+arch's reloc.h defines it, lets an arch refuse a file for another
+machine, ELF class or ABI version (e_flags) with ENOEXEC instead of
+mapping and relocating it.
+---
+ ldso/dynlink.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/ldso/dynlink.c b/ldso/dynlink.c
+index 4e4a463..b31b7ea 100644
+--- a/ldso/dynlink.c
++++ b/ldso/dynlink.c
+@@ -334,6 +334,10 @@ static Sym *gnu_lookup_filtered(uint32_t h1, uint32_t *hashtab, struct dso *dso,
+ #define ARCH_SYM_REJECT_UND(s) 0
+ #endif
+ 
++#ifndef ARCH_EHDR_REJECT
++#define ARCH_EHDR_REJECT(eh) 0
++#endif
++
+ #if defined(__GNUC__)
+ __attribute__((always_inline))
+ #endif
+@@ -742,6 +746,8 @@ static void *map_library(int fd, struct dso *dso)
+ 	if (l<0) return 0;
+ 	if (l<sizeof *eh || (eh->e_type != ET_DYN && eh->e_type != ET_EXEC))
+ 		goto noexec;
++	if (ARCH_EHDR_REJECT(eh))
++		goto noexec;
+ 	phsize = eh->e_phentsize * eh->e_phnum;
+ 	if (phsize > sizeof buf - sizeof *eh) {
+ 		allocated_buf = malloc(phsize);
