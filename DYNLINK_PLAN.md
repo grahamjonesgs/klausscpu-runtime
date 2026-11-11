@@ -119,6 +119,18 @@ independent review with no blockers. Items for M4 and the kernel:
 - Kernel: no ASLR yet (no `ARCH_HAS_ELF_RANDOMIZE`): PIEs load at
   0x55550000 until it is added.
 
+## Progress
+
+| # | State (2026-11-11) |
+|---|---|
+| M1 | done: ABI.md "Dynamic linking" on klausscpu-llvm `dynlink` (505579e, `<link.h>` ElfW(Addr) wording 9e5fefc) |
+| M2 | done, reviewed: codegen + MC (505579e..a25b4bb); non-PIC and non-Linux output byte-identical; Linux C++ exception tables change (indirect pcrel personality) |
+| M3 | implemented (lld, driver `-shared`/`-pie`), independent review: no blockers, 1 major (non-PIC address of a library symbol in a PIE now an error) and 4 minor being fixed |
+| M4 | done, reviewed, merged to runtime main (52999f1): `linux/musl/patches/` (ELF32 dynamic structures with LP64 pointers, gated on `DL_ELFCLASS`; arch ELF header check; `<link.h>` `__ELFW_ADDR`), `MUSL_SHARED=1` build in its own workspace; the static `libc.a` is now non-PIC (it was built from the -fPIC objects) and `dl_iterate_phdr` reads Elf32_Phdr |
+| M5 | first PIE (malloc, printf, stdout through GOT) and `ld-musl-klausscpu.so.1 --list` run on the emulator; the full suite is in progress |
+
+M2 and M3 merge to llvm `main` together, after M3's fixes and M5.
+
 ## Working rules
 
 - **klausscpu-llvm**: branch `dynlink`, built in a **separate build
