@@ -770,6 +770,23 @@ Microbenchmarks: `~/.cache/tlbmeas` (`dchase`, `dchase2`, `ichase`).
   sqlite gains 3.4% from any of them.
 - **The cheapest step:** 32 entries, +470 LUTs per the klaussCPU session.
   It needs no kernel change: `tlbex.S` already masks the index with 31.
+- **Built: 32 entries** (Graham's choice, no walker; klaussCPU `tlb32`
+  a92ce08, `CPU_FEATURES` 0x01F0_200D). The emulator follows (klausscc
+  master 40ed372: 32 by default, `--tlb-entries 16` for older bitstreams).
+  On the board, medians of 3:
+
+  | Workload | Before (cycles) | After (cycles) | Change | Refills | Predicted change |
+  |---|---|---|---|---|---|
+  | python `-c pass` | 359.3M | 238.8M | -33.5% | 1.40M -> 349K | -32% (349.9K) |
+  | the loop | 1402.8M | 493.1M | -64.8% | 8.34M -> 340K | -63% (339.7K) |
+  | sqlite | 921.7M | 884.6M | -4.0% | 288K -> 8.9K | -3.4% |
+  | lua | 56.4M | 55.5M | -1.6% | | |
+
+  fork, exec and fault are unchanged, as predicted. The refill cost is
+  unchanged: 110.6 cycles on the data side, 116 on the instruction side.
+  The 1-entry micro-ITLB (3 cycles per miss) is now about 3-4% of
+  Python start-up and 7-10% of the loop (an upper bound): a later
+  candidate.
 
 ### Swap
 
