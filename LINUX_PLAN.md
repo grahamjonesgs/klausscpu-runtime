@@ -587,6 +587,25 @@ sizes at lmbench's default 11 repetitions took far longer than the
 600 s limit), and the limit now also kills lmbench's measuring child
 (`pkill -P`), which had kept running after its parent was killed.
 
+### Hardware assists (klaussCPU perf-hw, HW_PERF_PLAN.md, 2026-11-11)
+
+Estimated first (board counters plus the klausscc cache model,
+`KLAUSSCC_CACHESIM=1`), then built with the klaussCPU session:
+
+| Item | Estimate | Kernel side |
+|---|---|---|
+| DCBZ: zero a 32-byte D-cache line, no fetch (CPU_FEATURES[22]) | 97% of fork's write misses are lines then written whole; fork and exec about -24%, fault -36% | `lib/string.c`: memset, memcpy and non-overlapping memmove zero each whole destination line with DCBZ first (RAM only: `memset_io` can reach memset with MMIO; never an overlapping copy). `nodcbz` turns it off. `/proc/klausscpu_perf` `dc_zero_lines` |
+| 16 KiB I-cache (was 8 KiB) | misses -13 to -20%, time -4 to -6% (32 B lines gain nothing once fills come through the D-cache) | none |
+| LiteEth 8 RX slots, opt-in `ETH_RX_SLOTS` (CPU_FEATURES[24]) | retransmits about 0, receive +10-20% (receive is CPU-bound) | `liteeth.c` asks for every slot before RX is enabled; RX_ERRORS is `rx_missed_errors` |
+| STATUS.MAL64: misaligned 64-bit accesses trap (CPU_FEATURES[23]) | correctness | the misaligned emulation (above) sets it |
+
+On the emulator (klausscc implements DCBZ and MAL64), with the fork / exec
+/ fault loops: DCBZ removes 94% / 87% / 98% of the write-miss fetches,
+for +10% / +6% / -3% instructions. KUnit `memcpy` (6/6, overlaps
+included), `string` and `usercopy` pass with it. On the release bitstream
+the same kernel leaves all three off (no feature bits); board numbers with
+the perf-hw bitstream to follow.
+
 ### Swap
 
 The kernel has `CONFIG_SWAP`. `install-swap [MiB]` writes

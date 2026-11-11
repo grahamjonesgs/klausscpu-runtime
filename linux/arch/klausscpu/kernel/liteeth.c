@@ -11,6 +11,18 @@
  *    to it releases the slot.  RX runs in NAPI with the event disabled.
  * The probe checks the SoC controller's scratch register (reset value
  * 0x12345678): an emulator without the MAC reads 0 and gets no eth0.
+ *
+ * With CPU_FEATURES[24] (klaussCPU HW_PERF_PLAN.md §3) the MAC has more RX
+ * slots, opt-in through ETH_RX_SLOTS (0xF007_0000: [3:0] the count in use,
+ * reset 2; [11:8] the maximum): the probe asks for them all before RX is
+ * enabled.  A write to ETH_RX_SLOTS flushes the MAC's RX state (CTRL_RESET
+ * is not connected in this core; the probe's pulse of it does nothing).
+ * The 0xF007 window exists only with the feature bit.  Slots 0 and 1 stay
+ * at 0xF008_0000/0800 and TX0 at
+ * 0xF008_1000; slot k >= 2 is at 0xF008_1000 + k * 0x800.  Two slots
+ * overflow while the CPU drains one at line rate (2192 TCP retransmits in
+ * 15 s of iperf3 into the board).  RX_ERRORS counts the frames the MAC
+ * dropped, as rx_missed_errors.
  */
 #include <linux/etherdevice.h>
 #include <linux/init.h>
@@ -39,9 +51,11 @@
 #define TX_LENGTH	0x1028
 #define TX_EV_PENDING	0x1030
 #define TX_EV_ENABLE	0x1034
+#define RX_ERRORS	0x1008		/* frames dropped by the MAC, free-running */
+#define ETH_RX_SLOTS	(MMIO_BASE + 0x00070000UL)
+#define CPU_FEAT_ETH_SLOTS	(1UL << 24)
 
 #define SLOT_SIZE	2048
-#define RX_SLOTS	2
 #define TX_SLOT0	(ETH_SRAM + 2 * SLOT_SIZE)
 #define SCRATCH_RESET	0x12345678
 
@@ -58,7 +72,15 @@ struct kl_eth {
 	struct napi_struct napi;
 	struct delayed_work link_work;
 	spinlock_t tx_lock;
+	unsigned int rx_slots;
+	u32 rx_errors_base;
 };
+
+/* RX slot k's SRAM: 0 and 1 below TX0, the rest above it. */
+static unsigned long rx_slot_addr(unsigned int k)
+{
+	return ETH_SRAM + (k < 2 ? k * SLOT_SIZE : 0x1000 + k * SLOT_SIZE);
+}
 
 static void __iomem *csr(unsigned int off)
 {
@@ -204,7 +226,7 @@ static int kl_eth_poll(struct napi_struct *napi, int budget)
 	int done = 0;
 
 	while (done < budget && (readl(csr(RX_EV_PENDING)) & 1)) {
-		unsigned int slot = readl(csr(RX_SLOT)) % RX_SLOTS;
+		unsigned int slot = readl(csr(RX_SLOT)) % priv->rx_slots;
 		unsigned int len = readl(csr(RX_LENGTH));
 		struct sk_buff *skb;
 
@@ -219,7 +241,7 @@ static int kl_eth_poll(struct napi_struct *napi, int budget)
 			writel(1, csr(RX_EV_PENDING));
 			continue;
 		}
-		sram_read(skb_put(skb, len), ETH_SRAM + slot * SLOT_SIZE, len);
+		sram_read(skb_put(skb, len), rx_slot_addr(slot), len);
 		writel(1, csr(RX_EV_PENDING));		/* release the slot */
 		skb->protocol = eth_type_trans(skb, ndev);
 		ndev->stats.rx_packets++;
@@ -288,10 +310,19 @@ static int kl_eth_stop(struct net_device *ndev)
 	return 0;
 }
 
+static void kl_eth_get_stats64(struct net_device *ndev, struct rtnl_link_stats64 *stats)
+{
+	struct kl_eth *priv = netdev_priv(ndev);
+
+	netdev_stats_to_stats64(stats, &ndev->stats);
+	stats->rx_missed_errors = readl(csr(RX_ERRORS)) - priv->rx_errors_base;
+}
+
 static const struct net_device_ops kl_eth_ops = {
 	.ndo_open		= kl_eth_open,
 	.ndo_stop		= kl_eth_stop,
 	.ndo_start_xmit		= kl_eth_xmit,
+	.ndo_get_stats64	= kl_eth_get_stats64,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -302,6 +333,7 @@ static int __init kl_eth_init(void)
 	struct net_device *ndev;
 	struct kl_eth *priv;
 	u32 scratch = readl(csr(CTRL_SCRATCH));
+	unsigned int slots = 2;
 	int err;
 
 	if (scratch != SCRATCH_RESET) {
@@ -309,6 +341,13 @@ static int __init kl_eth_init(void)
 		return 0;
 	}
 
+	/* All the RX slots there are, before RX is enabled (the write flushes RX). */
+	if (klausscpu_cpu_features & CPU_FEAT_ETH_SLOTS) {
+		writel((readl((void __iomem *)ETH_RX_SLOTS) >> 8) & 0xf, (void __iomem *)ETH_RX_SLOTS);
+		slots = readl((void __iomem *)ETH_RX_SLOTS) & 0xf;
+		if (slots < 2)
+			slots = 2;
+	}
 	writel(1, csr(CTRL_RESET));
 	mdelay(10);
 	writel(0, csr(CTRL_RESET));
@@ -325,6 +364,8 @@ static int __init kl_eth_init(void)
 		return -ENOMEM;
 	priv = netdev_priv(ndev);
 	priv->ndev = ndev;
+	priv->rx_slots = slots;
+	priv->rx_errors_base = readl(csr(RX_ERRORS));
 	spin_lock_init(&priv->tx_lock);
 	INIT_DELAYED_WORK(&priv->link_work, kl_eth_link);
 	netif_napi_add(ndev, &priv->napi, kl_eth_poll);
@@ -337,8 +378,8 @@ static int __init kl_eth_init(void)
 		free_netdev(ndev);
 		return err;
 	}
-	netdev_info(ndev, "LiteEth at %08lx, MAC %pM, PHY BMSR %04x\n", ETH_CSR, mac,
-		    mdio_read(PHY_BMSR));
+	netdev_info(ndev, "LiteEth at %08lx, MAC %pM, PHY BMSR %04x, %u RX slots\n", ETH_CSR, mac,
+		    mdio_read(PHY_BMSR), slots);
 	return 0;
 }
 device_initcall(kl_eth_init);

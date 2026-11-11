@@ -61,6 +61,7 @@ static const struct {
 	{ "dc_write_misses",	CACHE_BASE + 0x58 },
 	{ "dc_writebacks",	CACHE_BASE + 0x60 },
 	{ "dc_stall_cycles",	CACHE_BASE + 0x68 },
+	{ "dc_zero_lines",	CACHE_BASE + 0x70 },	/* DCBZ (HW_PERF_PLAN.md §1); 0 before it */
 };
 
 static int perf_show(struct seq_file *m, void *v)
