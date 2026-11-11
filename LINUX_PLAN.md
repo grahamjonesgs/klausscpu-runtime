@@ -70,7 +70,9 @@ On the console, rcS:
 - prints `eth0`'s address: from DHCP, which reserves 192.168.68.59 for
   MAC 00:ab:cd:00:00:01, or else 192.168.68.59/24 statically with gateway
   .1;
-- starts `dropbear` on 22 and `httpd` on 80.
+- starts the SSH server on 22 (OpenSSH's `sshd` when the SD system image
+  has it, with Dropbear beside it on 2222; Dropbear on 22 from the
+  initramfs alone) and `httpd` on 80.
 
 The dmesg lines to look for: `klausscpu-eth: ... LiteEth ..., PHY BMSR`,
 `eth0: link up`, `klausscpu-sd: mmcblk0, N MiB`.
@@ -103,6 +105,40 @@ DER). Linux only reads the flash.
    with `dropbearconvert`;
 2. else `/linux/dropbear_ed25519_host_key` on the SD card, generated once;
 3. else `-R`.
+
+`/etc/init.d/sshkeys` does the same for OpenSSH's `sshd`: the QSPI key as
+PEM (`kskey` prints it), else the SD Dropbear key converted with
+`dropbearconvert dropbear openssh`, else `ssh-keygen -t ed25519`, written
+to `/run/ssh`. Both servers therefore show the same fingerprint.
+
+### SSH servers: OpenSSH on 22, Dropbear on 2222 (2026-11-11)
+
+With the SD system image, rcS starts OpenSSH 10.2's `sshd`
+(`/etc/ssh/sshd_config`, privilege separation as user `sshd` in
+`/var/empty`) on 22, and Dropbear on 2222 as a fallback. The validator
+expects `rcS: ssh on port 22`; the next line names the server.
+
+Measured on the board (perf-hw-a, both negotiating mlkem768x25519-sha256,
+ecdsa-sha2-nistp256 and chacha20-poly1305, password login):
+
+| | OpenSSH 10.2 | Dropbear 2026.94 |
+|---|---|---|
+| `ssh true`, mean of 5 | 4.58 s | 1.50 s |
+| connect → server banner | 1.13 s | 0.08 s |
+| KEXINIT → server's key exchange reply | 2.04 s | 0.81 s |
+| password authentication | 0.99 s | 0.51 s |
+| 8 MiB `scp` (sftp protocol), up / down | 18.1 / 18.0 s | 16.6 / 15.8 s |
+| bulk rate after the login | ~0.62 MB/s | ~0.56 MB/s |
+
+Bulk transfer is CPU-bound on ChaCha20-Poly1305 and about equal; OpenSSH
+is 3 s slower per login. Per connection, `sshd` re-execs `sshd-session`
+and then `sshd-auth` (static, 4 MB each), and each one re-parses the
+config and the host key. `sshd -t` alone takes 1.1 s, nearly all of it
+user-space CPU in OpenSSL's EC key load and check (a `.pub` file beside
+the key didn't help). Open: an Ed25519 host key (OpenSSH's own code, no
+EC check), which would change the fingerprint, and shared libraries
+(DYNLINK_PLAN), which make the execs cheaper. Dropbear stays on 2222 until
+OpenSSH is the only server.
 
 Host tests: `linux/userland/keystore/test_kskey.sh` (synthetic NVS images:
 newest-wins, torn write, sector rollover, wrap, deleted, bad CRC; plus an
@@ -459,7 +495,7 @@ What it took:
   configure and its link of `git-remote-http` need libcurl's static
   dependencies spelled out (`-lcurl -lssl -lcrypto -lzstd -lz`), or it
   quietly builds without curl.
-- Checked by hand on the board: `scp` and `sftp` from the PC (Dropbear runs
+- Checked by hand on the board: `scp` and `sftp` from the PC (both servers run
   OpenSSH's `sftp-server`; a 300 KB file round trip is identical), and
   `git clone https://github.com/octocat/Hello-World.git` (also `--depth 1`).
   A bigger repository (libexpat) fails: `index-pack` needs over 60 MB and

@@ -1,0 +1,33 @@
+#!/bin/sh
+# /etc/init.d/sshkeys: host keys for OpenSSH's sshd in /run/ssh (tmpfs: the
+# root is read-only), and sshd's -h options on stdout.  The same keys as
+# Dropbear's (/etc/init.d/hostkey), so the board keeps one fingerprint:
+#  1. Zephyr's ssh_shell key from the QSPI keystore (kskey writes it as a
+#     PEM EC key, which sshd reads as it is);
+#  2. else the SD card's /mnt/linux/dropbear_ed25519_host_key, converted to
+#     OpenSSH's format;
+#  3. else a new ed25519 key in RAM for this boot.
+# Messages go to stderr.
+d=/run/ssh
+mkdir -p $d
+chmod 700 $d
+mtd=$(grep '"storage"' /proc/mtd 2>/dev/null | cut -d: -f1)
+if [ -n "$mtd" ] && kskey "/dev/$mtd" >$d/ssh_host_ecdsa_key 2>/dev/null &&
+   [ -s $d/ssh_host_ecdsa_key ]; then
+	chmod 600 $d/ssh_host_ecdsa_key
+	echo "sshkeys: Zephyr's key from the QSPI keystore ($mtd)" >&2
+	echo "-h $d/ssh_host_ecdsa_key"
+	exit 0
+fi
+rm -f $d/ssh_host_ecdsa_key
+k=/mnt/linux/dropbear_ed25519_host_key
+rm -f $d/ssh_host_ed25519_key
+if [ -s "$k" ] && dropbearconvert dropbear openssh "$k" $d/ssh_host_ed25519_key >/dev/null 2>&1; then
+	chmod 600 $d/ssh_host_ed25519_key
+	echo "sshkeys: $k (SD card)" >&2
+	echo "-h $d/ssh_host_ed25519_key"
+	exit 0
+fi
+ssh-keygen -q -t ed25519 -N "" -f $d/ssh_host_ed25519_key >/dev/null 2>&1
+echo "sshkeys: a new key for this boot" >&2
+echo "-h $d/ssh_host_ed25519_key"

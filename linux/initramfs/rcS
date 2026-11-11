@@ -93,8 +93,18 @@ if [ -e /sys/class/net/eth0 ]; then
 	if [ -n "$NTP_SERVER" ] && [ "$NTP_SERVER" != none ]; then
 		ntpd -p "$NTP_SERVER" && echo "rcS: ntpd ($NTP_SERVER)"
 	fi
-	if [ -x /usr/sbin/dropbear ]; then
-		dropbear $(/etc/init.d/hostkey) -p 22 && echo "rcS: dropbear on port 22"
+	# SSH: OpenSSH's sshd on port 22 when the system has it (the SD root),
+	# with Dropbear beside it on 2222 as a fallback; the initramfs alone
+	# has only Dropbear, on 22.  sshd must be started by its full path.
+	if [ -x /usr/sbin/sshd ] && /usr/sbin/sshd -f /etc/ssh/sshd_config $(/etc/init.d/sshkeys); then
+		echo "rcS: ssh on port 22"
+		echo "rcS: ssh server: OpenSSH (Dropbear on 2222)"
+		if [ -x /usr/sbin/dropbear ]; then
+			dropbear $(/etc/init.d/hostkey) -p 2222
+		fi
+	elif [ -x /usr/sbin/dropbear ]; then
+		dropbear $(/etc/init.d/hostkey) -p 22 && echo "rcS: ssh on port 22" &&
+			echo "rcS: ssh server: Dropbear"
 	fi
 	httpd -h /www -p 80 && echo "rcS: httpd on port 80"
 fi

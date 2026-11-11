@@ -647,7 +647,7 @@ fi
 if [ "$MODE" = net ]; then
   IP=${BOARD_IP:-192.168.68.59}
   printf 'sleep 120\nuptime\n' >"$OUT/net.in"
-  printf 'eth0: link up\nrcS: dropbear on port 22\nrcS: httpd on port 80\n' >"$OUT/net.expect"
+  printf 'eth0: link up\nrcS: ssh on port 22\nrcS: httpd on port 80\n' >"$OUT/net.expect"
   run_step net 0 120 '$ ' &
   step=$!
   timeout 180 bash -c "until grep -aq 'rcS: httpd' '$OUT/net.out' 2>/dev/null; do sleep 2; done" ||

@@ -116,7 +116,12 @@ if [ -x "$WS/curl-build/curl" ]; then
   install -m 755 "$RT/linux/userland/tests/curl-test.sh" "$T/"
 fi
 cp "$INI/inittab" "$INI/profile" "$ST/etc/"
-cp "$INI/rcS" "$INI/hostkey" "$ST/etc/init.d/"
+cp "$INI/rcS" "$INI/hostkey" "$INI/sshkeys" "$ST/etc/init.d/"
+# OpenSSH (Buildroot): our sshd_config, and privilege separation's empty
+# root-owned directory.
+mkdir -p "$ST/etc/ssh" "$ST/var/empty"
+chmod 755 "$ST/var/empty"
+cp "$INI/etc/sshd_config" "$ST/etc/ssh/sshd_config"
 cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"
 install -m 600 "$INI/etc/shadow" "$ST/etc/shadow"
 cp "$INI/default.script" "$ST/usr/share/udhcpc/default.script"

@@ -1,0 +1,13 @@
+# OpenSSH sshd for KlaussCPU Linux (linux/initramfs/etc/sshd_config,
+# installed as /etc/ssh/sshd_config).  Host keys come from
+# /etc/init.d/sshkeys (-h options on the command line), in /run/ssh.
+Port 22
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+AuthorizedKeysFile .ssh/authorized_keys
+PidFile /run/sshd.pid
+PrintMotd no
+# No reverse DNS lookup of every client: slow, and often no DNS here.
+UseDNS no
+Subsystem sftp /usr/libexec/sftp-server
