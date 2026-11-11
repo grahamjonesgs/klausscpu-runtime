@@ -21,7 +21,8 @@
 #   - always -static (musl, static only), and -ffunction-sections
 #     -fdata-sections: a .text bigger than the branch range can't get
 #     range-extension thunks inside it (SQLite hit this).
-# BR_SHARED=1 (DYNLINK_PLAN M7): linux-ws/br-toolchain-dyn instead, from the
+# BR_SHARED=1 (the default since 2026-11-11; DYNLINK_PLAN M7; BR_SHARED=0
+# gives the static linux-ws/br-toolchain above): linux-ws/br-toolchain-dyn, from the
 # MUSL_SHARED=1 sysroot (linux-ws/dyn/sysroot: libc.so and
 # ld-musl-klausscpu.so.1 beside libc.a), and the wrappers default to PIE, as
 # gcc does on most distributions: -fPIE first (a package's -fPIC, -fno-pie
@@ -34,7 +35,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../.." && pwd)
 WS=${LINUX_WS:-$RT/linux-ws}
 B=$(realpath "${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}")
-SHARED=${BR_SHARED:-0}
+SHARED=${BR_SHARED:-1}
 if [ "$SHARED" = 1 ]; then
   OUT=$WS/br-toolchain-dyn
   SR=$WS/dyn/sysroot

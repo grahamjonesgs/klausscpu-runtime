@@ -141,7 +141,8 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       echo "run tests/buildroot-test.sh on the board (LINUX_BUILDROOT_EMU_FORCE=1 tries anyway)"
       exit 2
     fi
-    if [ "${LINUX_BUILDROOT_PREBUILT:-0}" != 1 ] || [ ! -f "$RT/linux-ws/br-output/images/rootfs.tar" ]; then
+    if [ "${BR_SHARED:-1}" = 1 ]; then BRO=$RT/linux-ws/br-output-dyn; else BRO=$RT/linux-ws/br-output; fi
+    if [ "${LINUX_BUILDROOT_PREBUILT:-0}" != 1 ] || [ ! -f "$BRO/images/rootfs.tar" ]; then
       "$RT/linux/buildroot/build.sh" >"$OUT/buildroot.log" 2>&1 ||
         { echo "FAIL buildroot build (see $OUT/buildroot.log)"; exit 1; }
     fi

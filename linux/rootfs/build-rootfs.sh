@@ -134,14 +134,15 @@ echo "klausscpu-rootfs $(date -u +%Y-%m-%dT%H:%MZ) from runtime $(git -C "$RT" r
 
 # Buildroot's packages (linux/buildroot/build.sh), with ROOTFS_BUILDROOT=1:
 # bin, sbin, usr and lib of its rootfs.tar (ROOTFS_BUILDROOT_TAR, default
-# linux-ws/br-output/images/rootfs.tar; the shared-library build's is
-# linux-ws/br-output-dyn/images/rootfs.tar, whose lib holds musl's
-# ld-musl-klausscpu.so.1 and libc.so).  A package's file replaces a busybox
+# the shared-library build's linux-ws/br-output-dyn/images/rootfs.tar,
+# whose lib holds musl's ld-musl-klausscpu.so.1 and libc.so; with
+# BR_SHARED=0 the static build's linux-ws/br-output/images/rootfs.tar).  A package's file replaces a busybox
 # applet link (a real less over the applet), never one of our own files;
 # its /etc (Buildroot's skeleton), headers and static libraries stay out,
 # so our init, rcS and layout are untouched.
 if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
-  BRT=${ROOTFS_BUILDROOT_TAR:-$WS/br-output/images/rootfs.tar}
+  if [ "${BR_SHARED:-1}" = 1 ]; then BRO=$WS/br-output-dyn; else BRO=$WS/br-output; fi
+  BRT=${ROOTFS_BUILDROOT_TAR:-$BRO/images/rootfs.tar}
   [ -f "$BRT" ] || { echo "no $BRT: run linux/buildroot/build.sh" >&2; exit 1; }
   X=$WS/br-merge
   rm -rf "$X"; mkdir -p "$X"

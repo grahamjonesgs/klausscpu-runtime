@@ -154,7 +154,9 @@ binaries side by side from /tmp with the same config and key:
 Dropbear: 1.49 s. No misaligned accesses emulated. The EC key now costs
 about 0.27 s per process; the remaining ~0.39 s per process (three per
 login) is not the key: user-space start-up of the static 4.7 MB binary
-and OpenSSL's initialisation, not yet profiled.
+and OpenSSL's initialisation, not yet profiled. On the shared system
+(the default since 2026-11-11) a login takes 3.67 s: libcrypto.so's
+25 000 relocations per process (DYNLINK_PLAN "The default system").
 
 Host tests: `linux/userland/keystore/test_kskey.sh` (synthetic NVS images:
 newest-wins, torn write, sector rollover, wrap, deleted, bad CRC; plus an
@@ -186,6 +188,7 @@ the `/linux/` folder:
 | `rootfs.img` | the **system**: ext4, no journal, mounted **read-only** at `/` | `install-rootfs`, replaced whole |
 | `data.img` | the **data**: ext4 with a journal, mounted read-write at `/data` | `install-data`, once |
 | `swap.img` | optional **swap** (2026-11-11), turned on by rcS | `install-swap [MiB]` (default 256), `install-swap off` |
+| `rootfs-static.img` | the static system image the shared one replaced on 2026-11-11 (DYNLINK_PLAN "The default system"), kept for going back | copied by hand |
 | `rootfs.img.new`, `data.img.new` | an install in progress | renamed when complete |
 | `rootfs.img.next`, `data.img.next` | an install staged while the old image was in use; `sdinit` swaps it in at the next boot | `install-rootfs`; `install-data --force` |
 | `dropbear_ed25519_host_key` | the SSH host key, only when the QSPI key isn't found | `hostkey` |
@@ -405,7 +408,7 @@ kernel, and our initramfs, `sdinit`, `rcS` and layout stay.
 | `patches/0004-strace-bundled-headers.patch` | strace on KlaussCPU uses its bundled uapi headers (our 7.3 headers are newer than strace 6.19 expects) |
 | `linux/buildroot/toolchain.sh` | `linux-ws/br-toolchain`: gcc-named wrappers around our clang and the LLVM tools, and a usr/-layout copy of the musl sysroot with the 7.3 headers |
 | `linux/buildroot/external/` | the BR2_EXTERNAL tree: `configs/klausscpu_defconfig` and `patches/strace/0001-klausscpu.patch` (strace's KlaussCPU port) |
-| `linux/buildroot/build.sh [targets]` | build into `linux-ws/br-output` (downloads in `linux-ws/br-dl`); the result is `images/rootfs.tar` |
+| `linux/buildroot/build.sh [targets]` | build into `linux-ws/br-output-dyn`, shared libraries and Python (the default since 2026-11-11, DYNLINK_PLAN M7), or with `BR_SHARED=0` the static build into `linux-ws/br-output` (downloads in `linux-ws/br-dl`); the result is `images/rootfs.tar` |
 
 **The toolchain wrapper.** `klausscpu-linux-musl-gcc` runs clang
 `--target=klausscpu-unknown-linux-musl`:
@@ -447,7 +450,7 @@ image from the initramfs, as the ports mode does, and ran
 development tools the image holds ~160 MiB, more than the emulated
 machine's 128 MiB of RAM, so the mode now stops and says so; the check is
 `buildroot-test.sh` on the board (40/40). Putting the image on an emulated
-SD card instead needs a FAT writer (mtools) on the PC. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output`, and
+SD card instead needs a FAT writer (mtools) on the PC. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output-dyn` (`br-output` with `BR_SHARED=0`), and
 `LINUX_BUILDROOT_EXPECT=N` requires at least N packages.
 
 **Installed programs win in the shell (2026-11-11).** busybox was built
