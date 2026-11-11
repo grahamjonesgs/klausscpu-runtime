@@ -127,9 +127,22 @@ independent review with no blockers. Items for M4 and the kernel:
 | M2 | done, reviewed: codegen + MC (505579e..a25b4bb); non-PIC and non-Linux output byte-identical; Linux C++ exception tables change (indirect pcrel personality) |
 | M3 | implemented (lld, driver `-shared`/`-pie`), independent review: no blockers, 1 major (non-PIC address of a library symbol in a PIE now an error) and 4 minor being fixed |
 | M4 | done, reviewed, merged to runtime main (52999f1): `linux/musl/patches/` (ELF32 dynamic structures with LP64 pointers, gated on `DL_ELFCLASS`; arch ELF header check; `<link.h>` `__ELFW_ADDR`), `MUSL_SHARED=1` build in its own workspace; the static `libc.a` is now non-PIC (it was built from the -fPIC objects) and `dl_iterate_phdr` reads Elf32_Phdr |
-| M5 | first PIE (malloc, printf, stdout through GOT) and `ld-musl-klausscpu.so.1 --list` run on the emulator; the full suite is in progress |
+| M5 | done on the emulator: `linux/userland/tests/dynlink/run.sh`, 185 checks pass (library data/functions/function pointers/RELRO, protected/weak/interposed symbols, constructors and destructors in order, TLS GD/IE/LE with 4 threads, `dl_iterate_phdr`/`dladdr`/`r_debug`, `dlopen`/`dlsym`/`RTLD_NEXT`/`RTLD_GLOBAL` with TLS in threads made before and after, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `$ORIGIN`, setjmp/signals across modules, bad ELF files refused). Start-up per program (fork+exec+wait, emulator): static 4.9 ms, dynamic 9.0 ms, dynamic + one library 12.9 ms. It found a kernel race (an interrupt in the page fault return path zeroed r12; fixed in 03b354c) |
 
 M2 and M3 merge to llvm `main` together, after M3's fixes and M5.
+
+Notes from M5:
+- `-fPIC` through the driver means `-fhalf-no-semantic-interposition`:
+  a library's calls to its own default-visibility functions can be
+  inlined or constant-folded, so interposing them from the program needs
+  the library built with `-fsemantic-interposition` (as on other ELF
+  targets with clang).
+- Run as a command (`ld-musl-klausscpu.so.1 prog`), musl leaves
+  `getauxval` describing the loader (upstream behaviour).
+- `$ORIGIN` for the main program needs `/proc` mounted.
+- On every load `map_library` zeroes the rest of each writable page; lld
+  pads the RELRO segment to the 64 KiB page, so that's up to ~60 KiB of
+  memset per library: a start-up cost to look at in M6.
 
 ## Working rules
 
