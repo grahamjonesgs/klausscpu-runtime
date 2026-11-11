@@ -129,6 +129,7 @@ independent review with no blockers. Items for M4 and the kernel:
 | M4 | done, reviewed, merged to runtime main (52999f1): `linux/musl/patches/` (ELF32 dynamic structures with LP64 pointers, gated on `DL_ELFCLASS`; arch ELF header check; `<link.h>` `__ELFW_ADDR`), `MUSL_SHARED=1` build in its own workspace; the static `libc.a` is now non-PIC (it was built from the -fPIC objects) and `dl_iterate_phdr` reads Elf32_Phdr |
 | M5 | done on the emulator: `linux/userland/tests/dynlink/run.sh`, 185 checks pass (library data/functions/function pointers/RELRO, protected/weak/interposed symbols, constructors and destructors in order, TLS GD/IE/LE with 4 threads, `dl_iterate_phdr`/`dladdr`/`r_debug`, `dlopen`/`dlsym`/`RTLD_NEXT`/`RTLD_GLOBAL` with TLS in threads made before and after, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `$ORIGIN`, setjmp/signals across modules, bad ELF files refused). Start-up per program (fork+exec+wait, emulator): static 4.9 ms, dynamic 9.0 ms, dynamic + one library 12.9 ms. It found a kernel race (an interrupt in the page fault return path zeroed r12; fixed in 03b354c) |
 | M6 | the board (perf-hw c1874cf): `linux/userland/tests/dynlink/board.sh` runs run.sh's programs in a chroot on /tmp (the system image has no /lib yet); all 141 guest checks pass. Start-up (fork+exec+wait, 500 runs): static 18.4 ms, dynamic 32.8 ms, + one library 48.5 ms; see below |
+| M7 | Buildroot with shared libraries: `BR_SHARED=1 linux/buildroot/build.sh` (linux-ws/br-output-dyn), every package of the static build plus Python 3.14 with zlib, ssl/hashlib, sqlite3, bz2, lzma, readline, curses; no `_ctypes` (no libffi port: Buildroot patch 0005). Image: `ROOTFS_BUILDROOT=1 ROOTFS_BUILDROOT_TAR=linux-ws/br-output-dyn/images/rootfs.tar linux/rootfs/build-rootfs.sh linux-ws/rootfs-dyn.img 256`. On the board, in a chroot of that image from the SD card's `/linux/rootfs-dyn.img`: buildroot-test 40/40, the Python checks pass (threads, subprocess, sqlite3, HTTPS with the CA bundle) |
 
 M6, per start-up (perfstat over 200 runs):
 
@@ -145,6 +146,20 @@ writable data, bss, GOT and RELRO each start a page; ~9-13k zeroed lines,
 2048 per page). Ideas, not done: no separate RELRO page for small
 libraries (one writable page instead of two), prelinking-style symbol
 caches, and fewer, bigger libraries (busybox-style) in M7.
+
+M7 measurements (board, perf-hw a5d20f2):
+- Buildroot target 113 MB shared (with Python) against 155 MB static.
+- Program start, 10 runs each, static system against the shared image in a
+  chroot: curl --version 46 / 55 ms, sqlite3 45 / 54, git 46 / 87, vim
+  131 / 212, bash -c true 56 / 142, ssh -V 310 / 451.
+- Python: `python3 -S -c pass` 3.5 s (`-c pass` 5.1 s); 84.6M instructions
+  with 1.38M software TLB refills. A `for i in range(50000): s += i*i` loop
+  takes ~6400 instructions per iteration with ~140 TLB refills each: the
+  16-entry TLB (1 MiB with 64 KiB pages) can't hold libpython's eval loop,
+  its heap and libc.so. A bigger TLB or a hardware page-table walker would
+  help interpreters most (raised with the klaussCPU session).
+- Not done: a libffi port (Python ctypes), the shared image as the board's
+  default system, the driver defaulting to PIE for the Linux triple.
 
 The dynlink branch work merged to llvm `main` (M2+M3, 432b009); the
 `build-dynlink` directory is no longer needed.
