@@ -1,0 +1,701 @@
+From: KlaussCPU Linux port
+Subject: [PATCH] Add the KlaussCPU port
+
+src/klausscpu: ffi_call, variadic calls and closures for the KlaussCPU C
+ABI (klausscpu-llvm ABI.md, version 3: LP64, soft float, R0-R3 then
+8-byte stack slots, aggregates up to 16 bytes in one or two words and
+returned in R12/R11, larger ones by reference and through sret in R0,
+a 32-byte home area in variadic calls).  _Complex types are supported
+(aggregates); Go closures and static trampolines are not.  Closures
+use dynamic trampolines in libffi's W+X pages; the I-cache snoops the
+core's own stores, so no cache maintenance is needed (or available to
+user code).  configure.host and Makefile.am name the port; Buildroot
+autoreconfs libffi (LIBFFI_AUTORECONF = YES).
+
+--- a/configure.host	2025-02-08 18:30:36.000000000 +0200
++++ b/configure.host	2026-11-11 20:44:59.685380389 +0200
+@@ -136,6 +136,11 @@
+ 	SOURCES="ffi.c unix.S"
+ 	;;
+ 
++  klausscpu*-*-*)
++	TARGET=KLAUSSCPU; TARGETDIR=klausscpu
++	SOURCES="ffi.c sysv.S"
++	;;
++
+   kvx-*-*)
+ 	TARGET=KVX; TARGETDIR=kvx
+ 	SOURCES="ffi.c sysv.S"
+--- a/Makefile.am	2025-04-09 16:23:06.000000000 +0200
++++ b/Makefile.am	2026-11-11 20:44:59.685426885 +0200
+@@ -52,6 +52,7 @@
+ 	src/avr32/ffitarget.h src/bfin/ffitarget.h			\
+ 	src/cris/ffitarget.h src/csky/ffitarget.h src/frv/ffitarget.h	\
+ 	src/ia64/ffitarget.h src/ia64/ia64_flags.h			\
++	src/klausscpu/ffitarget.h					\
+ 	src/m32r/ffitarget.h src/m68k/ffitarget.h			\
+ 	src/m88k/ffitarget.h src/metag/ffitarget.h			\
+ 	src/microblaze/ffitarget.h src/mips/ffitarget.h			\
+@@ -76,7 +77,8 @@
+ 	src/avr32/ffi.c src/avr32/sysv.S src/bfin/ffi.c			\
+ 	src/bfin/sysv.S src/cris/ffi.c src/cris/sysv.S src/frv/ffi.c	\
+ 	src/csky/ffi.c src/csky/sysv.S src/frv/eabi.S src/ia64/ffi.c	\
+-	src/ia64/unix.S src/m32r/ffi.c src/m32r/sysv.S src/m68k/ffi.c	\
++	src/ia64/unix.S src/klausscpu/ffi.c src/klausscpu/sysv.S	\
++	src/m32r/ffi.c src/m32r/sysv.S src/m68k/ffi.c	\
+ 	src/m68k/sysv.S src/m88k/ffi.c src/m88k/obsd.S			\
+ 	src/metag/ffi.c src/metag/sysv.S src/microblaze/ffi.c		\
+ 	src/microblaze/sysv.S src/mips/ffi.c src/mips/o32.S		\
+--- a/src/klausscpu/ffitarget.h	1970-01-01 00:00:00.000000000 +0000
++++ b/src/klausscpu/ffitarget.h	2026-11-11 20:44:50.186092272 +0200
+@@ -0,0 +1,71 @@
++/* -----------------------------------------------------------------*-C-*-
++   ffitarget.h - Copyright (c) 2026 KlaussCPU Linux port
++
++   Target configuration macros for KlaussCPU (klausscpu-*-linux-musl).
++
++   Permission is hereby granted, free of charge, to any person obtaining
++   a copy of this software and associated documentation files (the
++   ``Software''), to deal in the Software without restriction, including
++   without limitation the rights to use, copy, modify, merge, publish,
++   distribute, sublicense, and/or sell copies of the Software, and to
++   permit persons to whom the Software is furnished to do so, subject to
++   the following conditions:
++
++   The above copyright notice and this permission notice shall be included
++   in all copies or substantial portions of the Software.
++
++   THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,
++   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++   NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++   DEALINGS IN THE SOFTWARE.
++
++   ----------------------------------------------------------------------- */
++
++#ifndef LIBFFI_TARGET_H
++#define LIBFFI_TARGET_H
++
++#ifndef LIBFFI_H
++#error "Please do not include ffitarget.h directly into your source.  Use ffi.h instead."
++#endif
++
++#ifndef __klausscpu__
++#error "libffi was configured for a KlaussCPU target but this does not appear to be a KlaussCPU compiler."
++#endif
++
++#ifndef LIBFFI_ASM
++typedef unsigned long ffi_arg;
++typedef signed long ffi_sarg;
++
++typedef enum ffi_abi {
++  FFI_FIRST_ABI = 0,
++  FFI_SYSV,
++  FFI_LAST_ABI,
++  FFI_DEFAULT_ABI = FFI_SYSV
++} ffi_abi;
++#endif
++
++/* The KlaussCPU C ABI (klausscpu-llvm ABI.md, version 3): every argument
++   is one or two 64-bit words, the first four in R0-R3 and the rest in
++   8-byte stack slots; soft float, so float and double are integer words.
++   _Complex values are aggregates of up to 16 bytes, passed and returned
++   like structs.  */
++#define FFI_TARGET_HAS_COMPLEX_TYPE
++
++/* A variadic call reserves a 32-byte home area for R0-R3 below its stack
++   arguments, so the cif must know it is variadic.  */
++#define FFI_TARGET_SPECIFIC_VARIADIC
++
++/* ---- Definitions for closures ----------------------------------------- */
++
++#define FFI_CLOSURES 1
++/* No Go closures: FFI_GO_CLOSURES stays undefined (ffi.h tests #ifdef).  */
++/* 16 bytes of code, then the address of ffi_closure_SYSV and that of the
++   closure (see ffi_prep_closure_loc).  */
++#define FFI_TRAMPOLINE_SIZE 32
++#define FFI_NATIVE_RAW_API 0
++
++#endif
+--- a/src/klausscpu/ffi.c	1970-01-01 00:00:00.000000000 +0000
++++ b/src/klausscpu/ffi.c	2026-11-11 21:03:24.647739955 +0200
+@@ -0,0 +1,439 @@
++/* -----------------------------------------------------------------------
++   ffi.c - Copyright (c) 2026 KlaussCPU Linux port
++
++   KlaussCPU Foreign Function Interface
++
++   Permission is hereby granted, free of charge, to any person obtaining
++   a copy of this software and associated documentation files (the
++   ``Software''), to deal in the Software without restriction, including
++   without limitation the rights to use, copy, modify, merge, publish,
++   distribute, sublicense, and/or sell copies of the Software, and to
++   permit persons to whom the Software is furnished to do so, subject to
++   the following conditions:
++
++   The above copyright notice and this permission notice shall be included
++   in all copies or substantial portions of the Software.
++
++   THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,
++   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++   NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++   DEALINGS IN THE SOFTWARE.
++   ----------------------------------------------------------------------- */
++
++/* The calling convention is klausscpu-llvm's ABI.md (version 3):
++
++   - Every argument is a sequence of 64-bit words: one for a scalar, one or
++     two for an aggregate (struct, _Complex) of up to 16 bytes (its bytes
++     in memory order, padding undefined), one for a larger aggregate,
++     which is passed as a pointer to a copy the caller makes.  The words
++     of all the arguments are assigned in order to R0-R3 and then to
++     8-byte stack slots; a two-word argument may take R3 and the first
++     stack slot.  There is no FPU: float is the low 32 bits of a word
++     (upper half undefined), double and long double (both 64-bit) a word.
++   - Integers narrower than 64 bits are extended by the producer: 32-bit
++     ones are sign-extended whatever their signedness, 8- and 16-bit ones
++     by their signedness.
++   - A result of up to 16 bytes comes back in R12 (bytes 0-7) and R11
++     (bytes 8-15); a larger aggregate is returned through a pointer the
++     caller passes as a hidden first argument (R0).
++   - CALL pushes the return address: at the callee's entry the stack
++     arguments start at SP + 8.  A variadic call first reserves a 32-byte
++     home area for R0-R3 there, and its stack arguments start at SP + 40;
++     the unnamed arguments are assigned exactly like named ones.  */
++
++#include <ffi.h>
++#include <ffi_common.h>
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#if __klausscpu_abi__ != 3
++#error "this port implements version 3 of the KlaussCPU C ABI"
++#endif
++_Static_assert (sizeof (long double) == 8, "KlaussCPU long double is a double");
++_Static_assert (sizeof (void *) == 8 && sizeof (ffi_arg) == 8, "LP64");
++
++#define NARGREG		4	/* R0-R3 */
++#define HOME_AREA	32	/* bytes a variadic call reserves */
++#define MAX_DIRECT	16	/* bigger aggregates go by reference */
++
++/* cif->flags */
++#define KL_VARIADIC	1
++
++/* What ffi_call_SYSV reads and writes; the offsets are in sysv.S.  */
++struct call_frame
++{
++  uint64_t r[NARGREG];		/*  0: R0-R3 */
++  void (*fn) (void);		/* 32 */
++  const uint64_t *stack;	/* 40: the stack area, from the callee's SP + 8 */
++  uint64_t nstack;		/* 48: its size in bytes, a multiple of 8 */
++  uint64_t ret[2];		/* 56: R12, R11 after the call */
++};
++
++extern void ffi_call_SYSV (struct call_frame *) FFI_HIDDEN;
++extern void ffi_closure_SYSV (void) FFI_HIDDEN;
++extern const char ffi_klausscpu_trampoline[] FFI_HIDDEN;
++extern const char ffi_klausscpu_trampoline_end[] FFI_HIDDEN;
++
++static int
++by_reference (const ffi_type *t)
++{
++  return (t->type == FFI_TYPE_STRUCT || t->type == FFI_TYPE_COMPLEX)
++	 && t->size > MAX_DIRECT;
++}
++
++/* The number of argument words of type T.  */
++static unsigned
++arg_words (const ffi_type *t)
++{
++  if (t->type == FFI_TYPE_STRUCT || t->type == FFI_TYPE_COMPLEX)
++    return t->size > MAX_DIRECT ? 1 : (unsigned) ((t->size + 7) / 8);
++  return 1;
++}
++
++/* Whether this port handles type T (as an argument, or VOID as a
++   result).  */
++static int
++known_type (const ffi_type *t)
++{
++  switch (t->type)
++    {
++    case FFI_TYPE_VOID:
++    case FFI_TYPE_INT:
++    case FFI_TYPE_FLOAT:
++    case FFI_TYPE_DOUBLE:
++    case FFI_TYPE_UINT8:
++    case FFI_TYPE_SINT8:
++    case FFI_TYPE_UINT16:
++    case FFI_TYPE_SINT16:
++    case FFI_TYPE_UINT32:
++    case FFI_TYPE_SINT32:
++    case FFI_TYPE_UINT64:
++    case FFI_TYPE_SINT64:
++    case FFI_TYPE_POINTER:
++#if FFI_TYPE_LONGDOUBLE != FFI_TYPE_DOUBLE
++    case FFI_TYPE_LONGDOUBLE:
++#endif
++    case FFI_TYPE_STRUCT:
++    case FFI_TYPE_COMPLEX:
++      return 1;
++    default:
++      return 0;
++    }
++}
++
++static ffi_status
++prep_cif (ffi_cif *cif, unsigned flags)
++{
++  unsigned i, words = 0;
++
++  if (cif->abi != FFI_SYSV)
++    return FFI_BAD_ABI;
++  if (!known_type (cif->rtype))
++    return FFI_BAD_TYPEDEF;
++  if (by_reference (cif->rtype))
++    words = 1;			/* the hidden result pointer, in R0 */
++  for (i = 0; i < cif->nargs; i++)
++    {
++      ffi_type *t = cif->arg_types[i];
++      if (t->type == FFI_TYPE_VOID || !known_type (t))
++	return FFI_BAD_TYPEDEF;
++      words += arg_words (t);
++    }
++  /* cif->bytes: the argument words, registers included.  */
++  cif->bytes = words * 8;
++  cif->flags = flags;
++  return FFI_OK;
++}
++
++ffi_status FFI_HIDDEN
++ffi_prep_cif_machdep (ffi_cif *cif)
++{
++  return prep_cif (cif, 0);
++}
++
++ffi_status FFI_HIDDEN
++ffi_prep_cif_machdep_var (ffi_cif *cif,
++			  unsigned int nfixedargs __attribute__ ((unused)),
++			  unsigned int ntotalargs __attribute__ ((unused)))
++{
++  return prep_cif (cif, KL_VARIADIC);
++}
++
++/* The words of a scalar or of an aggregate passed directly, at W
++   (zero-filled by the caller), extended as the ABI says.  */
++static void
++marshal (const ffi_type *t, const void *v, uint64_t *w)
++{
++  switch (t->type)
++    {
++    case FFI_TYPE_UINT8:
++      w[0] = *(const uint8_t *) v;
++      break;
++    case FFI_TYPE_SINT8:
++      w[0] = (uint64_t) (int64_t) *(const int8_t *) v;
++      break;
++    case FFI_TYPE_UINT16:
++      w[0] = *(const uint16_t *) v;
++      break;
++    case FFI_TYPE_SINT16:
++      w[0] = (uint64_t) (int64_t) *(const int16_t *) v;
++      break;
++    case FFI_TYPE_UINT32:	/* sign-extended too (RV64's rule) */
++    case FFI_TYPE_SINT32:
++    case FFI_TYPE_INT:
++      w[0] = (uint64_t) (int64_t) *(const int32_t *) v;
++      break;
++    case FFI_TYPE_FLOAT:	/* low 32 bits; the upper half is undefined */
++      memcpy (w, v, 4);
++      break;
++    case FFI_TYPE_STRUCT:
++    case FFI_TYPE_COMPLEX:
++      memcpy (w, v, t->size);
++      break;
++    default:			/* double, long double, 64-bit, pointer */
++      memcpy (w, v, 8);
++      break;
++    }
++}
++
++/* Logical argument word I (0-3 the registers, then the stack slots) lives
++   at R[I] or at STACK[I - 4]; STACK starts after the home area for a
++   variadic call.  */
++static uint64_t *
++arg_word (uint64_t *r, uint64_t *stack, size_t i)
++{
++  return i < NARGREG ? &r[i] : &stack[i - NARGREG];
++}
++
++static void *
++align_up (void *buf, size_t align)
++{
++  return (void *) (((uintptr_t) buf + align - 1) & ~(uintptr_t) (align - 1));
++}
++
++void
++ffi_call (ffi_cif *cif, void (*fn) (void), void *rvalue, void **avalue)
++{
++  ffi_type *rt = cif->rtype;
++  size_t words = cif->bytes / 8;
++  size_t nstackw = words > NARGREG ? words - NARGREG : 0;
++  size_t home = (cif->flags & KL_VARIADIC) ? HOME_AREA : 0;
++  size_t nstack = home + nstackw * 8;
++  uint64_t *stack, *slots;
++  struct call_frame cf;
++  size_t idx = 0;
++  unsigned i;
++  void *sret = NULL;
++
++  /* A non-variadic call gets at least 32 bytes of stack area too, the
++     unused part above its stack arguments, as clang makes a call through
++     a declaration without a prototype whose arguments all fit R0-R3 a
++     variadic one (ABI.md "Variadic functions").  A variadic function
++     called through a non-variadic cif (Python's ctypes does that when a
++     function's argtypes are not set) then stores R0-R3 in its home area
++     there rather than over ffi_call_SYSV's frame, and works if its
++     arguments fit R0-R3; non-variadic callees never look there.  */
++  if (nstack < HOME_AREA)
++    nstack = HOME_AREA;
++  stack = alloca (nstack);
++  slots = stack + home / 8;
++  memset (stack, 0, nstack);
++  memset (&cf, 0, sizeof cf);
++  if (by_reference (rt))
++    {
++      sret = rvalue;
++      if (sret == NULL)
++	sret = align_up (alloca (rt->size + rt->alignment), rt->alignment);
++      *arg_word (cf.r, slots, idx++) = (uintptr_t) sret;
++    }
++  for (i = 0; i < cif->nargs; i++)
++    {
++      ffi_type *t = cif->arg_types[i];
++      if (by_reference (t))
++	{
++	  /* A copy the callee may modify.  */
++	  void *copy = align_up (alloca (t->size + t->alignment),
++				 t->alignment);
++	  memcpy (copy, avalue[i], t->size);
++	  *arg_word (cf.r, slots, idx++) = (uintptr_t) copy;
++	}
++      else
++	{
++	  uint64_t w[2] = { 0, 0 };
++	  unsigned k, n = arg_words (t);
++	  marshal (t, avalue[i], w);
++	  for (k = 0; k < n; k++)
++	    *arg_word (cf.r, slots, idx++) = w[k];
++	}
++    }
++  FFI_ASSERT (idx == words);
++
++  cf.fn = fn;
++  cf.stack = stack;
++  cf.nstack = nstack;
++  ffi_call_SYSV (&cf);
++
++  if (rvalue == NULL || sret != NULL)
++    return;
++  switch (rt->type)
++    {
++    case FFI_TYPE_VOID:
++      break;
++    /* Integers narrower than ffi_arg fill an ffi_arg, extended by their
++       own signedness (an unsigned int comes back sign-extended).  */
++    case FFI_TYPE_UINT8:
++      *(ffi_arg *) rvalue = (uint8_t) cf.ret[0];
++      break;
++    case FFI_TYPE_SINT8:
++      *(ffi_sarg *) rvalue = (int8_t) cf.ret[0];
++      break;
++    case FFI_TYPE_UINT16:
++      *(ffi_arg *) rvalue = (uint16_t) cf.ret[0];
++      break;
++    case FFI_TYPE_SINT16:
++      *(ffi_sarg *) rvalue = (int16_t) cf.ret[0];
++      break;
++    case FFI_TYPE_UINT32:
++      *(ffi_arg *) rvalue = (uint32_t) cf.ret[0];
++      break;
++    case FFI_TYPE_SINT32:
++    case FFI_TYPE_INT:
++      *(ffi_sarg *) rvalue = (int32_t) cf.ret[0];
++      break;
++    case FFI_TYPE_FLOAT:
++      memcpy (rvalue, cf.ret, 4);
++      break;
++    case FFI_TYPE_STRUCT:
++    case FFI_TYPE_COMPLEX:
++      memcpy (rvalue, cf.ret, rt->size);
++      break;
++    default:
++      memcpy (rvalue, cf.ret, 8);
++      break;
++    }
++}
++
++/* Called by ffi_closure_SYSV with the closure, R0-R3 as they were at the
++   entry, the incoming stack area (entry SP + 8) and a 16-byte buffer whose
++   words it returns in R12 and R11.  */
++void FFI_HIDDEN
++ffi_closure_klausscpu_inner (ffi_closure *closure, uint64_t *regs,
++			     uint64_t *stack, uint64_t *ret)
++{
++  ffi_cif *cif = closure->cif;
++  ffi_type *rt = cif->rtype;
++  void **avalue = alloca (cif->nargs * sizeof (void *));
++  uint64_t *slots = stack + ((cif->flags & KL_VARIADIC) ? HOME_AREA / 8 : 0);
++  size_t idx = 0;
++  void *rvalue = ret;
++  int sret = by_reference (rt);
++  unsigned i;
++
++  if (sret)
++    rvalue = (void *) (uintptr_t) *arg_word (regs, slots, idx++);
++  for (i = 0; i < cif->nargs; i++)
++    {
++      ffi_type *t = cif->arg_types[i];
++      if (by_reference (t))
++	avalue[i] = (void *) (uintptr_t) *arg_word (regs, slots, idx++);
++      else
++	{
++	  unsigned n = arg_words (t);
++	  if (idx < NARGREG && idx + n > NARGREG)
++	    {
++	      /* Split between R3 and the first stack slot.  */
++	      uint64_t *w = alloca (16);
++	      w[0] = *arg_word (regs, slots, idx);
++	      w[1] = *arg_word (regs, slots, idx + 1);
++	      avalue[i] = w;
++	    }
++	  else
++	    avalue[i] = arg_word (regs, slots, idx);
++	  idx += n;
++	}
++    }
++
++  ret[0] = ret[1] = 0;
++  closure->fun (cif, rvalue, avalue, closure->user_data);
++
++  if (sret)
++    return;			/* R12 is undefined after an sret call */
++  /* The function stored an ffi_arg for a narrow integer (or just the
++     integer: its low bytes, little-endian, are the same); extend it as
++     the ABI says.  */
++  switch (rt->type)
++    {
++    case FFI_TYPE_UINT8:
++      ret[0] = *(uint8_t *) ret;
++      break;
++    case FFI_TYPE_SINT8:
++      ret[0] = (uint64_t) (int64_t) *(int8_t *) ret;
++      break;
++    case FFI_TYPE_UINT16:
++      ret[0] = *(uint16_t *) ret;
++      break;
++    case FFI_TYPE_SINT16:
++      ret[0] = (uint64_t) (int64_t) *(int16_t *) ret;
++      break;
++    case FFI_TYPE_UINT32:
++    case FFI_TYPE_SINT32:
++    case FFI_TYPE_INT:
++      ret[0] = (uint64_t) (int64_t) *(int32_t *) ret;
++      break;
++    default:
++      break;
++    }
++}
++
++/* The trampoline (ffi_klausscpu_trampoline in sysv.S, 16 bytes):
++
++	leapc   r14, .		; the trampoline's own address
++	ldidx64 r13, r14, 16	; ffi_closure_SYSV
++	ldidx64 r14, r14, 24	; the closure
++	jmpr    r13
++
++   followed by the two addresses.  R13 and R14 are caller-saved and carry
++   no argument; the trampoline leaves SP and R0-R3 alone, so
++   ffi_closure_SYSV sees the call as its caller made it.  The closure's
++   own (writable) address is stored rather than derived from the
++   trampoline's, so that a double-mapped closure (closures.c's fallback
++   when W+X memory is refused) also works.
++
++   Instruction-cache coherence: the KlaussCPU I-cache snoops this core's
++   stores (tag-checked against the physical address, with the fetch
++   window and prefetch buffer checked by virtual address), so code written
++   through the address it runs from needs no maintenance; that is the
++   normal case, closures.c mapping its pages read/write/execute.  User
++   mode has no instruction or system call to invalidate the I-cache
++   (CACHE_CTRL.ICACHE_INV is supervisor MMIO), and __clear_cache is not in
++   the compiler-rt builtins for this target, so nothing is called here.  */
++
++ffi_status
++ffi_prep_closure_loc (ffi_closure *closure, ffi_cif *cif,
++		      void (*fun) (ffi_cif *, void *, void **, void *),
++		      void *user_data,
++		      void *codeloc __attribute__ ((unused)))
++{
++  uint64_t target = (uintptr_t) ffi_closure_SYSV;
++  uint64_t self = (uintptr_t) closure;
++
++  if (cif->abi != FFI_SYSV)
++    return FFI_BAD_ABI;
++  /* The assembler decides the length of the leapc.  */
++  if (ffi_klausscpu_trampoline_end - ffi_klausscpu_trampoline != 16)
++    abort ();
++
++  closure->cif = cif;
++  closure->fun = fun;
++  closure->user_data = user_data;
++  memcpy (&closure->tramp[16], &target, 8);
++  memcpy (&closure->tramp[24], &self, 8);
++  memcpy (&closure->tramp[0], ffi_klausscpu_trampoline, 16);
++  return FFI_OK;
++}
+--- a/src/klausscpu/sysv.S	1970-01-01 00:00:00.000000000 +0000
++++ b/src/klausscpu/sysv.S	2026-11-11 20:45:40.523534110 +0200
+@@ -0,0 +1,134 @@
++/* -----------------------------------------------------------------------
++   sysv.S - Copyright (c) 2026 KlaussCPU Linux port
++
++   KlaussCPU Foreign Function Interface: the call and closure entry.
++
++   Permission is hereby granted, free of charge, to any person obtaining
++   a copy of this software and associated documentation files (the
++   ``Software''), to deal in the Software without restriction, including
++   without limitation the rights to use, copy, modify, merge, publish,
++   distribute, sublicense, and/or sell copies of the Software, and to
++   permit persons to whom the Software is furnished to do so, subject to
++   the following conditions:
++
++   The above copyright notice and this permission notice shall be included
++   in all copies or substantial portions of the Software.
++
++   THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,
++   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++   NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++   DEALINGS IN THE SOFTWARE.
++   ----------------------------------------------------------------------- */
++
++#define LIBFFI_ASM
++#include <fficonfig.h>
++#include <ffi.h>
++
++/* struct call_frame (ffi.c) */
++#define CF_R0		0
++#define CF_FN		32
++#define CF_STACK	40
++#define CF_NSTACK	48
++#define CF_RET		56
++
++	.text
++
++/* void ffi_call_SYSV(struct call_frame *cf)
++
++   Copies cf->nstack bytes from cf->stack to the bottom of a new stack
++   area, loads R0-R3 and calls cf->fn, so the callee finds the area at
++   its entry SP + 8; then stores R12 and R11 in cf->ret.  R4 (callee-
++   saved) keeps cf across the call.  */
++	.globl	ffi_call_SYSV
++	.hidden	ffi_call_SYSV
++	.type	ffi_call_SYSV, @function
++	.p2align 2
++ffi_call_SYSV:
++	.cfi_startproc
++	enter	0
++	.cfi_def_cfa r15, 16
++	.cfi_offset r15, -16
++	push	r4
++	.cfi_offset r4, -24
++	copy	r4, r0
++	ldidx64	r8, r4, CF_NSTACK
++	ldidx64	r10, r4, CF_STACK
++	getsp	r9
++	subr	r9, r9, r8		# both multiples of 8: SP stays 8-aligned
++	setsp	r9
++1:	fbri	r8, 0, 0, 2f		# EQ: copied
++	ldidx64	r11, r10, 0
++	stidx64	r11, r9, 0
++	addi	r10, r10, 8
++	addi	r9, r9, 8
++	addi	r8, r8, -8
++	jmp	1b
++2:	ldidx64	r0, r4, CF_R0
++	ldidx64	r1, r4, CF_R0 + 8
++	ldidx64	r2, r4, CF_R0 + 16
++	ldidx64	r3, r4, CF_R0 + 24
++	ldidx64	r13, r4, CF_FN
++	callr	r13
++	stidx64	r12, r4, CF_RET
++	stidx64	r11, r4, CF_RET + 8
++	ldidx64	r4, r15, -8
++	leaveret
++	.cfi_endproc
++	.size	ffi_call_SYSV, . - ffi_call_SYSV
++
++/* ffi_closure_SYSV: jumped to by a closure's trampoline with R14 = the
++   closure and everything else as the caller left it ([SP] the return
++   address, the stack arguments from SP + 8).  Saves R0-R3 and calls
++   ffi_closure_klausscpu_inner(closure, regs, entry SP + 8, ret), then
++   returns ret[0] in R12 and ret[1] in R11.
++
++   Frame: R15 + 8 the return address, R15 the caller's R15,
++   R15 - 16 .. - 1 ret[2], R15 - 48 .. - 17 the saved R0-R3.  */
++	.globl	ffi_closure_SYSV
++	.hidden	ffi_closure_SYSV
++	.type	ffi_closure_SYSV, @function
++	.p2align 2
++ffi_closure_SYSV:
++	.cfi_startproc
++	enter	6
++	.cfi_def_cfa r15, 16
++	.cfi_offset r15, -16
++	stidx64	r0, r15, -48
++	stidx64	r1, r15, -40
++	stidx64	r2, r15, -32
++	stidx64	r3, r15, -24
++	copy	r0, r14
++	addi	r1, r15, -48
++	addi	r2, r15, 16
++	addi	r3, r15, -16
++	callrel	ffi_closure_klausscpu_inner
++	ldidx64	r12, r15, -16
++	ldidx64	r11, r15, -8
++	leaveret
++	.cfi_endproc
++	.size	ffi_closure_SYSV, . - ffi_closure_SYSV
++
++/* The trampoline's code, copied into each closure by ffi_prep_closure_loc,
++   which stores the address of ffi_closure_SYSV at +16 and that of the
++   closure at +24.  Position-independent; never run from here.  */
++	.globl	ffi_klausscpu_trampoline
++	.hidden	ffi_klausscpu_trampoline
++	.type	ffi_klausscpu_trampoline, @object
++	.p2align 3
++ffi_klausscpu_trampoline:
++	leapc	r14, .			# its own address (compressed to leapc.s)
++	ldidx64	r13, r14, 16
++	ldidx64	r14, r14, 24
++	jmpr	r13
++	.globl	ffi_klausscpu_trampoline_end
++	.hidden	ffi_klausscpu_trampoline_end
++ffi_klausscpu_trampoline_end:		# ffi.c checks that the code is 16 bytes
++	.size	ffi_klausscpu_trampoline, . - ffi_klausscpu_trampoline
++
++#if defined __ELF__ && defined __linux__
++	.section .note.GNU-stack,"",%progbits
++#endif

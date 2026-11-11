@@ -36,3 +36,9 @@ define SQLITE_KLAUSSCPU_CONFIG_SUB
 	cp $(TOPDIR)/support/gnuconfig/config.sub $(@D)/autosetup/autosetup-config.sub
 endef
 SQLITE_POST_PATCH_HOOKS += SQLITE_KLAUSSCPU_CONFIG_SUB
+
+# Python's configure finds out whether libffi has complex types (for
+# ctypes' c_double_complex etc.) by running a program, and assumes it has
+# not when cross-compiling.  The KlaussCPU port has them (patches/libffi;
+# linux/userland/tests/libffi runs libffi.complex and that very program).
+PYTHON3_CONF_ENV += ac_cv_ffi_complex_double_supported=yes
