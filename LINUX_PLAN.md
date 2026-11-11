@@ -603,8 +603,40 @@ On the emulator (klausscc implements DCBZ and MAL64), with the fork / exec
 / fault loops: DCBZ removes 94% / 87% / 98% of the write-miss fetches,
 for +10% / +6% / -3% instructions. KUnit `memcpy` (6/6, overlaps
 included), `string` and `usercopy` pass with it. On the release bitstream
-the same kernel leaves all three off (no feature bits); board numbers with
-the perf-hw bitstream to follow.
+the same kernel leaves all three off (no feature bits).
+
+**Board, perf-hw-a 88acc21** (`CPU_FEATURES 01f0100d`), the same kernel
+with and without `nodcbz`:
+
+| | DCBZ off | DCBZ on | | estimate |
+|---|---|---|---|---|
+| `sysloop fork` | 12.66 ms | 9.92 ms | -21.6% | -24% |
+| `sysloop exec` | 29.46 ms | 21.83 ms | -25.9% | -24% |
+| `sysloop fault` | 3.51 ms | 1.92 ms | -45.4% | -36% |
+| lmbench fork+exit / fork+execve / fork+sh -c | 13.90 / 25.95 / 50.4 ms | 10.62 / 20.00 / 37.8 ms | -24% / -23% / -25% | |
+
+User-space bandwidth is unchanged (37 MB/s writes): musl's memset/memcpy
+don't use DCBZ.  On the board a DCBZ costs ~3 cycles a line with a clean
+victim and ~16 with a dirty one, against ~40/53 for four stores to a
+missing line (klaussCPU's measurement).
+
+LiteEth, the same kernel with `liteeth.rx_slots=2` and without (8):
+
+| iperf3, 15 s | 2 slots | 8 slots (two runs) |
+|---|---|---|
+| PC -> board | 10.4 Mbit/s, 1948 retransmits, 1980 frames dropped by the MAC | 16.4 / 16.4 Mbit/s, 865 / 839 retransmits, 886 / 845 dropped |
+| board -> PC | 22.6 Mbit/s; 12390 incoming ACKs dropped | 20.9 / 20.0 Mbit/s; 3555 / 197 dropped |
+
+Receive is CPU-bound (the board is 96% busy), so some bursts still
+overflow eight slots. `liteeth.rx_slots=N` caps the count for such A/Bs;
+`ip -s link` shows the MAC's drops as "missed".
+
+MAL64 on the board: `unaligntest` passes all 395 checks (64-bit included),
+and Buildroot 40/40, Lua, SQLite, curl and musltest pass with it on. It
+found that almost every static program does two misaligned 64-bit loads at
+startup: musl's `__init_tls` before the Elf32_Phdr fix (the binaries on the
+card predate it), which the hardware used to answer with the wrong
+doubleword. Relinking them against the fixed musl removes that.
 
 ### Swap
 

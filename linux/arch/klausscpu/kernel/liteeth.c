@@ -27,6 +27,7 @@
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/moduleparam.h>
 #include <linux/io.h>
 #include <linux/netdevice.h>
 #include <linux/unaligned.h>
@@ -75,6 +76,10 @@ struct kl_eth {
 	unsigned int rx_slots;
 	u32 rx_errors_base;
 };
+
+/* liteeth.rx_slots=N: at most N RX slots (2..8; 0, the default, = all). */
+static unsigned int rx_slots_max;
+module_param_named(rx_slots, rx_slots_max, uint, 0444);
 
 /* RX slot k's SRAM: 0 and 1 below TX0, the rest above it. */
 static unsigned long rx_slot_addr(unsigned int k)
@@ -343,7 +348,11 @@ static int __init kl_eth_init(void)
 
 	/* All the RX slots there are, before RX is enabled (the write flushes RX). */
 	if (klausscpu_cpu_features & CPU_FEAT_ETH_SLOTS) {
-		writel((readl((void __iomem *)ETH_RX_SLOTS) >> 8) & 0xf, (void __iomem *)ETH_RX_SLOTS);
+		unsigned int want = (readl((void __iomem *)ETH_RX_SLOTS) >> 8) & 0xf;
+
+		if (rx_slots_max && rx_slots_max < want)
+			want = rx_slots_max;
+		writel(want, (void __iomem *)ETH_RX_SLOTS);
 		slots = readl((void __iomem *)ETH_RX_SLOTS) & 0xf;
 		if (slots < 2)
 			slots = 2;
