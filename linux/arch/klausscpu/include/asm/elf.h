@@ -32,6 +32,10 @@ typedef struct { unsigned long unused; } elf_fpregset_t;
 
 #define ELF_PLAT_INIT(_r, load_addr)	do { } while (0)
 
+/* AT_DCACHEBSIZE: DCBZ's line, 0 without it (asm/auxvec.h, lib/string.c). */
+extern unsigned long klausscpu_dcbz_line_size(void);
+#define ARCH_DLINFO	NEW_AUX_ENT(AT_DCACHEBSIZE, klausscpu_dcbz_line_size())
+
 /* elfcore.h writes this without a semicolon. */
 #define ELF_CORE_COPY_REGS(dest, regs)	klausscpu_elf_core_copy_regs((dest), (regs));
 struct pt_regs;

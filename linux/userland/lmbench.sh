@@ -51,4 +51,5 @@ done
 "${CC[@]}" -static -O2 -o "$OUT/tlbmiss" "$HERE/tlbmiss.c"
 "${CC[@]}" -static -O2 -o "$OUT/perfstat" "$HERE/perfstat.c"
 "${CC[@]}" -static -O2 -o "$OUT/sysloop" "$HERE/sysloop.c"
-echo "lmbench: $OUT ($BENCH tlbmiss perfstat sysloop; lmbench $REV)"
+"${CC[@]}" -static -O2 -o "$OUT/strtest" "$HERE/strtest.c"
+echo "lmbench: $OUT ($BENCH tlbmiss perfstat sysloop strtest; lmbench $REV)"

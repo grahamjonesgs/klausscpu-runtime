@@ -35,6 +35,12 @@
 /* The D-cache line DCBZ zeroes, or 0 without DCBZ (klausscpu_dcbz_init). */
 static unsigned long klausscpu_dcbz_line;
 
+/* For AT_DCACHEBSIZE (asm/elf.h): user code may use DCBZ with this line. */
+unsigned long klausscpu_dcbz_line_size(void)
+{
+	return klausscpu_dcbz_line;
+}
+
 static inline void dcbz(void *p)
 {
 	asm volatile("dcbz %0" : : "r"(p) : "memory");

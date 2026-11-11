@@ -92,7 +92,7 @@ if [ -x "$WS/sqlite-build/sqlite3" ]; then
 fi
 if [ -x "$WS/coremark-build/coremark" ] && [ -x "$WS/lmbench-build/tlbmiss" ]; then
   cp "$WS/coremark-build/coremark" "$WS/lmbench-build/tlbmiss" "$ST/usr/bin/"
-  for b in perfstat sysloop; do
+  for b in perfstat sysloop strtest; do
     if [ -x "$WS/lmbench-build/$b" ]; then cp "$WS/lmbench-build/$b" "$ST/usr/bin/"; fi
   done
   mkdir -p "$ST/usr/libexec/lmbench"
