@@ -57,6 +57,13 @@
 
 /* Restore from pt_regs at SP and IRET. */
 .macro RESTORE_REGS_IRET
+	/*
+	 * Interrupts off for the restore: its last load (r12) reads the frame
+	 * below the new SP, where an interrupt's frame would land.  The C
+	 * handlers return with them off already; this keeps one that doesn't
+	 * from corrupting r12.  IRET restores the disable bit from the frame.
+	 */
+	di	r1
 	getsp	r12
 	ldidx64	r1, r12, PT_FRAME
 	shrv	r1, r1, 44

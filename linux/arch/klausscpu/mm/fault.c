@@ -112,5 +112,11 @@ bad_area_nosemaphore:
 	}
 	no_context(regs, addr);
 out:
+	/*
+	 * Generic entry wants interrupts off for irqentry_exit, as on every
+	 * other way out of an exception; returning with them on let an
+	 * interrupt hit RESTORE_REGS_IRET's last load (entry.S).
+	 */
+	local_irq_disable();
 	irqentry_exit(regs, state);
 }
