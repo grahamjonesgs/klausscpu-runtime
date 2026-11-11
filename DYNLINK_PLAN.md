@@ -99,6 +99,26 @@ starting points, to be checked against the ISA (`LEAPC`, `CALLREL`,
 M2 and M3 can overlap; M4 can start from the ABI text before M3 is
 finished (it needs only the relocation semantics), then meet at M5.
 
+## M1 review (2026-11-11): what lands on the musl / kernel side
+
+The ABI text (klausscpu-llvm `dynlink`, ABI.md "Dynamic linking") passed an
+independent review with no blockers. Items for M4 and the kernel:
+- `<link.h>`: ElfW Phdr/Dyn/Sym/Half are Elf32, every pointer/Addr field in
+  `dl_phdr_info`, `link_map`, `r_debug` is 8 bytes. The static
+  `dl_iterate_phdr` already misreads PT_TLS / PT_GNU_EH_FRAME today (the
+  `__init_tls` bug class): fix with M4.
+- `r_addend` (Elf32_Sword) is sign-extended for every relocation type.
+- `libc.so` link: musl's configure flags (`--dynamic-list`,
+  `--exclude-libs=ALL`, `--no-undefined`, symbolic binding of libc's own
+  calls) and Linux-triple, `-fPIC`, hidden-visibility compiler builtins
+  (the LLVM session builds them).
+- `map_library` checks `e_machine` and the `e_flags` ABI version.
+- `crt_arch.h` `_dlstart`: `.hidden _DYNAMIC`, `leapc`.
+- musl's `jmp setjmp` / `jmp __cancel` / `jmp __sigsetjmp_tail` become
+  tail calls (they'd be PCREL32 against preemptible symbols).
+- Kernel: no ASLR yet (no `ARCH_HAS_ELF_RANDOMIZE`): PIEs load at
+  0x55550000 until it is added.
+
 ## Working rules
 
 - **klausscpu-llvm**: branch `dynlink`, built in a **separate build

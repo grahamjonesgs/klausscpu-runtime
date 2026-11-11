@@ -18,8 +18,13 @@ TARGET_CONFIGURE_OPTS += \
 # need the dashed git-add, and the rest become symlinks.
 GIT_MAKE_OPTS += SKIP_DASHED_BUILT_INS=YesPlease INSTALL_SYMLINKS=YesPlease
 
-# Static linking: libcurl.a needs OpenSSL, zstd and zlib after it.  git's
+# Static linking: libcurl.a needs OpenSSL and zlib after it.  git's
 # configure tests -lcurl alone (and so builds without HTTPS), and its
 # Makefile links git-remote-http with `curl-config --libs` (just -lcurl).
-GIT_CONF_ENV_LIBS += -lcurl -lssl -lcrypto -lzstd -lz -lpthread
-GIT_MAKE_OPTS += CURL_LDFLAGS="-lcurl -lssl -lcrypto -lzstd -lz -lpthread"
+# libcurl uses zstd only if zstd happens to be built first (libcurl.mk
+# doesn't mention it), so the build order decided.  Dependencies can't be
+# added from here (a package's are fixed when its .mk is read), so curl
+# goes without zstd (only zstd-compressed HTTP replies).
+LIBCURL_CONF_OPTS += --without-zstd
+GIT_CONF_ENV_LIBS += -lcurl -lssl -lcrypto -lz -lpthread
+GIT_MAKE_OPTS += CURL_LDFLAGS="-lcurl -lssl -lcrypto -lz -lpthread"

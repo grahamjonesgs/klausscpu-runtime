@@ -126,12 +126,17 @@ int main(int argc, char **argv)
 		memset(x, 1, sz);
 		memset(y, 2, sz);
 		t = now();
-		for (int r = 0; r < reps; r++)
+		/* The barrier keeps the compiler from dropping stores nothing reads. */
+		for (int r = 0; r < reps; r++) {
 			memset(x, r, sz);
+			__asm__ __volatile__ ("" : : "r"(x) : "memory");
+		}
 		printf("strtest: memset %.1f MB/s\n", reps * sz / (now() - t) / 1e6);
 		t = now();
-		for (int r = 0; r < reps; r++)
+		for (int r = 0; r < reps; r++) {
 			memcpy(r & 1 ? x : y, r & 1 ? y : x, sz);
+			__asm__ __volatile__ ("" : : "r"(x), "r"(y) : "memory");
+		}
 		printf("strtest: memcpy %.1f MB/s\n", reps * sz / (now() - t) / 1e6);
 	}
 	printf("strtest: %s\n", fails ? "FAIL" : "PASS");

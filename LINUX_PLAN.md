@@ -615,8 +615,12 @@ with and without `nodcbz`:
 | `sysloop fault` | 3.51 ms | 1.92 ms | -45.4% | -36% |
 | lmbench fork+exit / fork+execve / fork+sh -c | 13.90 / 25.95 / 50.4 ms | 10.62 / 20.00 / 37.8 ms | -24% / -23% / -25% | |
 
-User-space bandwidth is unchanged (37 MB/s writes): musl's memset/memcpy
-don't use DCBZ.  On the board a DCBZ costs ~3 cycles a line with a clean
+musl's memset/memcpy use DCBZ too (KlaussCPU versions in
+`linux/musl/src/string/klausscpu`, the line size from `AT_DCACHEBSIZE`):
+`strtest -b` over 4 MiB, the same binary with and without `nodcbz`:
+memset 33.8 -> 76.1 MB/s, memcpy 18.5 -> 28.2 MB/s. Relinking all userland
+against this musl also removed the startup misaligned loads (0 emulated
+accesses after boot and the suites, from two per program start).  On the board a DCBZ costs ~3 cycles a line with a clean
 victim and ~16 with a dirty one, against ~40/53 for four stores to a
 missing line (klaussCPU's measurement).
 
