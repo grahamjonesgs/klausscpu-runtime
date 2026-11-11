@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Jones <grahamjonesgs@gmail.com>
+Date: Wed, 11 Nov 2026 15:39:07 +0200
+Subject: [PATCH 3/3] link.h: let bits/link.h define ElfW and the address field
+ type
+
+bits/link.h is now included before ElfW is defined, and may define
+ElfW itself and __ELFW_ADDR, the type of the address fields of
+dl_phdr_info, link_map and r_debug (dlpi_addr, l_addr, r_brk,
+r_ldbase). By default ElfW follows UINTPTR_MAX and the fields are
+ElfW(Addr), as before. An arch with ELFCLASS32 files and 64-bit
+pointers (KlaussCPU) defines ElfW as Elf32_* and __ELFW_ADDR as an
+8-byte type: the fields hold load addresses in memory, like the
+pointers beside them, while dlpi_phdr and l_ld point at Elf32
+structures.
+---
+ include/link.h | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/include/link.h b/include/link.h
+index 8150185..dd8b3b6 100644
+--- a/include/link.h
++++ b/include/link.h
+@@ -10,16 +10,25 @@ extern "C" {
+ #define __NEED_uint32_t
+ #include <bits/alltypes.h>
+ 
++#include <bits/link.h>
++
++/* An arch's bits/link.h may define ElfW, and __ELFW_ADDR for the
++ * address fields below when its ELF class is narrower than its
++ * pointers (they hold load addresses in memory, not ELF fields). */
++#ifndef ElfW
+ #if UINTPTR_MAX > 0xffffffff
+ #define ElfW(type) Elf64_ ## type
+ #else
+ #define ElfW(type) Elf32_ ## type
+ #endif
++#endif
+ 
+-#include <bits/link.h>
++#ifndef __ELFW_ADDR
++#define __ELFW_ADDR ElfW(Addr)
++#endif
+ 
+ struct dl_phdr_info {
+-	ElfW(Addr) dlpi_addr;
++	__ELFW_ADDR dlpi_addr;
+ 	const char *dlpi_name;
+ 	const ElfW(Phdr) *dlpi_phdr;
+ 	ElfW(Half) dlpi_phnum;
+@@ -30,7 +39,7 @@ struct dl_phdr_info {
+ };
+ 
+ struct link_map {
+-	ElfW(Addr) l_addr;
++	__ELFW_ADDR l_addr;
+ 	char *l_name;
+ 	ElfW(Dyn) *l_ld;
+ 	struct link_map *l_next, *l_prev;
+@@ -39,13 +48,15 @@ struct link_map {
+ struct r_debug {
+ 	int r_version;
+ 	struct link_map *r_map;
+-	ElfW(Addr) r_brk;
++	__ELFW_ADDR r_brk;
+ 	enum { RT_CONSISTENT, RT_ADD, RT_DELETE } r_state;
+-	ElfW(Addr) r_ldbase;
++	__ELFW_ADDR r_ldbase;
+ };
+ 
+ int dl_iterate_phdr(int (*)(struct dl_phdr_info *, size_t, void *), void *);
+ 
++#undef __ELFW_ADDR
++
+ #ifdef __cplusplus
+ }
+ #endif

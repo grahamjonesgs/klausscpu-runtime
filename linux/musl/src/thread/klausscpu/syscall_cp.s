@@ -33,4 +33,4 @@ __cp_end:
 	ret
 __cp_cancel:
 2:
-	jmp __cancel
+	tail __cancel
