@@ -172,10 +172,16 @@ if [[ " $MODES " == *" testsuite "* ]]; then
 	grep -v '^PASS \|^SUMMARY' check.txt || true
 	summary=$(grep '^SUMMARY' check.txt || echo "SUMMARY none")
 	echo "$summary"
-	case "$summary" in
-	*" fail=0 "*) pass "testsuite: $summary" ;;
-	*) fail "testsuite: $summary" ;;
-	esac
+	# Every job must have run: pass + fail = the jobs built, and at least one
+	# (an FT_FILTER matching nothing or an empty testsuite is not a pass).
+	np=$(sed -n 's/.* pass=\([0-9]*\).*/\1/p' <<<"$summary")
+	nf=$(sed -n 's/.* fail=\([0-9]*\).*/\1/p' <<<"$summary")
+	nj=$(wc -l <build.jobs)
+	if [ -n "$np" ] && [ "$np" -gt 0 ] && [ "$nf" = 0 ] && [ $((np + nf)) = "$nj" ]; then
+		pass "testsuite: $summary"
+	else
+		fail "testsuite: $summary (jobs $nj)"
+	fi
 fi
 
 # ---- Python ctypes ----
