@@ -7,7 +7,7 @@
 #define _ASM_KLAUSSCPU_KLAUSSCPU_H
 
 /* System registers (MFSR/MTSR take them by number or name). */
-#define SR_STATUS	0	/* [0] UM, [1] DI, [9] TE */
+#define SR_STATUS	0	/* [0] UM, [1] DI, [9] TE, [10] MAL64 */
 #define SR_EVEC		1
 #define SR_ECAUSE	2
 #define SR_EADDR	3
@@ -25,6 +25,7 @@
 #define STATUS_UM	0x1
 #define STATUS_DI	0x2
 #define STATUS_TE	0x200
+#define STATUS_MAL64	0x400	/* misaligned 64-bit accesses trap (HW_PERF_PLAN §4) */
 
 #define TLB_HI_G	0x100
 #define TLB_INDEX_P	0x80000000
@@ -93,6 +94,7 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define CPU_FEAT_LRSC		0x8
 #define CPU_FEAT_TLB_ENTRIES(f)	(((f) >> 8) & 0xff)
 #define CPU_FEAT_SDNATIVE	(1UL << 21)	/* native SD controller, INT2 cascade */
+#define CPU_FEAT_MAL64		(1UL << 23)	/* STATUS.MAL64 implemented */
 
 #ifndef __ASSEMBLER__
 

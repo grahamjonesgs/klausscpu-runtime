@@ -1116,6 +1116,59 @@ direct-mapped windows. RISC-V shows the generic syscall table and
   a time, and `clear_page`/`copy_page` (64 KiB) use these: switching cut
   a page fault from 12.5 to 5.4 ms and fork+exit from 42.6 to 19.4 ms.
 
+### Misaligned accesses (user mode)
+
+The CPU raises MISALIGNED_LOAD/STORE (cause 5/6, EADDR = the effective
+address, frame PC = the instruction, nothing done) for a 16-bit access at
+an odd address and a 32-bit one not 4-aligned, except the unaligned-tolerant
+`MEMGET32` (arch §8.3). With `STATUS.MAL64` it does the same for every
+64-bit load/store not 8-aligned (A=0 and A=1; klaussCPU HW_PERF_PLAN §4)
+instead of silently using the aligned-down doubleword. `trap_init` sets
+MAL64 when `CPU_FEATURES[23]` says it exists (boot log "misaligned 64-bit
+accesses trap (STATUS.MAL64)"). Exception entry and IRET leave STATUS[10]
+alone, and nothing else writes STATUS after boot.
+
+`arch/klausscpu/kernel/unaligned.c` emulates these for **user mode**, so
+code written for x86/ARM (stores through misaligned pointers) works,
+slowly:
+
+- **What.** It reads the instruction with `get_user` and decodes every
+  class 6/7 form: 16/32/64-bit, signed and unsigned loads, stores, in every
+  mode: `[rs1]`, the short `rs1 + simm8 << SIZE`, `rs1 + imm32`, `[imm32]`
+  and `rs1 + rs2`. The EA it computes must equal EADDR. It does the access
+  a byte at a time with `get_user`/`put_user`, writes rd sign- or
+  zero-extended, and steps the PC past the instruction (1 or 2 words).
+  There are no SP-relative loads or stores; the stack operations never
+  raise MISALIGNED.
+- **Not emulated (SIGBUS, as before):** LR/SC, anything else it can't
+  decode, a misaligned fetch, a 64-bit access when MAL64 is off, and every
+  kernel-mode misaligned access (exception fixup or panic, as before).
+  With MAL64 on, a kernel `get_user`/`put_user` of 8 bytes at a misaligned
+  user address now fails with -EFAULT instead of using the aligned-down
+  doubleword.
+- **Faults.** A fault on the user data during the emulated access is
+  SIGSEGV with `si_addr` = the faulting byte (SEGV_MAPERR / SEGV_ACCERR).
+  A store that straddles into an unwritable page may have written its
+  first bytes by then.
+- **Log.** A rate-limited `comm[pid]: emulated misaligned 32-bit store at
+  pc 0002380c eaddr 0004d085`.
+- **Counter.** `misaligned_emulated N` in `/proc/klausscpu_perf`, since the
+  last clear like `tlb_refills` (so `perfstat` shows it per command). It
+  also counts as a `PERF_COUNT_SW_ALIGNMENT_FAULTS` event.
+- **Opt-out.** `prctl(PR_SET_UNALIGN, PR_UNALIGN_SIGBUS)` gets SIGBUS
+  instead; `PR_UNALIGN_NOPRINT` keeps the emulation without the log line.
+  `PR_GET_UNALIGN` reads it. Inherited across fork, as on other arches.
+- **Cost** (emulator, `/proc/klausscpu_perf` deltas over 2000 accesses,
+  less the same aligned): about 255 instructions / 500 cycles for a 16-bit
+  load, 280 / 560 for a 32-bit store, 340 / 680 for a 64-bit load, so about
+  5–7 µs each at 100 MHz, against one cycle for an aligned access.
+- **Test.** `linux/userland/unaligntest.c` (in minish's initramfs, run by
+  `tools/validate/linux.sh shell`) runs every form, as raw instruction
+  words, at offsets 0–7 and checks rd's 64 bits or the surrounding bytes,
+  plus C stores through a misaligned `uint32_t *`, the counter, SIGSEGV
+  inside an emulated access, SIGBUS for LR/SC and with
+  `PR_UNALIGN_SIGBUS`, and prints the cost (without `-q`).
+
 ### Time, interrupts, console
 
 - **clocksource and `sched_clock`:** `CYCLE` (100 MHz, 64-bit,

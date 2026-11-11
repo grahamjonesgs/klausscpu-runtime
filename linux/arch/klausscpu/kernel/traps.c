@@ -169,9 +169,12 @@ asmlinkage void klausscpu_do_exception(struct pt_regs *regs)
 	case EXC_ACCESS_FETCH:
 		do_page_fault(regs, cause & 0xff, regs->eaddr);
 		return;
-	case EXC_MISALIGNED_FETCH:
 	case EXC_MISALIGNED_LOAD:
 	case EXC_MISALIGNED_STORE:
+		if (user_mode(regs) && klausscpu_misaligned_user(regs, cause & 0xff))
+			return;
+		fallthrough;
+	case EXC_MISALIGNED_FETCH:
 		do_bad_exception(regs, cause & 0xff, SIGBUS, BUS_ADRALN);
 		return;
 	case EXC_TRAP:
@@ -202,4 +205,5 @@ void __init trap_init(void)
 {
 	mtsr(SR_TLBVEC, (unsigned long)klausscpu_tlb_refill);
 	mtsr(SR_EVEC, (unsigned long)klausscpu_exc_vector);
+	klausscpu_misaligned_init();
 }

@@ -23,6 +23,10 @@ bool klausscpu_sd_use_native(void);
 static inline bool klausscpu_sd_use_native(void) { return false; }
 #endif
 void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr);
+/* unaligned.c: misaligned user loads/stores, emulated unless false. */
+bool klausscpu_misaligned_user(struct pt_regs *regs, unsigned long cause);
+void klausscpu_misaligned_init(void);
+unsigned long klausscpu_misaligned_count(void);	/* emulated since boot */
 asmlinkage void klausscpu_ret_from_fork(struct task_struct *prev, struct pt_regs *regs,
 					int (*fn)(void *), void *arg);
 #endif

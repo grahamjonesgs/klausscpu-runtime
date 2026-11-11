@@ -4,7 +4,8 @@
 #   INITRAMFS_PROFILE  m3 (default): the libc-free milestone-3 /init
 #                      musltest: /init = linux/userland/musltest.c (musl)
 #                      minish: /init = linux/userland/minish.c, a small
-#                              musl shell, with /bin/musltest
+#                              musl shell, with /bin/musltest and
+#                              /bin/unaligntest
 #                      busybox: /init = sdinit (switches to the SD card's
 #                               /linux/rootfs.img if there is one), else
 #                               busybox init (rcS, mdev, eth0 up), ash,
@@ -44,7 +45,7 @@ musltest)
   echo "file /init $OUT/initramfs/musltest 0755 0 0" >>"$LIST"
   ;;
 minish)
-  for p in minish musltest; do
+  for p in minish musltest unaligntest; do
     "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$WS/sysroot" -Os \
       "$RT/linux/userland/$p.c" -o "$OUT/initramfs/$p"
   done
@@ -53,6 +54,7 @@ dir /bin 0755 0 0
 file /init $OUT/initramfs/minish 0755 0 0
 file /bin/minish $OUT/initramfs/minish 0755 0 0
 file /bin/musltest $OUT/initramfs/musltest 0755 0 0
+file /bin/unaligntest $OUT/initramfs/unaligntest 0755 0 0
 LIST
   ;;
 busybox)

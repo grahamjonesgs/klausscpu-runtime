@@ -8,7 +8,8 @@
 # with the stage 3 TLB):
 #   shell (default)  initramfs "minish": a scripted session at the "$ "
 #                    prompt (klausscc --uart-in/--uart-prompt): built-ins,
-#                    /proc, tmpfs, and fork+execve of the musl test program
+#                    /proc, tmpfs, fork+execve of the musl test program, and
+#                    unaligntest (misaligned access emulation)
 #   busybox          initramfs "busybox": busybox init and ash (musl,
 #                    linux/userland/busybox.sh), a scripted session
 #   ssh              initramfs "busybox" with Dropbear (linux/userland/
@@ -237,6 +238,7 @@ ls /bin
 mount
 cat /proc/self/comm
 /bin/musltest
+/bin/unaligntest -q
 mkdir /tmp/d
 ls /tmp
 rm /tmp/d
@@ -263,6 +265,8 @@ musltest: 4 threads: mutex count 8000, atomic count 8000
 musltest: uaccess at a page edge ok
 musltest: 300 forks, 0 bad
 musltest: PASS
+/bin/unaligntest -q
+unaligntest: PASS
 mkdir /tmp/d
 ls /tmp
 d

@@ -22,6 +22,7 @@ struct thread_struct {
 	unsigned long sp;
 	unsigned long ra;
 	unsigned long tp;
+	unsigned long align_ctl;	/* prctl(PR_SET_UNALIGN): PR_UNALIGN_* */
 };
 
 #define INIT_THREAD	{ }
@@ -36,6 +37,12 @@ extern void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long s
 extern unsigned long __get_wchan(struct task_struct *p);
 
 #define cpu_relax()	barrier()
+
+/* prctl(PR_SET_UNALIGN / PR_GET_UNALIGN): kernel/unaligned.c. */
+extern int klausscpu_get_unalign_ctl(struct task_struct *tsk, unsigned long addr);
+extern int klausscpu_set_unalign_ctl(struct task_struct *tsk, unsigned int val);
+#define GET_UNALIGN_CTL(tsk, addr)	klausscpu_get_unalign_ctl((tsk), (addr))
+#define SET_UNALIGN_CTL(tsk, val)	klausscpu_set_unalign_ctl((tsk), (val))
 
 #endif /* !__ASSEMBLER__ */
 #endif
