@@ -1,0 +1,6 @@
+Load Complete OK
+test_icall: 36 callees at I-cache line 0x3f0, stack slots at lines 0x3f0-3..+3
+test_icall: 4032 calls
+=== ALL PASS ===
+
+CPU halted.

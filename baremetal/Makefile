@@ -19,6 +19,7 @@
 #   make test_unaligned — unaligned loads (MEMGET32, packed structs, packets)
 #   make test_hwcg      — compiler-emitted FBR W / imm32 (incl. range limits), CMPRVW.S, MULV.S
 #   make test_leapc     — LEAPC.S around the +-32 KiB boundary
+#   make test_icall     — calls whose callee's I-cache fill meets the return-address push (klaussCPU c1874cf)
 #   make test_misalign  — the misaligned 16/32-bit access trap (tools/validate/misalign.sh)
 #   make test_exc       — MMU stage 1: exceptions, user mode, SYSCALL, SRs, LR/SC (exc.h)
 #   make test_mpu       — MMU stage 2: the MPU (regions, GUARD, user permissions, stack guard)
@@ -186,7 +187,7 @@ PROGRAMS = hello adventure test_64bit expr bst crypto queens \
            test_fatfs_printf test_big test_cache test_rtos test_sd test_sync \
            test_eth eth_test lwip_demo ping_demo tcp_echo http_server net_client \
            netboot loader crypto_selftest crypto_selftest2 crypto_test dhrystone blit_selftest blit_capture \
-           test_unaligned test_misalign test_exc test_mpu test_tlb test_hwcg test_leapc vga_off test_setjmp test_task_exit
+           test_unaligned test_misalign test_exc test_mpu test_tlb test_hwcg test_leapc test_icall vga_off test_setjmp test_task_exit
 
 .PHONY: all clean $(PROGRAMS)
 
@@ -326,6 +327,12 @@ test_leapc_cases.o: programs/test_leapc_cases.S
 
 test_leapc.elf: test_leapc.o test_leapc_cases.o $(LIBC_OBJS) $(RUNTIME_OBJS)
 	$(call link,$@,test_leapc_cases.o test_leapc.o)
+
+test_icall_cases.o: programs/test_icall_cases.S
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test_icall.elf: test_icall.o test_icall_cases.o $(LIBC_OBJS) $(RUNTIME_OBJS)
+	$(call link,$@,test_icall_cases.o test_icall.o)
 
 # test_misalign: CASE=0 (nothing traps) by default; the trapping cases are
 # built by tools/validate/misalign.sh with CASEFLAGS=-DCASE=<n>.
@@ -633,6 +640,7 @@ test_mpu:          test_mpu.elf
 test_tlb:          test_tlb.elf
 test_hwcg:         test_hwcg.elf
 test_leapc:        test_leapc.elf
+test_icall:        test_icall.elf
 vga_off:           vga_off.elf
 test_divshadow:    test_divshadow.elf
 perf_baseline:     perf_baseline.elf

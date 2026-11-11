@@ -35,6 +35,7 @@ test_flags	Halt
 test_fp	Halt
 test_hwcg	Halt
 test_leapc	Halt
+test_icall	Halt
 test_misalign	Halt
 test_printf	Halt
 test_rtos	InstructionCap

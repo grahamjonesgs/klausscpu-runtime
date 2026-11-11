@@ -121,7 +121,9 @@ the CPU's cache-miss penalty doubles (klaussCPU 3508f87: 29 -> 56 cycles,
 would fail the perf comparison; then `misalign.sh` on the board, then `board_suite.sh` builds the
 self-checking programs at -O2, the runtime's default level (among them `test_hwcg`, the compiler's code for
 the 3508f87 instructions: FBR W / imm32 at every predicate and at the range
-limit, CMPRVW.S, MULV.S; `test_leapc`: LEAPC.S around +-32 KiB; `test_diei`;
+limit, CMPRVW.S, MULV.S; `test_leapc`: LEAPC.S around +-32 KiB; `test_icall`: calls whose callee's
+I-cache line fill meets the return-address push, the klaussCPU c1874cf bug, which it
+catches on bc527b1/be78350; `test_diei`;
 `test_flags`), plus
 Dhrystone with `-fno-builtin` (`dhrystone_nobuiltin`, the like-for-like
 figure: since strcpy/strcmp became built-ins the default build folds

@@ -35,6 +35,7 @@ test_flags	486253	43552
 test_fp	232819	16792
 test_hwcg	3912088	517888
 test_leapc	29620	76952
+test_icall	3585045	633136
 test_misalign	33233	10552
 test_printf	105084	10544
 test_rtos	nohalt	13824
