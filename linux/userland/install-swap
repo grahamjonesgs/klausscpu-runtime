@@ -1,0 +1,40 @@
+#!/bin/sh
+# install-swap [MiB | off]: a swap file on the SD card, /linux/swap.img
+# (default 256 MiB), turned on now and by rcS at every boot; "off" turns
+# it off and deletes it.  Nothing else on the card is touched.
+#
+# The file sits on the card's FAT partition itself, not inside data.img:
+# the kernel maps its blocks once at swapon and then reads and writes the
+# card directly, so swapping never goes through the loop driver or vfat's
+# page cache (which would need memory to free memory).  Written in one go
+# on a card with free space it is one extent (dmesg: "extents:1").
+#
+# 128 MiB of RAM is little for git, compilers or big test runs; swap lets
+# them finish, slowly (the card writes at ~4 MB/s).  It also wears the card.
+set -e
+size=${1:-256}
+mkdir -p /mnt
+grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
+img=/mnt/linux/swap.img
+if grep -q "^$img " /proc/swaps; then
+	swapoff "$img"
+fi
+if [ "$size" = off ]; then
+	rm -f "$img"
+	sync
+	echo "install-swap: swap off, /linux/swap.img removed"
+	exit 0
+fi
+case $size in
+''|*[!0-9]*) echo "usage: install-swap [MiB | off]" >&2; exit 2 ;;
+esac
+[ "$size" -ge 16 ] || { echo "install-swap: at least 16 MiB" >&2; exit 2; }
+mkdir -p /mnt/linux
+rm -f "$img"
+echo "install-swap: writing a $size MiB /linux/swap.img"
+dd if=/dev/zero of="$img" bs=1M count="$size" conv=fsync 2>/dev/null
+# FAT has no permissions, so mkswap and swapon warn that the file is
+# 0755; their messages are shown only if they fail.
+mkswap "$img" >/tmp/install-swap.log 2>&1 || { cat /tmp/install-swap.log >&2; exit 1; }
+swapon "$img" >/tmp/install-swap.log 2>&1 || { cat /tmp/install-swap.log >&2; exit 1; }
+echo "install-swap: $(grep "^$img " /proc/swaps | awk '{ print $3 / 1024 " MiB of swap on" }') /linux/swap.img; rcS turns it on at boot"

@@ -99,6 +99,15 @@ if [ -e /sys/class/net/eth0 ]; then
 	httpd -h /www -p 80 && echo "rcS: httpd on port 80"
 fi
 
+# Swap: /linux/swap.img on the card (install-swap), when booted from it.
+if [ -f /mnt/linux/swap.img ]; then
+	if swapon /mnt/linux/swap.img 2>/tmp/swapon.log; then
+		echo "rcS: swap on /linux/swap.img"
+	else
+		echo "rcS: WARNING: swapon /linux/swap.img failed (see /tmp/swapon.log)"
+	fi
+fi
+
 if [ -r /data/etc/rc.local ]; then
 	echo "rcS: running /data/etc/rc.local"
 	sh /data/etc/rc.local </dev/null &

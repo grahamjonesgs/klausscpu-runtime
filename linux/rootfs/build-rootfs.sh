@@ -54,13 +54,13 @@ if [ -f "$WS/busybox-build/busybox.links" ]; then
   while IFS= read -r l; do
     [ -n "$l" ] || continue
     d=$ST$(dirname "$l"); mkdir -p "$d"
-    [ -e "$ST$l" ] || [ -L "$ST$l" ] || ln -s "$(realpath -m --relative-to="$(dirname "$l")" /bin/busybox)" "$ST$l"
+    [ -e "$ST$l" ] || [ -L "$ST$l" ] || ln -s "$(realpath -m -s --relative-to="$(dirname "$l")" /bin/busybox)" "$ST$l"
   done <"$WS/busybox-build/busybox.links"
 fi
 "${CC[@]}" "$RT/linux/userland/keystore/kskey.c" -o "$ST/usr/bin/kskey"
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
-cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$ST/usr/bin/"
+cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" "$ST/usr/bin/"
 if [ -x "$DB" ]; then
   cp "$DB" "$ST/usr/sbin/dropbearmulti"
   ln -s dropbearmulti "$ST/usr/sbin/dropbear"

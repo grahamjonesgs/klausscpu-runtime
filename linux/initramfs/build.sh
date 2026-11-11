@@ -97,11 +97,23 @@ file /bin/musltest $OUT/initramfs/musltest 0755 0 0
 file /usr/bin/kskey $OUT/initramfs/kskey 0755 0 0
 file /usr/bin/install-rootfs $RT/linux/userland/install-rootfs 0755 0 0
 file /usr/bin/install-data $RT/linux/userland/install-data 0755 0 0
+file /usr/bin/install-swap $RT/linux/userland/install-swap 0755 0 0
 dir /mnt 0755 0 0
 dir /run 0755 0 0
 slink /etc/resolv.conf ../run/resolv.conf 0777 0 0
 slink /etc/dropbear ../run/dropbear 0777 0 0
 LIST
+  # A link for every applet: ash runs commands from PATH (busybox has no
+  # standalone shell).  sh, init and mdev are above.
+  if [ -f "$WS/busybox-build/busybox.links" ]; then
+    while IFS= read -r l; do
+      case $l in ''|/bin/sh|/sbin/init|/sbin/mdev|/linuxrc) continue ;; esac
+      echo "slink $l $(realpath -m -s --relative-to="$(dirname "$l")" /bin/busybox) 0777 0 0"
+    done <"$WS/busybox-build/busybox.links" >>"$LIST"
+  else
+    echo "initramfs: no busybox.links: the busybox profile needs linux/userland/busybox.sh" >&2
+    exit 1
+  fi
   # Dropbear (linux/userland/dropbear.sh), if built: one multi-call binary.
   if [ -x "$DB" ]; then
     cat >>"$LIST" <<LIST

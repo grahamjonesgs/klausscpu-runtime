@@ -133,6 +133,7 @@ the `/linux/` folder:
 |---|---|---|
 | `rootfs.img` | the **system**: ext4, no journal, mounted **read-only** at `/` | `install-rootfs`, replaced whole |
 | `data.img` | the **data**: ext4 with a journal, mounted read-write at `/data` | `install-data`, once |
+| `swap.img` | optional **swap** (2026-11-11), turned on by rcS | `install-swap [MiB]` (default 256), `install-swap off` |
 | `rootfs.img.new`, `data.img.new` | an install in progress | renamed when complete |
 | `rootfs.img.next`, `data.img.next` | an install staged while the old image was in use; `sdinit` swaps it in at the next boot | `install-rootfs`; `install-data --force` |
 | `dropbear_ed25519_host_key` | the SSH host key, only when the QSPI key isn't found | `hostkey` |
@@ -397,13 +398,20 @@ machine's 128 MiB of RAM, so the mode now stops and says so; the check is
 SD card instead needs a FAT writer (mtools) on the PC. `LINUX_BUILDROOT_PREBUILT=1` reuses `br-output`, and
 `LINUX_BUILDROOT_EXPECT=N` requires at least N packages.
 
-**Applets win in the shell.** The busybox shell is built with
-`FEATURE_PREFER_APPLETS`, so typing `less` runs busybox's applet even
-though `/usr/bin/less` is installed. The test therefore calls each
-package by its real path. To make packages win interactively, drop the
-overlapping applets from `busybox.config`, or turn
-`FEATURE_PREFER_APPLETS` off; the system image has applet links, so it
-doesn't need the setting.
+**Installed programs win in the shell (2026-11-11).** busybox was built
+with `FEATURE_SH_STANDALONE` and `FEATURE_PREFER_APPLETS`, and in ash it
+is SH_STANDALONE that runs an applet before searching PATH: typing `less`,
+`ps` or `vi` ran busybox's even with the package installed. Both are off
+now, so ash finds commands on PATH. The initramfs, which had only
+`/bin/busybox` and three links, gets a link per applet from
+`busybox.links`, as the system image already had (its fallback shell and
+rcS need them). `buildroot-test.sh` still calls each package by its real
+path.
+- Turning the standalone shell off showed that the links in `/usr/bin` and
+  `/usr/sbin` had always been broken: their targets came from `realpath` on
+  the PC, where `/bin` is a symlink to `/usr/bin`, so `/usr/bin/wc` pointed
+  at `busybox` (itself) instead of `../../bin/busybox`. ash's standalone
+  mode had hidden it. Both images now use `realpath -s`.
 
 | Package | Version | Check |
 |---|---|---|
@@ -578,6 +586,24 @@ buffer-head layer.
 sizes at lmbench's default 11 repetitions took far longer than the
 600 s limit), and the limit now also kills lmbench's measuring child
 (`pkill -P`), which had kept running after its parent was killed.
+
+### Swap
+
+The kernel has `CONFIG_SWAP`. `install-swap [MiB]` writes
+`/linux/swap.img` (default 256 MiB, 75 s on the board) on the card's FAT
+partition, runs mkswap and swapon, and rcS turns it on at every boot;
+`install-swap off` removes it.
+- It is a swap *file on vfat*, not inside `data.img`: the kernel maps its
+  blocks once at swapon (vfat's bmap) and then reads and writes the card
+  directly, so swapping never goes through the loop driver or the page
+  cache. Written in one go it is one extent (`dmesg`: `extents:1`).
+- FAT has no permissions, so mkswap and swapon warn that the file is
+  0755; install-swap shows their output only when they fail.
+- Why: with 128 MiB of RAM, `git clone --depth 1` of libexpat was killed
+  by the OOM killer in `index-pack` (60+ MB). With swap it completes
+  (5 min 44 s, a 139 MB checkout into `/data`, peaking at ~32 MiB of
+  swap). `/tmp` is RAM (tmpfs): clone and build in `/data`.
+- Swapping is slow (the card writes at ~4 MB/s) and wears the card.
 
 ### Board checks: SD card speed
 
