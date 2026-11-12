@@ -2,9 +2,9 @@
 === KlaussCPU cache profiler ===
 
 Cache geometry:
-  ways        = 0
-  sets        = 0
-  total size  = 0 KB
+  ways        = 2
+  sets        = 1024
+  total size  = 64 KB
 
 
 Geometry check: FAIL

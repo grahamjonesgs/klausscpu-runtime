@@ -412,8 +412,11 @@ change in any of it is a regression like any other.
   AES engine: the result reads 0); `crypto_selftest` (`FAIL  TRNG never
   became ready`: the TRNG's STATUS reads 0, and the test stops there); `test_eth` (`[FAIL] scratch`: the
   Ethernet controller's scratch register reads 0, and the test stops
-  there); `test_cache` (`Geometry check: FAIL`: the cache-info register
-  reads 0).
+  there).
+  `test_cache` (`Geometry check: FAIL`) is no longer an emulator-only
+  failure: klausscc 8463af5 models the cache-info registers (2 ways x 1024
+  sets x 32 B = 64 KB, as the board reports), and the failure is now the
+  test's stale expectation of 2048 sets, as on the board.
 - Board: `test_cache` `Geometry check: FAIL` (the test expects 2048 sets,
   the cache reports 2 ways x 1024 sets, 64 KB: a stale expectation in the
   test); `test_big` `FAIL read hello.txt` (the SD card in the board has no

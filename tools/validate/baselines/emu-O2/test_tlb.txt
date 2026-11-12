@@ -1,0 +1,35 @@
+--- Captured UART output ---
+
+=== test_tlb: MMU stage 3 (TLB) ===
+CPU_FEATURES = 00c0200d
+T0 TLB entry count                                       PASS
+T1 TLBR reads back a wired entry                         PASS
+T1 TE on, still running                                  PASS
+T1 identity and kseg aliases agree                       PASS
+T2 the kseg hole faults ACCESS_LOAD                      PASS
+T3 load miss: TLB_MISS_LOAD, EADDR, TLB_HI auto-loaded   PASS
+T3 refilled and retried: the value through kseg          PASS
+T3 the next access hits                                  PASS
+T4 store: miss, then ACCESS_STORE on W = 0, then W set   PASS
+T4 the store landed                                      PASS
+T5 fetch miss: TLB_MISS_FETCH, refilled, the code ran    PASS
+T6 ASID 5: miss, refill, value                           PASS
+T6 ASID 6: the ASID-5 entry does not match (miss)        PASS
+T6 back to ASID 5: hits the old entry                    PASS
+T7 TLBP finds the VA0 entry                              PASS
+T7 TLBP miss: P set, index unchanged                     PASS
+T8 SC after TLBWI fails                                  PASS
+T8 SC without a TLB change succeeds                      PASS
+T9 user reads a mapped page (TLB hit)                    PASS
+T9 user miss: refilled, value                            PASS
+T9 user access to kseg: ACCESS_LOAD                      PASS
+T9 user call into a page without X: miss, then ACCESS_FETCH PASS
+  T11a kseg: 8 of 8 returned correctly, 0 to a decoy
+T11a kseg LEAVERET across a page behind a load miss      PASS
+  T11b TLB: 8 of 8 returned correctly, 0 TLB misses
+T11b TLB-mapped LEAVERET across a page: no TLB miss      PASS
+T10 TE off: physical again                               PASS
+T10 TLBINV clears every V bit                            PASS
+Results: 26 pass, 0 fail
+test_tlb PASSED
+--- end UART ---

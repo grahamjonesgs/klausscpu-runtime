@@ -1,0 +1,61 @@
+--- Captured UART output ---
+
+=== test_exc: MMU stage 1 ===
+CPU_FEATURES = 00c0200d
+F0 CPU_FEATURES: exceptions and LR/SC                PASS
+S1 STATUS: supervisor, interrupts enabled            PASS
+S1 STATUS.DI follows DI                              PASS
+S2 SCRATCH0/1, TP keep 64 bits                       PASS
+S2 EVEC reads back exc_vector                        PASS
+S2 USP round trip                                    PASS
+S3 CYCLE counts up                                   PASS
+S4 TRAP: cause, EADDR = word, PC = the TRAP          PASS
+S5 ILLEGAL: cause, EADDR = word, PC                  PASS
+S6 SYSCALL: frame PC = next instruction              PASS
+S6 SYSCALL returns the handler's r12                 PASS
+S7 misaligned 32-bit load: MISALIGNED_LOAD, EADDR    PASS
+S7 misaligned 32-bit store: MISALIGNED_STORE, nothing written PASS
+S8 LR.D not 8-aligned: MISALIGNED_LOAD               PASS
+S8 LR.W to MMIO in supervisor: ACCESS_LOAD           PASS
+S8 SC.W to MMIO in supervisor: ACCESS_STORE          PASS
+L1 LR.D + SC.D succeeds (0), stores                  PASS
+L1 a second SC without LR fails (1), no store        PASS
+L2 SC after an exception entry fails                 PASS
+L3 SC to another doubleword fails                    PASS
+L4 an ordinary store does not clear the reservation  PASS
+L5 LR.W zero-extends; SC.W stores 32 bits            PASS
+U1 user code runs and returns                        PASS
+U2 STATUS in user mode: UM = 1, DI = 0               PASS
+U3 TP read/write in user mode                        PASS
+U4 CYCLE readable in user mode                       PASS
+U5 SYSCALL from user mode                            PASS
+U5 the handler saw PM = 1, kernel stack, USP in the user stack PASS
+U6 DI in user mode: PRIVILEGED                       PASS
+U6 EI in user mode: PRIVILEGED                       PASS
+U6 HALT in user mode: PRIVILEGED                     PASS
+U6 MFSR ecause in user mode: PRIVILEGED              PASS
+U6 MFSR usp in user mode: PRIVILEGED                 PASS
+U6 MTSR evec in user mode: PRIVILEGED                PASS
+U7 MMIO load in user mode: ACCESS_LOAD               PASS
+U7 MMIO store in user mode: ACCESS_STORE             PASS
+U6 EVEC unchanged after the user MTSR                PASS
+U7 ACCESS_LOAD EADDR = the MMIO address              PASS
+U8 TRAP in user mode resumes after the handler       PASS
+U8 TRAP: cause, PC, PM = 1                           PASS
+U9 user SP is on the user stack                      PASS
+U10 PUSH via an MMIO SP: ACCESS_STORE, SP unchanged at the fault PASS
+U10 the retried PUSH pushed the right value          PASS
+U10 nothing reached the device                       PASS
+U11 timer interrupts are taken in user mode          PASS
+U11 interrupt frames have PM = 1, ISR ran on the kernel stack PASS
+  (timer ISR added 1604 during the user loop)
+U12 user atomics: CAS / exchange results             PASS
+U12 64-bit counter = user + ISR increments           PASS
+U12 32-bit counter                                   PASS
+U12 16-bit counter (sub-word LR/SC), neighbour intact PASS
+U12 8-bit counter (sub-word LR/SC), neighbours intact PASS
+U12 the ISR interrupted the user loop                PASS
+Z EVEC cleared by exc_disable                        PASS
+Results: 53 pass, 0 fail
+test_exc PASSED
+--- end UART ---

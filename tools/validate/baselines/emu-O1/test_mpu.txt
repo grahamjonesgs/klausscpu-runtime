@@ -1,0 +1,7 @@
+--- Captured UART output ---
+
+=== test_mpu: MMU stage 2 (MPU) ===
+CPU_FEATURES = 00c0200d
+SKIP: no MPU on this core
+test_mpu PASSED
+--- end UART ---
