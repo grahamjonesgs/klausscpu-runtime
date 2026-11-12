@@ -217,7 +217,11 @@ program to find out when cross-compiling).
   host): 398 pass, none fail, `abi.c` 200/200 at -O0 and -O2 (the closure
   stress and re-prepare cases are the real I-cache check: the emulator
   has no I-cache), `ctypes_smoke.py` 28/28, no misaligned accesses
-  emulated.
+  emulated. Again after the variadic fix (tlb32 166885e from QSPI,
+  `linux/userland/tests/libffi/board.sh` inside `tools/validate/board-check.sh`):
+  398/398, `abi.c` 301/301 at -O0 and -O2, `ctypes_smoke.py` 29/29
+  (`snprintf` with 5 ints and no argtypes works; with 6, 9 words, it does
+  not, as expected).
 - Reviewed adversarially (no blocker or major). Minor 1, fixed, up to 8
   argument words: a variadic function called through a non-variadic cif
   (ctypes without `argtypes`) with more than four argument words read its
