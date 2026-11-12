@@ -179,6 +179,30 @@ and OpenSSL's initialisation, not yet profiled. On the shared system
 (the default since 2026-11-11) a login takes 3.67 s: libcrypto.so's
 25 000 relocations per process (DYNLINK_PLAN "The default system").
 
+**Where an OpenSSH process's start-up goes (2026-11-12).** Measured with
+the emulator profiler (klausscc `KLAUSSCC_PROFILE`, `sshd -t` with an
+ECDSA P-256 key, the second run). It is 21.6M instructions, about 0.86 s
+on the board, and each login pays it three times (`sshd`, `sshd-session`,
+`sshd-auth`):
+
+| Share | What |
+|---|---|
+| 30% | OpenSSL 3 library start-up: providers, algorithm-name hash tables (`ossl_fnv1a_hash`, `OPENSSL_LH_*`, whose `%` costs 0.4M cycles of DIV), error strings, `_dopr` |
+| 15% | P-256 key validation (nistp256) |
+| 12% | musl's malloc/free |
+| 12% | OpenSSH's private-key shielding: `sha512_block_data_order` 6.4% and `chacha_encrypt_bytes` 5.9% |
+| 9% | the kernel |
+| 6% | the dynamic loader's relocations (`do_relocs`) |
+| the rest | libc string functions and sshd itself |
+
+No single change removes it:
+- Linking sshd statically saves the loader's part (0.66 s against 0.86 s
+  per `sshd -t`).
+- An Ed25519 host key would save the P-256 part but changes the
+  fingerprint.
+- The rest is OpenSSL's and OpenSSH's design.
+- Dropbear (1.5 s per login) stays the fast server.
+
 Host tests: `linux/userland/keystore/test_kskey.sh` (synthetic NVS images:
 newest-wins, torn write, sector rollover, wrap, deleted, bad CRC; plus an
 `ssh-keygen` fingerprint round trip).
