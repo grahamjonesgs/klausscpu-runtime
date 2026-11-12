@@ -723,8 +723,10 @@ For the klaussCPU session's TLB plan. Board: perf-hw a5d20f2, 100 MHz.
 Model: klausscc `KLAUSSCC_TLBSIM=1` (branch `tlbsim`), which simulates
 other TLB shapes beside the real one, windowed by perfstat. Its 16-entry
 round-robin case equals the kernel's `tlb_refills` in every window.
-Runner: `linux-ws/tlbsim/run.sh`; tables in `linux-ws/tlbsim/results.md`.
-Microbenchmarks: `~/.cache/tlbmeas` (`dchase`, `dchase2`, `ichase`).
+Tools in `linux/userland/tests/tlb/`: `model/run.sh` runs the workloads
+in the emulator under the model, and `model/analyze.py` prints the tables.
+`board.sh` runs the refill microbenchmarks (`dchase`, `dchase2`, `ichase`
+from `gen.py`) and the workloads (`wl.sh`) on the board.
 
 - **Refill cost:**
   - 110 cycles on the data side and 115-117 on the instruction side, with
@@ -771,8 +773,10 @@ Microbenchmarks: `~/.cache/tlbmeas` (`dchase`, `dchase2`, `ichase`).
 - **The cheapest step:** 32 entries, +470 LUTs per the klaussCPU session.
   It needs no kernel change: `tlbex.S` already masks the index with 31.
 - **Built: 32 entries** (Graham's choice, no walker; klaussCPU `tlb32`
-  a92ce08, `CPU_FEATURES` 0x01F0_200D). The emulator follows (klausscc
-  master 40ed372: 32 by default, `--tlb-entries 16` for older bitstreams).
+  a92ce08, `CPU_FEATURES` 0x01F0_200D; released 2026-11-12: klaussCPU
+  master 166885e, in the QSPI flash). The emulator follows (klausscc
+  master 40ed372: 32 by default, `--tlb-entries 16` for older bitstreams;
+  the model is klausscc 6e964f8).
   On the board, medians of 3:
 
   | Workload | Before (cycles) | After (cycles) | Change | Refills | Predicted change |
