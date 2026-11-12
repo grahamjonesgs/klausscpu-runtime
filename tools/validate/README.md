@@ -434,6 +434,8 @@ change in any of it is a regression like any other.
 | `g_invariance.sh` | -g vs -g0 `.text` of Csmith programs |
 | `oracle.sh`, `oracle_diff.sh` | output-byte snapshot and diff |
 | `selftest.sh <out> <emu-O1 run> [<board-O2 run>]` | fault injection for compare.sh, perf.py and the Csmith scripts |
+| `linux.sh <out> [mode] [emu\|board]` | build the Linux port and run it on the emulator or the board (modes in its header) |
+| `board-check.sh [--boot] [--quick] [out]` | the running board's Linux checked in one go after a bitstream, kernel or image change: kernel log, ping, httpd, SSH on 22 and 2222 with the keystore host key, scp round trip, `buildroot-test`, Python modules and ctypes, the dynlink and libffi board suites (`--quick` skips those two); `--boot` reloads the kernel over the UART first. Holds both board locks for the whole run; `BOARD_SSH`/`BOARD_SCP` for the login (default key-based) |
 | `zephyr/suite.sh` | Zephyr build, emulator and board runs; `zephyr/build.sh <app> <dir>` builds one app; `zephyr/sshrun.sh` drives an SSH session; `zephyr/vncgrab.py` grabs a VNC frame |
 | `zephyr/llext_sd.sh <out> [steps]` | rebuild, back up, upload and run the SD card's LLEXT extensions; `zephyr/llext_sd.py` lists, downloads and uploads card files over HTTP and drives `run`/`svc` over SSH |
 
