@@ -792,6 +792,52 @@ from `gen.py`) and the workloads (`wl.sh`) on the board.
   Python start-up and 7-10% of the loop (an upper bound): a later
   candidate.
 
+### Where Python's time goes after the 32-entry TLB (2026-11-12)
+
+Board: perfstat with exclusive stall attribution. Model: klausscc's
+windowed `KLAUSSCC_CACHESIM` plus `KLAUSSCC_PROFILE` (branch `cacheprof`):
+per-PC instructions, I-cache misses and divides, symbolized against the
+maps of the same run. The model is validated against the board's
+counters.
+
+| | `python3 -S -c pass` | the loop | sqlite3 |
+|---|---|---|---|
+| cycles per instruction | 4.65 | 3.37 | 3.32 |
+| fetch waits (`if_miss`) | 28% | 24% | 28% |
+| memory-port waits (`mem_wait`) | 26% | 16% | 13% |
+| `stall_muldiv` | 10% | 14.5% | 14% |
+| TLB refills | 17% | 8% | 0.1% |
+
+- **`stall_muldiv` is mostly not multiply or divide.** It is `ex_busy`,
+  which includes `ex_mpu_hold` (pipeline_core.sv): with translation on,
+  every load and store holds EX for one check cycle (two across a page).
+  The model's loads plus stores match the counter within 1-3%. Real DIV
+  and MUL are 1-5% of it, so translated memory accesses cost 10-14% of
+  all cycles.
+- **`ic_miss` overstates I-cache misses 2-5x.** It also counts about 2.5
+  cycles per refill of the 1-entry micro-ITLB (fitted, within 4% on all
+  three workloads). True misses are 51 / 38 / 71 per 1000 instructions,
+  and a fill costs 11-21 cycles (through the D-cache).
+- **I-cache shapes, cycles saved (python `-c pass` / the loop / sqlite):**
+
+  | Shape | Saved |
+  |---|---|
+  | 16K 2-way | 5.7 / 4.9 / 9.2% |
+  | 16K 4-way | 8.8 / 10.1 / 13.0% |
+  | 32K 2-way | 12.7 / 11.7 / 16.5% |
+  | 64K 2-way | 17.2 / 13.2 / 19.9% |
+
+  The loop's misses are conflicts.
+- **A 4-entry micro-ITLB:** 2-3%.
+- **Software:**
+  - libpython calls itself through its PLT (5.6M stub instructions in the
+    loop) and range-extension thunks; `-fno-semantic-interposition` would
+    remove most of that.
+  - sqlite's 64-bit multiply-overflow check is a 66-cycle DIVU (4.5% of
+    sqlite).
+- Sent to the klaussCPU session (the check cycle, the I-cache, the
+  micro-ITLB).
+
 ### Swap
 
 The kernel has `CONFIG_SWAP`. `install-swap [MiB]` writes
