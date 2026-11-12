@@ -77,6 +77,6 @@ t whetstone whetstone '"$P" 2000 | tail -1'
 t fio fio '"$P" --name=t --filename=/tmp/fio.dat --size=4M --rw=randrw --bs=4k --ioengine=psync --runtime=5 --verify=crc32c --do_verify=1 >fio.out 2>&1; grep -q "err= 0" fio.out && rm -f /tmp/fio.dat && "$P" --version'
 t git git 'rm -rf gt && mkdir gt && cd gt && "$P" init -q && echo hi >f && "$P" add f && "$P" -c user.name=t -c user.email=t@e commit -q -m first && [ "$("$P" log --format=%s)" = first ] && "$P" --version'
 t openssh ssh-keygen 'rm -f k k.pub && "$P" -q -t ed25519 -N "" -f k && grep -q "^ssh-ed25519 " k.pub && [ -x /usr/libexec/sftp-server ] && /usr/bin/ssh -V 2>&1'
-t util-linux lsblk '"$P" -n -o NAME | grep -q mmcblk0 && /bin/findmnt -n -o FSTYPE / | grep -q ext4 && "$P" -V'
+t util-linux lsblk '"$P" -n -o NAME | grep -q mmcblk0 && /bin/findmnt -n -o FSTYPE / | grep -qE "^(ext4|overlay)$" && "$P" -V'
 t procps-ng ps '"$P" -eo pid,comm | grep -q "^ *1 init" && /bin/free -m | grep -q "^Mem:" && /bin/vmstat 1 2 >/dev/null && /bin/top -bn1 | grep -q "^top - " && "$P" -V'
 echo "buildroot-test: $pass/$n passed"

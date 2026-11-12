@@ -18,10 +18,21 @@
  * Order: /test/rootfs.img when a test build put one in the initramfs, then
  * /mnt/sd/linux/rootfs.img on mmcblk0p1; data.img sits beside it.  After
  * the switch the card stays mounted at /mnt (the image files live on it).
+ *
+ * Overlay (an image with /rofs, and a data.img): / is then an overlayfs
+ * whose lower layer is the read-only image (also visible at /rofs) and
+ * whose upper layer is /data/overlay/upper, so the running system can be
+ * changed (linux/buildroot/push.sh) and the changes last.  A new system
+ * image (rootfs.img.next swapped in) or /data/overlay/reset moves the old
+ * changes to /data/overlay/upper.old first, so they never shadow a newer
+ * image.  /linux/overlay.off on the card or /data/overlay/off keeps the
+ * plain read-only root; so does any failure to set the overlay up.
  */
+#define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <linux/loop.h>
 #include <libgen.h>
 #include <stdio.h>
@@ -148,13 +159,13 @@ static int try_root(const char *image)
  * with the same directories.  Only for system images that have /data (the
  * layout with /root and /home linked into it).
  */
-static void mount_data(const char *sysimg)
+static int mount_data(const char *sysimg)
 {
 	char img[256], next[256], old[256], dir[256];
 	int staged = 0;
 
 	if (access("/newroot/data", F_OK))
-		return;
+		return 0;
 	snprintf(dir, sizeof(dir), "%s", sysimg);
 	snprintf(img, sizeof(img), "%s/data.img", dirname(dir));
 	snprintf(next, sizeof(next), "%s.next", img);
@@ -177,7 +188,7 @@ static void mount_data(const char *sysimg)
 	if (access(img, F_OK) == 0) {
 		if (loop_mount(img, "/newroot/data", 0) == 0) {
 			msg("data.img mounted read-write at /data");
-			return;
+			return 1;
 		}
 		if (staged && access(old, F_OK) == 0) {
 			snprintf(dir, sizeof(dir), "%s.bad", img);
@@ -188,7 +199,7 @@ static void mount_data(const char *sysimg)
 			msg("WARNING: the new data.img does not mount: kept as data.img.bad, the old one restored");
 			if (loop_mount(img, "/newroot/data", 0) == 0) {
 				msg("data.img mounted read-write at /data");
-				return;
+				return 1;
 			}
 		}
 		fprintf(stderr, "sdinit: WARNING: %s does not mount as ext4 (left as it is)\n", img);
@@ -201,12 +212,84 @@ static void mount_data(const char *sysimg)
 		mkdir("/newroot/data/home", 0755);
 		mkdir("/newroot/data/etc", 0755);
 	}
+	return 0;
+}
+
+static int rm_entry(const char *path, const struct stat *sb, int type, struct FTW *ftw)
+{
+	(void)sb;
+	(void)type;
+	(void)ftw;
+	remove(path);
+	return 0;
+}
+
+#define OVL "/newroot/data/overlay"
+
+/*
+ * Put a writable overlay over the read-only image now at /newroot: the
+ * image moves to /lower (then /newroot/rofs), the overlay takes /newroot,
+ * and /data (data.img, mounted at /newroot/data) moves out and back in on
+ * top of it.  Returns 1 with the overlay in place, 0 with /newroot as it
+ * was (the plain read-only root).
+ */
+static int overlay_root(int data_img, int new_image)
+{
+	if (!data_img || access("/newroot/rofs", F_OK))
+		return 0;	/* no data.img, or an image without the layout */
+	if (access("/mnt/sd/linux/overlay.off", F_OK) == 0 || access(OVL "/off", F_OK) == 0) {
+		msg("overlay off (/linux/overlay.off or /data/overlay/off): the root stays read-only");
+		return 0;
+	}
+	mkdir(OVL, 0755);
+	if (new_image || access(OVL "/reset", F_OK) == 0) {
+		if (access(OVL "/upper", F_OK) == 0) {
+			nftw(OVL "/upper.old", rm_entry, 16, FTW_DEPTH | FTW_PHYS);
+			if (rename(OVL "/upper", OVL "/upper.old") == 0)
+				msg(new_image ? "new system image: the overlay's old changes are in /data/overlay/upper.old"
+					      : "overlay reset: its changes are in /data/overlay/upper.old");
+		}
+		nftw(OVL "/work", rm_entry, 16, FTW_DEPTH | FTW_PHYS);
+		unlink(OVL "/reset");
+		sync();
+	}
+	mkdir(OVL "/upper", 0755);
+	mkdir(OVL "/work", 0755);
+	mkdir("/ovdata", 0755);
+	mkdir("/lower", 0755);
+	if (mount("/newroot/data", "/ovdata", NULL, MS_MOVE, NULL)) {
+		perror("sdinit: move /data");
+		return 0;
+	}
+	if (mount("/newroot", "/lower", NULL, MS_MOVE, NULL)) {
+		perror("sdinit: move the image");
+		mount("/ovdata", "/newroot/data", NULL, MS_MOVE, NULL);
+		return 0;
+	}
+	if (mount("overlay", "/newroot", "overlay", 0,
+		  "lowerdir=/lower,upperdir=/ovdata/overlay/upper,workdir=/ovdata/overlay/work")) {
+		perror("sdinit: overlay");
+		mount("/lower", "/newroot", NULL, MS_MOVE, NULL);
+		mount("/ovdata", "/newroot/data", NULL, MS_MOVE, NULL);
+		return 0;
+	}
+	if (mount("/ovdata", "/newroot/data", NULL, MS_MOVE, NULL) ||
+	    mount("/lower", "/newroot/rofs", NULL, MS_MOVE, NULL)) {
+		/* /data must be there; undo rather than boot without it. */
+		perror("sdinit: overlay layout");
+		umount2("/newroot", MNT_DETACH);
+		mount("/lower", "/newroot", NULL, MS_MOVE, NULL);
+		mount("/ovdata", "/newroot/data", NULL, MS_MOVE, NULL);
+		return 0;
+	}
+	msg("root: overlay (the image at /rofs, changes in /data/overlay/upper)");
+	return 1;
 }
 
 int main(void)
 {
 	const char *sysimg = "/test/rootfs.img";
-	int sd = 0;
+	int sd = 0, new_image = 0, ovl;
 
 	mkdir("/proc", 0755);
 	mkdir("/sys", 0755);
@@ -226,9 +309,10 @@ int main(void)
 			 * one (replacing an open file on FAT leaks its clusters). */
 			if (access("/mnt/sd/linux/rootfs.img.next", R_OK) == 0) {
 				unlink("/mnt/sd/linux/rootfs.img");
-				if (rename("/mnt/sd/linux/rootfs.img.next", "/mnt/sd/linux/rootfs.img") == 0)
+				if (rename("/mnt/sd/linux/rootfs.img.next", "/mnt/sd/linux/rootfs.img") == 0) {
 					msg("installed the staged /linux/rootfs.img.next");
-				else
+					new_image = 1;
+				} else
 					msg("cannot rename /linux/rootfs.img.next");
 				sync();
 			}
@@ -247,8 +331,9 @@ int main(void)
 
 	/* Switch: the card, /data and /dev move under the new root; proc and
 	 * sys are mounted again by its rcS. */
-	mount_data(sysimg);
-	msg("switching to the SD card's root file system (read-only)");
+	ovl = overlay_root(mount_data(sysimg), new_image);
+	msg(ovl ? "switching to the SD card's root file system (overlay)"
+		: "switching to the SD card's root file system (read-only)");
 	if (sd) {
 		mkdir("/newroot/mnt", 0755);
 		mount("/mnt/sd", "/newroot/mnt", NULL, MS_MOVE, NULL);

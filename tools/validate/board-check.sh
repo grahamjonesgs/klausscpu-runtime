@@ -14,7 +14,7 @@
 #   dynlink   linux/userland/tests/dynlink/board.sh (run its run.sh first)
 #   libffi    linux/userland/tests/libffi/board.sh (run its run.sh first)
 # --boot      first load the kernel over the UART (KERNEL, default
-#             linux-ws/build-perf/vmlinux) and wait for SSH: a fresh boot,
+#             linux-ws/build-board/vmlinux, else build-perf) and wait for SSH: a fresh boot,
 #             and the console is kept in OUTDIR/console.log
 # --quick     skip dynlink and libffi (about a minute instead of ten)
 # OUTDIR      default linux-ws/board-check/<date-time>
@@ -62,7 +62,9 @@ check() { local name=$1; shift; if "$@"; then pass "$name"; else fail "$name"; f
 rsh() { "${SSH[@]}" "$@"; }
 
 if [ $BOOT = 1 ]; then
-	K=${KERNEL:-$RT/linux-ws/build-perf/vmlinux}
+	# The board kernel: build-board (overlayfs, the overlay sdinit), else build-perf.
+	K=${KERNEL:-$RT/linux-ws/build-board/vmlinux}
+	[ -f "$K" ] || K=$RT/linux-ws/build-perf/vmlinux
 	KLAUSSCC=${KLAUSSCC:-$RT/../klausscc/target/release/klausscc}
 	echo "booting $K"
 	"$KLAUSSCC" -i "$K" -s -m </dev/null >"$OUT/console.log" 2>&1 &

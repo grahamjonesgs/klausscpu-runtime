@@ -1,0 +1,36 @@
+#!/bin/sh
+# overlay [status|files|reset|off|on]: the writable overlay over the
+# read-only system image (sdinit; the image is at /rofs, the changes in
+# /data/overlay/upper, where linux/buildroot/push.sh puts packages).
+#   status  whether / is the overlay, and how much it holds (default)
+#   files   the changed files (a "c 0,0" entry is a deletion)
+#   reset   at the next boot, move the changes to /data/overlay/upper.old
+#           (a new system image does that by itself)
+#   off/on  boot with the plain read-only root / with the overlay again
+U=/data/overlay/upper
+# busybox find has no "!": everything but directories, as /path.
+files() {
+	[ -d $U ] || return 0
+	find $U | while IFS= read -r f; do [ -d "$f" ] || echo "${f#$U}"; done | sort
+}
+case ${1:-status} in
+status)
+	if grep -q '^overlay / ' /proc/mounts; then
+		echo "root: overlay over the system image (/rofs); changes in $U: $(files | wc -l) files, $(du -sh $U | cut -f1)"
+	else
+		echo "root: the read-only system image (no overlay)"
+	fi
+	[ -f /data/overlay/reset ] && echo "reset at the next boot"
+	[ -f /data/overlay/off ] && echo "off from the next boot"
+	true ;;
+files)
+	files ;;
+reset)
+	touch /data/overlay/reset && sync && echo "overlay: at the next boot the changes move to /data/overlay/upper.old" ;;
+off)
+	touch /data/overlay/off && sync && echo "overlay: the next boot keeps the plain read-only root" ;;
+on)
+	rm -f /data/overlay/off /mnt/linux/overlay.off && sync && echo "overlay: on from the next boot" ;;
+*)
+	echo "usage: overlay [status|files|reset|off|on]" >&2; exit 2 ;;
+esac

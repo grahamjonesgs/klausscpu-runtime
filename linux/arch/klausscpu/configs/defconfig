@@ -72,3 +72,5 @@ CONFIG_MMC=y
 CONFIG_MMC_BLOCK=y
 # The VGA port as /dev/fb0 (KLAUSSCPU_FB).
 CONFIG_FB=y
+# The SD system's root: the image read-only under a writable overlay on /data (sdinit).
+CONFIG_OVERLAY_FS=y

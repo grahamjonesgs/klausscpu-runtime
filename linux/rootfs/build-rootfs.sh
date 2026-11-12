@@ -38,7 +38,9 @@ DB=$WS/dropbear-build/dropbearmulti
 [ -f "$WS/sysroot/lib/libc.a" ] || { echo "no musl sysroot: run linux/musl/build.sh" >&2; exit 1; }
 
 rm -rf "$ST"
-mkdir -p "$ST"/{bin,sbin,usr/bin,usr/sbin,usr/share/udhcpc,etc/init.d,var,www,proc,sys,dev,tmp,run,mnt,data}
+# rofs: where sdinit shows the image under the writable overlay (and the
+# sign that this image takes one).
+mkdir -p "$ST"/{bin,sbin,usr/bin,usr/sbin,usr/share/udhcpc,etc/init.d,var,www,proc,sys,dev,tmp,run,mnt,data,rofs}
 chmod 1777 "$ST/tmp"
 ln -s data/root "$ST/root"
 ln -s data/home "$ST/home"
@@ -79,6 +81,7 @@ fi
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
 cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" "$ST/usr/bin/"
 install -D -m 755 "$RT/linux/userland/adduser-ssh" "$ST/usr/sbin/adduser-ssh"
+install -D -m 755 "$RT/linux/userland/overlay" "$ST/usr/sbin/overlay"
 if [ -x "$DB" ]; then
   cp "$DB" "$ST/usr/sbin/dropbearmulti"
   ln -s dropbearmulti "$ST/usr/sbin/dropbear"

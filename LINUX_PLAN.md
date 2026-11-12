@@ -281,6 +281,65 @@ ssh-keyscan -t ecdsa 192.168.68.59 2>/dev/null | ssh-keygen -lf -
 `ssh root@192.168.68.59` then logs in without a host-key warning, because
 `known_hosts` already holds Zephyr's key.
 
+### Faster updates: the overlay root and push.sh (2026-11-13)
+
+A new program used to mean three slow steps:
+1. Rebuild Buildroot's output and the system image.
+2. Write all 256 MiB to the card with `install-rootfs`: 391 s measured.
+3. Reload the kernel over the UART and reboot: about 6 min with the quick
+   check.
+
+Now the root can be changed in place.
+
+- **The overlay root.** `sdinit` mounts the image read-only at `/rofs`
+  and puts an overlayfs over it as `/`, with the writable layer in
+  `/data/overlay/upper` (data.img). Writes to `/` last across reboots.
+  - **When:** an image that has `/rofs` and a data.img.
+  - **Kernel:** needs `CONFIG_OVERLAY_FS` (in the defconfig; the board
+    kernel `linux-ws/build-board` is build-perf's config plus overlayfs).
+  - **New images start clean:** when sdinit swaps in a staged
+    `rootfs.img.next`, the old changes move to `/data/overlay/upper.old`,
+    so they never shadow a newer image.
+  - **`overlay` on the board:** `status`, `files`, `reset` (move the
+    changes to upper.old at the next boot), `off`/`on`.
+  - **Recovery:** `/linux/overlay.off` on the card, or any failure to
+    mount the overlay, gives the plain read-only root as before.
+  - **`install-rootfs`** knows the overlay root as "the image in use" and
+    stages the new image as before.
+- **`linux/buildroot/push.sh [-n] [-p] PKG...`** adds or updates
+  Buildroot packages on the running board:
+  - it switches the package on in br-output-dyn's .config if needed, and
+    puts the .config back if the build fails;
+  - it builds the package, then takes the files it and its dependencies
+    installed (`build/<pkg>/.files-list.txt`), filtered as build-rootfs.sh
+    merges them;
+  - it leaves out files identical to the image's (`linux-ws/rootfs-staging`)
+    and applies the packages' permission entries (setuid);
+  - it streams the rest with tar (busybox tar, added for this) into `/`;
+  - `-n` lists, `-p` also adds the package to klausscpu_defconfig for the
+    next image.
+- **Our own files** (scripts, tests) are just copied: `scp FILE
+  root@board:/usr/sbin/` lands in the overlay.
+- **Measured on the board:**
+
+  | Step | Time |
+  |---|---|
+  | `push.sh pv` | 26 s |
+  | `push.sh sslh` (with PCRE2, a library the image lacks; 9 files) | 32 s |
+  | a whole image | about 13 min (391 s to write it, then a reboot) |
+
+  A push needs no reboot; most of its time is Buildroot's `make`.
+  Survived: a reboot, `overlay reset`, and a new image moving the changes
+  aside.
+- **Caveats:**
+  - Buildroot never removes a deselected package's files from
+    br-output-dyn/target, so a package tried and dropped stays in the next
+    image unless it is cleaned out (`make PKG-dirclean` plus its files).
+  - Meson-built packages (glib2 and everything needing it, e.g. `mc`)
+    don't configure yet: meson's cross-compile size checks all fail with
+    the toolchain wrapper ("Compiler provides no native 16-bit integer
+    type").
+
 ### The SD card: system image and data image
 
 The card keeps its single FAT partition and its files. Linux uses only

@@ -33,7 +33,9 @@ limit() { # <seconds> <command...>: run it, killed after that long
 }
 if [ "${1:-}" = quick ]; then
 	N="-N 1 -W 0"; CM="0x0 0x0 0x66 20"; MEM=64k; MEMRD=1; CTX="2 4"; MEMRDN=$N
-	TLBM="-M 1M"; TLBA=100000; T=900
+	# -M 4M: the TLB holds 32 x 64 KiB pages (2 MiB) since klaussCPU tlb32;
+	# within 1 MiB lmbench's tlb finds no edge and prints nothing.
+	TLBM="-M 4M"; TLBA=100000; T=900
 else
 	N=""; CM=""; MEM=8m; MEMRD=32; CTX="2 4 8 16"; TLBM="-c -M 8M"; TLBA=2000000; T=600
 	# lat_mem_rd's ~110 sizes at the default 11 repetitions take far

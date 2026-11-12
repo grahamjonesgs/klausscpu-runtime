@@ -60,8 +60,9 @@ if [ -n "$want" ]; then
 fi
 # The new image's data reaches the card before its name does.
 sync
-if grep -q '^/dev/loop[0-9]* / ' /proc/mounts; then
-	# Running from the card's image: don't replace a file that is in use
+if grep -qE '^(/dev/loop[0-9]* /|overlay /|/dev/loop[0-9]* /rofs) ' /proc/mounts; then
+	# Running from the card's image (directly, or under sdinit's overlay):
+	# don't replace a file that is in use
 	# (on FAT that leaks its clusters).  sdinit swaps it in at the next boot.
 	rm -f /mnt/linux/rootfs.img.next
 	mv /mnt/linux/rootfs.img.new /mnt/linux/rootfs.img.next
