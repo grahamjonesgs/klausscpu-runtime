@@ -54,12 +54,24 @@ def t_snprintf():
     want = b'-42|str|2.500|-7|2147483648|-1099511627776|Z'
     check('snprintf-variadic', buf.value == want and n == len(want), (n, buf.value))
     # Without argtypes ctypes makes a non-variadic call; with every
-    # argument in R0-R3 libffi's 32-byte call area makes it work anyway.
+    # argument in R0-R3 libffi's call area of at least 32 bytes (the
+    # callee's home area) makes it work anyway.
     g = CDLL(None).snprintf
     g.restype = c_int
     buf2 = create_string_buffer(32)
     n = g(buf2, c_size_t(32), b'<%d>', c_int(1234))
     check('snprintf-no-argtypes', buf2.value == b'<1234>' and n == 6, (n, buf2.value))
+    # With stack arguments: libffi stores the 1-4 stack words of a
+    # non-variadic call both where a non-variadic callee reads them and,
+    # after the home area, where a variadic one does.  buf, n, fmt and 5
+    # ints are 8 words, the most that works this way.
+    buf3 = create_string_buffer(64)
+    n = g(buf3, c_size_t(64), b'%d %d %d %d %d', 1, -2, 3, -4, 5)
+    check('snprintf-no-argtypes-5', buf3.value == b'1 -2 3 -4 5' and n == 11, (n, buf3.value))
+    # 6 ints are 9 words: the two layouts overlap, and only a variadic
+    # cif (argtypes for the fixed arguments, as above) gets it right.
+    n = g(buf3, c_size_t(64), b'%d %d %d %d %d %d', 1, 2, 3, 4, 5, 6)
+    print(f'INFO snprintf-no-argtypes-6 (9 words, not supported): {buf3.value!r}')
 
 
 def t_math():

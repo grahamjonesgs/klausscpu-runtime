@@ -6,7 +6,9 @@
  * in the low half, aggregate bytes in memory order), two-word arguments
  * split between R3 and the first stack slot, aggregates over 16 bytes by
  * reference to a copy, sret in R0, the 32-byte home area of variadic
- * calls, the R12/R11 results, and closures called from compiled code.
+ * calls, variadic callees through a non-variadic cif (the stack words
+ * copied after the home area too), the R12/R11 results, and closures
+ * called from compiled code.
  *
  * kl_capture (abi_helpers.S) records R0-R3 and the stack slots; each
  * case calls it once through a C function pointer of the case's
@@ -412,6 +414,52 @@ __attribute__((noinline)) double vsum(int n, ...)
 	va_end(ap);
 	return s;
 }
+/* Variadic callees that check every unnamed argument, for the calls
+   through a non-variadic cif: vints(n, ...) takes n ints, vintsd(n, ...)
+   n ints and then a double.  They return a mask of the wrong arguments
+   (bit i: argument i after n), 0 if all are right. */
+static int vint_val(int i)
+{
+	return -100003 * (i + 1) - i;
+}
+static double vdbl_val(int n)
+{
+	return 0.375 + n;
+}
+__attribute__((noinline)) long vints(int n, ...)
+{
+	va_list ap;
+	long bad = 0;
+	va_start(ap, n);
+	for (int i = 0; i < n; i++)
+		if (va_arg(ap, int) != vint_val(i))
+			bad |= 1L << i;
+	va_end(ap);
+	return bad;
+}
+__attribute__((noinline)) long vintsd(int n, ...)
+{
+	va_list ap;
+	long bad = 0;
+	va_start(ap, n);
+	for (int i = 0; i < n; i++)
+		if (va_arg(ap, int) != vint_val(i))
+			bad |= 1L << i;
+	if (va_arg(ap, double) != vdbl_val(n))
+		bad |= 1L << n;
+	va_end(ap);
+	return bad;
+}
+/* Non-variadic callees with 4 and 6 stack words. */
+__attribute__((noinline)) long nv8(long a, long b, long c, long d, long e, long f, long g, long h)
+{
+	return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8;
+}
+__attribute__((noinline)) long nv10(long a, long b, long c, long d, long e, long f, long g, long h,
+				    long i, long j)
+{
+	return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8 + i * 9 + j * 10;
+}
 
 /* Python's configure test for complex support in libffi. */
 __attribute__((noinline)) int z_is_expected(double _Complex z)
@@ -492,6 +540,86 @@ static void call_cases(void)
 	got = 0;
 	ffi_call(&cif, FFI_FN(vsum), &got, av);
 	CHECK("vsum1-nonvar", got == want);
+
+	/* A variadic callee through a non-variadic cif with 1-4 stack words
+	   (5-8 argument words): libffi puts the stack arguments at entry
+	   SP + 8 for a non-variadic callee and again at SP + 40, after the
+	   home area, for a variadic one. */
+	{
+		int vi[8], vn;
+		double vdd;
+		long bad;
+		for (int i = 0; i < 8; i++)
+			vi[i] = vint_val(i);
+		CHECKX("vints-clang", vints(7, vi[0], vi[1], vi[2], vi[3], vi[4], vi[5], vi[6]), 0);
+		CHECKX("vintsd-clang", vintsd(6, vi[0], vi[1], vi[2], vi[3], vi[4], vi[5], vdbl_val(6)), 0);
+		for (int words = 5; words <= 8; words++) {
+			char name[32];
+			/* vints(n, n ints): 1 + n words */
+			vn = words - 1;
+			at[0] = &ffi_type_sint; av[0] = &vn;
+			for (int i = 0; i < vn; i++) {
+				at[1 + i] = &ffi_type_sint;
+				av[1 + i] = &vi[i];
+			}
+			snprintf(name, sizeof name, "vints-nonvar-%dw", words);
+			CHECK(name, ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 1 + vn, &ffi_type_slong, at) == FFI_OK);
+			bad = -1;
+			ffi_call(&cif, FFI_FN(vints), &bad, av);
+			CHECKX(name, bad, 0);
+			/* vintsd(n, n ints, double): 2 + n words */
+			vn = words - 2;
+			vdd = vdbl_val(vn);
+			at[1 + vn] = &ffi_type_double; av[1 + vn] = &vdd;
+			snprintf(name, sizeof name, "vintsd-nonvar-%dw", words);
+			CHECK(name, ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 2 + vn, &ffi_type_slong, at) == FFI_OK);
+			bad = -1;
+			ffi_call(&cif, FFI_FN(vintsd), &bad, av);
+			CHECKX(name, bad, 0);
+			/* and through the variadic cif */
+			snprintf(name, sizeof name, "vintsd-var-%dw", words);
+			CHECK(name, ffi_prep_cif_var(&cif, FFI_DEFAULT_ABI, 1, 2 + vn, &ffi_type_slong, at) == FFI_OK);
+			bad = -1;
+			ffi_call(&cif, FFI_FN(vintsd), &bad, av);
+			CHECKX(name, bad, 0);
+		}
+	}
+	/* Ordinary non-variadic calls with 1-6 stack words: kl_capture sees
+	   the stack arguments at entry SP + 8 as clang places them, and with
+	   at most 4 of them the copy at SP + 40; compiled callees with 4 and
+	   6 stack words. */
+	{
+		long v[10];
+		for (int i = 0; i < 10; i++) {
+			v[i] = 0x1000 * (i + 1) + i;
+			at[i] = &ffi_type_slong;
+			av[i] = &v[i];
+		}
+		clear_cap();
+		((void (*)(long, long, long, long, long, long, long, long, long, long))kl_capture)(
+			v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]);
+		for (int i = 0; i < 10; i++)
+			CHECKX("nonvar10-clang", kl_cap[i], v[i]);
+		for (int n = 5; n <= 10; n++) {
+			char name[32];
+			int k = n - 4;
+			snprintf(name, sizeof name, "nonvar-%dw", n);
+			CHECK(name, ffi_prep_cif(&cif, FFI_DEFAULT_ABI, n, &ffi_type_void, at) == FFI_OK);
+			ffi_capture(&cif, NULL, av);
+			for (int i = 0; i < n; i++)
+				CHECKX(name, kl_cap[i], v[i]);
+			if (k <= 4)
+				for (int i = 0; i < k; i++)
+					CHECKX(name, kl_cap[8 + i], v[4 + i]);
+		}
+		long lr2 = 0;
+		CHECK("nv8", ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 8, &ffi_type_slong, at) == FFI_OK);
+		ffi_call(&cif, FFI_FN(nv8), &lr2, av);
+		CHECKX("nv8", lr2, nv8(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]));
+		CHECK("nv10", ffi_prep_cif(&cif, FFI_DEFAULT_ABI, 10, &ffi_type_slong, at) == FFI_OK);
+		ffi_call(&cif, FFI_FN(nv10), &lr2, av);
+		CHECKX("nv10", lr2, nv10(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]));
+	}
 
 	double _Complex z = 1.25 - 0.5 * I;
 	at[0] = &ffi_type_complex_double;

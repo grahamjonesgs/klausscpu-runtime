@@ -186,13 +186,20 @@ program to find out when cross-compiling).
   §11.4 says the store snoop compares physical tags, so the docs disagree on
   aliases); libffi only does that if W+X mappings are refused, which they
   are not here.
-- A non-variadic call gets at least 32 bytes of stack area, as clang's
-  calls without a prototype do: a variadic C function called through a
-  non-variadic cif (ctypes without `argtypes`) works when its arguments
-  fit R0-R3, instead of overwriting `ffi_call_SYSV`'s frame.
+- A variadic C function called through a non-variadic cif (ctypes
+  without `argtypes`, or with only the fixed arguments) works with up to
+  8 argument words: a non-variadic call with 0-4 stack words gets a
+  stack area of 32 bytes plus its stack words, which are stored at entry
+  SP+8 (where a non-variadic callee reads them) and again at SP+40, after
+  the 32-byte home area (where a variadic callee reads its unnamed
+  ones). The copies don't overlap, a non-variadic callee owns only the
+  first, and a variadic callee's home-area stores stay inside the area.
+  With every argument in R0-R3 this is the 32 bytes clang reserves for a
+  call without a prototype. With 5 or more stack words the two layouts
+  overlap and only the non-variadic one is stored.
 - `linux/userland/tests/libffi/run.sh` (emulator): libffi's testsuite
   (libffi.call, libffi.closures, libffi.complex at -O0 and -O2, the
-  libffi.bhaible programs) and `abi.c` (200 checks of libffi's argument
+  libffi.bhaible programs) and `abi.c` (301 checks of libffi's argument
   and result words against clang's, through an assembly function that
   records the registers and stack slots, and closures called by compiled
   code): 398 programs pass, none fail; unsupported: the 2 C++ tests (no
@@ -201,22 +208,28 @@ program to find out when cross-compiling).
   fail; three of them (32-bit and 8-bit extension of arguments and
   closure results) only `abi.c` noticed. Then Python 3.14 in the
   initramfs runs `ctypes_smoke.py`: strlen, snprintf (variadic, with and
-  without argtypes), pow/powf/powl/ldexp/fmaf, div/ldiv (struct results
+  without argtypes, 1 and 5 ints), pow/powf/powl/ldexp/fmaf, div/ldiv (struct results
   in R12, R12/R11), inet_ntoa (struct argument), qsort with a CFUNCTYPE
   callback, callbacks with a 24-byte struct, pointers, errno and
-  `c_double_complex`: 28 checks pass.
+  `c_double_complex`: 29 checks pass.
 - On the board (perf-hw a5d20f2, the installed shared system; the same
   test programs, run by ffirun from /tmp and checked by check.py on the
   host): 398 pass, none fail, `abi.c` 200/200 at -O0 and -O2 (the closure
   stress and re-prepare cases are the real I-cache check: the emulator
   has no I-cache), `ctypes_smoke.py` 28/28, no misaligned accesses
   emulated.
-- Reviewed adversarially (no blocker or major). Left as is: a variadic
-  function called through a non-variadic cif (ctypes without `argtypes`)
-  with more than four argument words reads its unnamed arguments from
-  SP+40 while libffi put them at SP+8; Apple arm64 has the same rule
-  (declare `argtypes`). Copying 1-4 stack words to both places would make
-  `printf` with up to 8 words work.
+- Reviewed adversarially (no blocker or major). Minor 1, fixed, up to 8
+  argument words: a variadic function called through a non-variadic cif
+  (ctypes without `argtypes`) with more than four argument words read its
+  unnamed stack arguments from SP+40 while libffi put them at SP+8
+  (`snprintf` with 6 ints gave `'1 6 1 2141911992 ...'`). libffi now
+  stores 1-4 stack words in both places (above); `abi.c` checks
+  variadic callees through non-variadic cifs with 5-8 words (ints, a
+  double), `ctypes_smoke.py` `snprintf` with 5 ints and no argtypes,
+  and with the copy removed 18 `abi.c` checks and that one fail. Beyond
+  8 words (`snprintf` with 6 ints is 9) a variadic function still needs
+  `argtypes` for its fixed arguments, as on Apple arm64. Emulator: 398
+  pass, `abi.c` 301/301, ctypes 29/29; the board re-check is pending.
 
 **The default system (2026-11-11).** `linux/buildroot/build.sh`,
 `toolchain.sh`, `build-rootfs.sh` and `tools/validate/linux.sh` default
