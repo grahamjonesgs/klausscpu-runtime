@@ -14,7 +14,9 @@
 #   - -msoft-float is dropped (KlaussCPU code is always soft-float; clang
 #     only warns, which -Werror packages would trip on);
 #   - a run-together -zKEYWORD (Buildroot's -ztext for musl with shared
-#     libraries) becomes -Wl,-z,KEYWORD, which clang's driver takes;
+#     libraries) becomes -Wl,-z,KEYWORD, which clang's driver takes; linker
+#     options (-z, -Wl,) are dropped when only compiling (-c/-S/-E), as gcc
+#     ignores them there and clang's warning broke meson's probes;
 #   - for --sysroot=X (Buildroot's staging) they also search X/usr/include
 #     and X/usr/lib, where packages install, besides clang's X/include and
 #     X/lib, after the package's own directories, as gcc does;
@@ -83,12 +85,23 @@ mode=\${0##*-}
 sysroot="$OUT/sysroot"
 args=()
 next_sysroot=0
+# Link-only options (-z, -Wl, -pie, -static, -shared, -rdynamic, -L, -l)
+# only when linking: gcc ignores them with -c/-S/-E, clang warns, and
+# meson's probes add -Werror=unused-command-line-argument (its sizeof
+# checks all failed on Buildroot's -z relro/-z now and -pie).  When
+# linking they keep their place (-Wl,--whole-archive ... and the like).
+compile_only=0
+for a in "\$@"; do
+	case "\$a" in -c|-S|-E) compile_only=1 ;; esac
+done
 for a in "\$@"; do
 	if [ \$next_sysroot = 1 ]; then sysroot=\$a; next_sysroot=0; continue; fi
 	case "\$a" in
 	-dumpversion|-dumpfullversion) echo 14.2.0; exit 0 ;;
 	-msoft-float) ;;
-	-z?*) args+=("-Wl,-z,\${a#-z}") ;;
+	-z?*) [ \$compile_only = 1 ] || args+=("-Wl,-z,\${a#-z}") ;;
+	-Wl,*|-pie|-no-pie|-static|-shared|-rdynamic|-L*|-l*)
+		[ \$compile_only = 1 ] || args+=("\$a") ;;
 	--sysroot=*) sysroot=\${a#--sysroot=} ;;
 	--sysroot) next_sysroot=1 ;;
 	*) args+=("\$a") ;;
@@ -104,7 +117,7 @@ pre=(--target=klausscpu-unknown-linux-musl --sysroot="\$sysroot")
 $LINKMODE
 exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" \\
 	"\${link[@]}" "\${pic[@]}" -ffunction-sections -fdata-sections -Wno-unused-command-line-argument \\
-	"\${args[@]}" -L"\$sysroot/usr/lib"
+	"\${args[@]}" \$([ \$compile_only = 1 ] || echo "-L\$sysroot/usr/lib")
 EOF
 chmod +x "$OUT/bin/$P-gcc"
 for m in cc cpp as; do ln -s "$P-gcc" "$OUT/bin/$P-$m"; done

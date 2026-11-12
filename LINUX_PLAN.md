@@ -335,10 +335,18 @@ Now the root can be changed in place.
   - Buildroot never removes a deselected package's files from
     br-output-dyn/target, so a package tried and dropped stays in the next
     image unless it is cleaned out (`make PKG-dirclean` plus its files).
-  - Meson-built packages (glib2 and everything needing it, e.g. `mc`)
-    don't configure yet: meson's cross-compile size checks all fail with
-    the toolchain wrapper ("Compiler provides no native 16-bit integer
-    type").
+  - Meson-built packages: their configure failed because meson's probes
+    add `-Werror=unused-command-line-argument` and the wrapper passed
+    link-only options (Buildroot's `-z relro`/`-z now`, `-pie`, its own
+    `-L`) to compile-only runs. The wrapper now drops them with
+    -c/-S/-E, as gcc ignores them. zlib, htop and sqlite rebuilt
+    byte-identical after strip, and meson's `sizeof(int)` is 4 again.
+    glib2 (and so `mc`) then configures but stops in `gatomic.c`:
+    clang's KlaussCPU target says atomics are lock-free
+    (`__CLANG_ATOMIC_*_LOCK_FREE 2`) but doesn't define gcc's
+    `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1/2/4/8`, which each clang target
+    defines itself. That is a compiler question (klausscpu-llvm), not
+    patched here.
 
 ### The SD card: system image and data image
 
