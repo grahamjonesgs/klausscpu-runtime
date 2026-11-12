@@ -36,6 +36,25 @@ if [ -L /root ] && grep -q '^tmpfs /data ' /proc/mounts; then
 	echo "rcS: WARNING: /root, /home and /data/etc are lost at reboot"
 fi
 
+# Users (the SD system image): /etc/passwd, group, shadow and gshadow link
+# to /data/etc, so adduser, deluser, addgroup and passwd work and last.
+# Seed them from the image's /etc/users.default, and keep the image's
+# system accounts in them (a newer image may add one).
+if [ -L /etc/passwd ] && [ -d /etc/users.default ]; then
+	mkdir -p /data/etc /data/home
+	for f in passwd group shadow gshadow; do
+		d=/data/etc/$f
+		if [ ! -e $d ]; then
+			cp /etc/users.default/$f $d && echo "rcS: users: /data/etc/$f from the image's defaults"
+		fi
+		while IFS= read -r line; do
+			grep -q "^${line%%:*}:" $d || echo "$line" >>$d
+		done </etc/users.default/$f
+	done
+	chmod 644 /data/etc/passwd /data/etc/group
+	chmod 600 /data/etc/shadow /data/etc/gshadow
+fi
+
 HOSTNAME=klausscpu
 IP=
 NETMASK=255.255.255.0
@@ -96,18 +115,22 @@ if [ -e /sys/class/net/eth0 ]; then
 	# SSH: OpenSSH's sshd on port 22 when the system has it (the SD root),
 	# with Dropbear beside it on 2222 as a fallback; the initramfs alone
 	# has only Dropbear, on 22.  sshd must be started by its full path.
-	# A system image with root's keys (/etc/ssh/authorized_keys, from
+	# A system image with root's keys (/etc/ssh/authorized_keys.d/root, from
 	# build-rootfs.sh) takes key logins only: sshd's config says so, Dropbear
 	# gets -s and reads the keys from /root/.ssh (on /data).  The initramfs
 	# alone keeps password logins, for recovery.
+	# Dropbear reads only ~/.ssh/authorized_keys: the image's root keys
+	# are added to /root/.ssh/authorized_keys (keys added there by hand
+	# stay).  Other users keep their keys in ~/.ssh/authorized_keys.
 	DB_OPT=
-	if [ -s /etc/ssh/authorized_keys ]; then
+	AKR=/etc/ssh/authorized_keys.d/root
+	if [ -s $AKR ]; then
 		DB_OPT=-s
-		if ! cmp -s /etc/ssh/authorized_keys /root/.ssh/authorized_keys 2>/dev/null; then
-			mkdir -p /root/.ssh && chmod 700 /root/.ssh &&
-				cp /etc/ssh/authorized_keys /root/.ssh/authorized_keys &&
-				chmod 600 /root/.ssh/authorized_keys
-		fi
+		mkdir -p /root/.ssh && chmod 700 /root/.ssh &&
+			touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys &&
+			while IFS= read -r k; do
+				grep -qxF "$k" /root/.ssh/authorized_keys || echo "$k" >>/root/.ssh/authorized_keys
+			done <$AKR
 		echo "rcS: ssh: key logins only"
 	fi
 	if [ -x /usr/sbin/sshd ] && /usr/sbin/sshd -f /etc/ssh/sshd_config $(/etc/init.d/sshkeys); then

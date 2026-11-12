@@ -1,0 +1,34 @@
+#!/bin/sh
+# adduser-ssh NAME 'PUBLIC KEY' [-G GROUP]: a user who logs in over SSH
+# with that key (the system image takes key logins only).
+#   - adduser -D makes the user and its /home (on /data), but leaves the
+#     password field "!", which OpenSSH treats as a locked account and
+#     refuses even for keys: it becomes "*" (no password, not locked).
+#   - The key goes to ~/.ssh/authorized_keys with the modes sshd insists on.
+#   - sync: the user files and the home are on /data (the SD card).
+# A second run for an existing user adds the key.  Remove a user with
+# "deluser --remove-home NAME".  -G GROUP also puts the user in GROUP.
+set -e
+[ $# -ge 2 ] || { echo "usage: adduser-ssh NAME 'ssh-ed25519 AAAA... comment' [-G GROUP]" >&2; exit 2; }
+name=$1 key=$2
+shift 2
+grp=
+[ "${1:-}" = -G ] && grp=$2
+case $key in
+ssh-ed25519\ *|ecdsa-sha2-nistp256\ *|ssh-rsa\ *) ;;
+*) echo "adduser-ssh: not an OpenSSH public key: $key" >&2; exit 2 ;;
+esac
+if ! grep -q "^$name:" /etc/passwd; then
+	adduser -D -s /bin/sh "$name"
+	echo "$name:*" | chpasswd -e
+fi
+[ -n "$grp" ] && addgroup "$name" "$grp"
+home=$(grep "^$name:" /etc/passwd | cut -d: -f6)
+mkdir -p "$home/.ssh"
+touch "$home/.ssh/authorized_keys"
+grep -qxF "$key" "$home/.ssh/authorized_keys" || echo "$key" >>"$home/.ssh/authorized_keys"
+chown -R "$name:$name" "$home/.ssh"
+chmod 700 "$home/.ssh"
+chmod 600 "$home/.ssh/authorized_keys"
+sync
+echo "adduser-ssh: $name ($(id "$name")), $(wc -l <"$home/.ssh/authorized_keys") key(s) in $home/.ssh/authorized_keys"

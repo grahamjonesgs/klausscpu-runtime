@@ -139,6 +139,37 @@ keys, the system image takes key logins only on both ports:
   ("Permission denied (publickey)"), both keys log in on both ports, and
   board-check.sh passes 16/16.
 
+**Users (2026-11-12).** Users are managed on the board and last across
+reboots and image updates:
+- **Where they live:** the image's `/etc/passwd`, `group`, `shadow` and
+  `gshadow` are links to `/data/etc`. rcS seeds those from the image's
+  `/etc/users.default` at boot and adds any system account an image
+  brings that is missing. busybox's update code follows the links, so it
+  writes in /data/etc.
+- **Tools:** busybox has `adduser`, `deluser`, `addgroup`, `delgroup` and
+  `chpasswd`. The ID ranges are set explicitly: allnoconfig leaves them at
+  0.
+- **SSH keys are per user:** sshd reads `~/.ssh/authorized_keys` and
+  `/etc/ssh/authorized_keys.d/%u` (root's, from the image). rcS adds root's
+  image keys to `/root/.ssh/authorized_keys` for Dropbear. It adds them
+  only, so keys added there by hand stay, and removing a key means editing
+  that file too.
+- **`adduser-ssh NAME 'KEY' [-G GROUP]`** (/usr/sbin) makes an SSH user:
+  - `adduser -D` leaves the password field `!`, which OpenSSH takes as a
+    locked account and refuses even for keys, so the helper sets `*`
+    instead;
+  - it installs the key with the modes sshd wants;
+  - it syncs, because a reset soon after an unsynced write to /data loses
+    it.
+- **Checked on the board:**
+  - the user logs in with its key on 22 and 2222;
+  - root's key is refused for the user and the user's key for root;
+  - the user can't read /etc/shadow;
+  - the user survives a reboot;
+  - `deluser --remove-home` removes everything.
+- **Without data.img** /data is RAM, so users are lost at reboot (rcS
+  warns).
+
 Measured on the board (perf-hw-a, both negotiating mlkem768x25519-sha256,
 ecdsa-sha2-nistp256 and chacha20-poly1305, password login):
 

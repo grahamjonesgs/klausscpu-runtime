@@ -17,7 +17,7 @@
 # SSH logins are key-only when the image has root's authorized keys:
 # ROOTFS_AUTHORIZED_KEYS, a file of OpenSSH public keys (default: this
 # PC's ~/.ssh/klausscpu_board_ed25519.pub and ~/.ssh/id_ed25519.pub, those
-# that exist), becomes /etc/ssh/authorized_keys. sshd then refuses
+# that exist), becomes /etc/ssh/authorized_keys.d/root. sshd then refuses
 # passwords (PermitRootLogin prohibit-password), and rcS starts Dropbear
 # with -s and copies the keys to /root/.ssh. Without keys the image keeps
 # password logins and says so. ROOTFS_AUTHORIZED_KEYS=none forces that.
@@ -68,6 +68,7 @@ fi
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
 cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" "$ST/usr/bin/"
+install -D -m 755 "$RT/linux/userland/adduser-ssh" "$ST/usr/sbin/adduser-ssh"
 if [ -x "$DB" ]; then
   cp "$DB" "$ST/usr/sbin/dropbearmulti"
   ln -s dropbearmulti "$ST/usr/sbin/dropbear"
@@ -138,17 +139,26 @@ if [ -z "$AK" ]; then
   cat "$HOME/.ssh/klausscpu_board_ed25519.pub" "$HOME/.ssh/id_ed25519.pub" 2>/dev/null >"$AK" || true
 fi
 if [ "$AK" != none ] && [ -s "$AK" ]; then
-  grep -E '^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) ' "$AK" >"$ST/etc/ssh/authorized_keys" ||
+  mkdir -p "$ST/etc/ssh/authorized_keys.d"
+  grep -E '^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) ' "$AK" >"$ST/etc/ssh/authorized_keys.d/root" ||
     { echo "no public keys in $AK" >&2; exit 1; }
-  chmod 644 "$ST/etc/ssh/authorized_keys"
+  chmod 644 "$ST/etc/ssh/authorized_keys.d/root"
   sed -i -e 's/^PermitRootLogin .*/PermitRootLogin prohibit-password/' \
     -e 's/^PasswordAuthentication .*/PasswordAuthentication no/' "$ST/etc/ssh/sshd_config"
-  echo "ssh: key-only logins, $(wc -l <"$ST/etc/ssh/authorized_keys") authorized key(s) from $AK"
+  echo "ssh: key-only logins, $(wc -l <"$ST/etc/ssh/authorized_keys.d/root") authorized key(s) for root from $AK"
 else
   echo "ssh: no authorized keys: password logins stay on" >&2
 fi
-cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"
-install -m 600 "$INI/etc/shadow" "$ST/etc/shadow"
+# Users are managed on the board (adduser, deluser, addgroup, passwd):
+# /etc/passwd, group, shadow and gshadow link to /data/etc, which rcS
+# seeds from /etc/users.default (and keeps the image's system accounts
+# in) at every boot.
+mkdir -p "$ST/etc/users.default"
+cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/users.default/"
+install -m 600 "$INI/etc/shadow" "$ST/etc/users.default/shadow"
+sed 's/^\([^:]*\):.*/\1:!::/' "$INI/etc/group" >"$ST/etc/users.default/gshadow"
+chmod 600 "$ST/etc/users.default/gshadow"
+for f in passwd group shadow gshadow; do ln -sfn ../data/etc/$f "$ST/etc/$f"; done
 cp "$INI/default.script" "$ST/usr/share/udhcpc/default.script"
 cp "$INI/etc/index.html" "$ST/www/index.html"
 echo "klausscpu-rootfs $(date -u +%Y-%m-%dT%H:%MZ) from runtime $(git -C "$RT" rev-parse --short HEAD)${KLAUSSCPU_ROOTFS_TAG:+ $KLAUSSCPU_ROOTFS_TAG}" \
