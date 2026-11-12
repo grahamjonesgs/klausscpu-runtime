@@ -64,6 +64,16 @@ if [ -f "$WS/busybox-build/busybox.links" ]; then
     [ -e "$ST$l" ] || [ -L "$ST$l" ] || ln -s "$(realpath -m -s --relative-to="$(dirname "$l")" /bin/busybox)" "$ST$l"
   done <"$WS/busybox-build/busybox.links"
 fi
+# su and passwd: bbsuid (linux/userland/busybox-suid.config), the setuid-root
+# busybox with only those two; the main busybox is not setuid.
+BBS=$WS/busybox-suid-build/busybox
+if [ -f "$BBS" ]; then
+  install -m 4755 "$BBS" "$ST/bin/bbsuid"
+  ln -sfn bbsuid "$ST/bin/su"
+  ln -sfn ../../bin/bbsuid "$ST/usr/bin/passwd"
+else
+  echo "no $BBS (linux/userland/busybox.sh): no su, and passwd is root-only" >&2
+fi
 "${CC[@]}" "$RT/linux/userland/keystore/kskey.c" -o "$ST/usr/bin/kskey"
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
@@ -159,6 +169,24 @@ install -m 600 "$INI/etc/shadow" "$ST/etc/users.default/shadow"
 sed 's/^\([^:]*\):.*/\1:!::/' "$INI/etc/group" >"$ST/etc/users.default/gshadow"
 chmod 600 "$ST/etc/users.default/gshadow"
 for f in passwd group shadow gshadow; do ln -sfn ../data/etc/$f "$ST/etc/$f"; done
+# wheel: the users sudo lets run anything (adduser-ssh NAME KEY -G wheel).
+echo "wheel:x:10:root" >>"$ST/etc/users.default/group"
+echo "wheel:!::root" >>"$ST/etc/users.default/gshadow"
+printf '/bin/sh\n/bin/ash\n' >"$ST/etc/shells"
+# sudo (Buildroot): the image's rules, plus local ones in /data/etc/sudoers.d
+# (rcS makes it; visudo -f /data/etc/sudoers.d/local).
+cat >"$ST/etc/sudoers" <<'SUDOERS'
+# /etc/sudoers: in the read-only system image (linux/rootfs/build-rootfs.sh).
+# Local rules go in /data/etc/sudoers.d/ (visudo -f /data/etc/sudoers.d/local).
+Defaults env_reset
+Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+root ALL=(ALL:ALL) ALL
+# Members of wheel (adduser-ssh NAME 'KEY' -G wheel) may run anything, with
+# their own password (root sets one: passwd NAME).
+%wheel ALL=(ALL:ALL) ALL
+@includedir /data/etc/sudoers.d
+SUDOERS
+chmod 440 "$ST/etc/sudoers"
 cp "$INI/default.script" "$ST/usr/share/udhcpc/default.script"
 cp "$INI/etc/index.html" "$ST/www/index.html"
 echo "klausscpu-rootfs $(date -u +%Y-%m-%dT%H:%MZ) from runtime $(git -C "$RT" rev-parse --short HEAD)${KLAUSSCPU_ROOTFS_TAG:+ $KLAUSSCPU_ROOTFS_TAG}" \
@@ -205,6 +233,15 @@ if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
         fi
       done ;;
     esac
+  done
+  # tar as a normal user drops the setuid/setgid bits Buildroot's
+  # permission table set (sudo): put them back.
+  tar -tvf "$BRT" | awk '$1 ~ /^-/ && $1 ~ /[sS]/ {print $1, $NF}' | while read -r m f; do
+    f=${f#./}
+    [ -f "$ST/$f" ] || continue
+    case $m in ???[sS]*) chmod u+s "$ST/$f" ;; esac
+    case $m in ??????[sS]*) chmod g+s "$ST/$f" ;; esac
+    echo "buildroot: $m /$f"
   done
   echo "buildroot: merged $(tar -tf "$BRT" | grep -c -E '^\./(usr/)?s?bin/[^/]+$') programs from $BRT"
   install -m 755 "$RT/linux/userland/tests/buildroot-test.sh" "$T/"

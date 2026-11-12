@@ -7,7 +7,8 @@
 #   - The key goes to ~/.ssh/authorized_keys with the modes sshd insists on.
 #   - sync: the user files and the home are on /data (the SD card).
 # A second run for an existing user adds the key.  Remove a user with
-# "deluser --remove-home NAME".  -G GROUP also puts the user in GROUP.
+# "deluser --remove-home NAME".  -G GROUP also puts the user in GROUP
+# (-G wheel: sudo, once the user has a password: passwd NAME).
 set -e
 [ $# -ge 2 ] || { echo "usage: adduser-ssh NAME 'ssh-ed25519 AAAA... comment' [-G GROUP]" >&2; exit 2; }
 name=$1 key=$2

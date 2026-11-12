@@ -53,6 +53,8 @@ if [ -L /etc/passwd ] && [ -d /etc/users.default ]; then
 	done
 	chmod 644 /data/etc/passwd /data/etc/group
 	chmod 600 /data/etc/shadow /data/etc/gshadow
+	# sudo's local rules (/etc/sudoers includes the directory).
+	mkdir -p /data/etc/sudoers.d && chmod 750 /data/etc/sudoers.d
 fi
 
 HOSTNAME=klausscpu

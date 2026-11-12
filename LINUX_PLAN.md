@@ -170,6 +170,33 @@ reboots and image updates:
 - **Without data.img** /data is RAM, so users are lost at reboot (rcS
   warns).
 
+**su, sudo and passwd for users (2026-11-12).**
+- **`su` and `passwd`:** come from `/bin/bbsuid`, a second busybox built
+  setuid root with only those two applets (`linux/userland/busybox-suid.config`;
+  busybox.sh refuses a build with more). The main busybox is not setuid.
+  allnoconfig's shell default (ash) had to be turned off explicitly. Users
+  change their own passwords; hashes are SHA-512 (`$6$`, musl's crypt; the
+  main busybox's default algorithm was empty).
+- **`sudo`** is Buildroot's package. `/etc/sudoers` (in the image) lets root
+  and the `wheel` group run anything with their own password, and includes
+  `/data/etc/sudoers.d` for local rules (rcS makes it, 0750). `wheel`
+  (gid 10) is one of the image's default groups.
+  - Give a user sudo with `adduser-ssh NAME 'KEY' -G wheel` (or
+    `addgroup NAME wheel`) and a password with `passwd NAME`.
+  - Key-only users have no password (`*`), so sudo can't authenticate
+    them until they get one.
+- **Setuid bits:** build-rootfs.sh restores the bits Buildroot's
+  permission table set (`sudo`, OpenSSH's `ssh-keysign`), which tar
+  extracted as a normal user drops.
+- **Checked on the board:**
+  - a wheel user's sudo works with its password and fails with a wrong
+    one, and a non-wheel user is refused;
+  - `su` works with root's password and fails with a wrong one;
+  - `passwd` as the user works.
+- **`su` and root's password:** `su` uses root's password, which is the
+  well-known default (`klausscpu`, in `linux/initramfs/etc/shadow`) until
+  root changes it (`passwd` as root; it lasts, in /data/etc/shadow).
+
 Measured on the board (perf-hw-a, both negotiating mlkem768x25519-sha256,
 ecdsa-sha2-nistp256 and chacha20-poly1305, password login):
 
