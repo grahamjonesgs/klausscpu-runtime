@@ -23,8 +23,12 @@ SRC=$(cd "$RT/.." && pwd)
 B=${KLAUSSCPU_LLVM_BIN:-$SRC/klausscpu-llvm/build/bin}
 OUT=${DT_OUT:-$RT/linux-ws/dynlink-m5}
 IP=${BOARD_IP:-192.168.68.59}
-read -r -a SSH <<<"${BOARD_SSH:-ssh root@$IP}"
-read -r -a SCP <<<"${BOARD_SCP:-scp -r}"
+KEY=${BOARD_SSH_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+# The board's host key is pinned in its own known_hosts on first contact.
+KO="-o UserKnownHostsFile=$HOME/.cache/klausscpu-board-known_hosts -o StrictHostKeyChecking=accept-new"
+[ -f "$KEY" ] && KO="$KO -i $KEY -o IdentitiesOnly=yes"
+read -r -a SSH <<<"${BOARD_SSH:-ssh $KO -o BatchMode=yes -o ConnectTimeout=20 root@$IP}"
+read -r -a SCP <<<"${BOARD_SCP:-scp -r $KO -o BatchMode=yes}"
 RUNS=${DT_RUNS:-500}
 [ -f "$OUT/extra.list" ] || { echo "no $OUT/extra.list: run run.sh first" >&2; exit 2; }
 

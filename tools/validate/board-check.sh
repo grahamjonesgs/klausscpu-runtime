@@ -47,8 +47,12 @@ if [ -z "${BOARD_CHECK_LOCKED:-}" ]; then
 		$([ $QUICK = 1 ] && echo --quick) "$OUT"
 fi
 IP=${BOARD_IP:-192.168.68.59}
-read -r -a SSH <<<"${BOARD_SSH:-ssh -o BatchMode=yes -o ConnectTimeout=20 root@$IP}"
-read -r -a SCP <<<"${BOARD_SCP:-scp -o BatchMode=yes}"
+KEY=${BOARD_SSH_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+# The board's host key is pinned in its own known_hosts on first contact.
+KO="-o UserKnownHostsFile=$HOME/.cache/klausscpu-board-known_hosts -o StrictHostKeyChecking=accept-new"
+[ -f "$KEY" ] && KO="$KO -i $KEY -o IdentitiesOnly=yes"
+read -r -a SSH <<<"${BOARD_SSH:-ssh $KO -o BatchMode=yes -o ConnectTimeout=20 root@$IP}"
+read -r -a SCP <<<"${BOARD_SCP:-scp $KO -o BatchMode=yes}"
 export BOARD_SSH="${SSH[*]}" BOARD_SCP="${SCP[*]}" BOARD_IP=$IP
 FP=${BOARD_HOSTKEY_FP:-SHA256:DYRxGyaKM2ZNhrjasuYI3VHyznQ7oWfC9LxA2KwsIYI}
 FAILS=0 PASSES=0

@@ -18,8 +18,12 @@ OUT=${FT_OUT:-$RT/linux-ws/libffi-test}
 BR_OUT=${BR_OUT:-$RT/linux-ws/br-output-dyn}
 TS=${FFI_SRC:-$BR_OUT/build/libffi-3.4.8}/testsuite
 IP=${BOARD_IP:-192.168.68.59}
-read -r -a SSH <<<"${BOARD_SSH:-ssh root@$IP}"
-read -r -a SCP <<<"${BOARD_SCP:-scp}"
+KEY=${BOARD_SSH_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+# The board's host key is pinned in its own known_hosts on first contact.
+KO="-o UserKnownHostsFile=$HOME/.cache/klausscpu-board-known_hosts -o StrictHostKeyChecking=accept-new"
+[ -f "$KEY" ] && KO="$KO -i $KEY -o IdentitiesOnly=yes"
+read -r -a SSH <<<"${BOARD_SSH:-ssh $KO -o BatchMode=yes -o ConnectTimeout=20 root@$IP}"
+read -r -a SCP <<<"${BOARD_SCP:-scp $KO -o BatchMode=yes}"
 for f in "$OUT/build.jobs" "$OUT/ffirun" "$OUT/unsupported.txt" "$TS"; do
 	[ -e "$f" ] || { echo "missing $f: run run.sh testsuite first" >&2; exit 2; }
 done

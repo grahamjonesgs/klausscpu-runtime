@@ -14,6 +14,13 @@
 # built, musl programs compiled here) and the /etc of linux/initramfs/;
 # packed as a tarball with root ownership and made with mke2fs -d.
 # KLAUSSCPU_ROOTFS_TAG is appended to /etc/klausscpu-rootfs if set.
+# SSH logins are key-only when the image has root's authorized keys:
+# ROOTFS_AUTHORIZED_KEYS, a file of OpenSSH public keys (default: this
+# PC's ~/.ssh/klausscpu_board_ed25519.pub and ~/.ssh/id_ed25519.pub, those
+# that exist), becomes /etc/ssh/authorized_keys. sshd then refuses
+# passwords (PermitRootLogin prohibit-password), and rcS starts Dropbear
+# with -s and copies the keys to /root/.ssh. Without keys the image keeps
+# password logins and says so. ROOTFS_AUTHORIZED_KEYS=none forces that.
 # Needs linux/musl/build.sh and linux/userland/busybox.sh first.
 set -euo pipefail
 umask 022
@@ -125,6 +132,21 @@ cp "$INI/rcS" "$INI/hostkey" "$INI/sshkeys" "$ST/etc/init.d/"
 mkdir -p "$ST/etc/ssh" "$ST/var/empty"
 chmod 755 "$ST/var/empty"
 cp "$INI/etc/sshd_config" "$ST/etc/ssh/sshd_config"
+AK=${ROOTFS_AUTHORIZED_KEYS:-}
+if [ -z "$AK" ]; then
+  AK=$WS/rootfs-authorized_keys
+  cat "$HOME/.ssh/klausscpu_board_ed25519.pub" "$HOME/.ssh/id_ed25519.pub" 2>/dev/null >"$AK" || true
+fi
+if [ "$AK" != none ] && [ -s "$AK" ]; then
+  grep -E '^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) ' "$AK" >"$ST/etc/ssh/authorized_keys" ||
+    { echo "no public keys in $AK" >&2; exit 1; }
+  chmod 644 "$ST/etc/ssh/authorized_keys"
+  sed -i -e 's/^PermitRootLogin .*/PermitRootLogin prohibit-password/' \
+    -e 's/^PasswordAuthentication .*/PasswordAuthentication no/' "$ST/etc/ssh/sshd_config"
+  echo "ssh: key-only logins, $(wc -l <"$ST/etc/ssh/authorized_keys") authorized key(s) from $AK"
+else
+  echo "ssh: no authorized keys: password logins stay on" >&2
+fi
 cp "$INI/etc/passwd" "$INI/etc/group" "$ST/etc/"
 install -m 600 "$INI/etc/shadow" "$ST/etc/shadow"
 cp "$INI/default.script" "$ST/usr/share/udhcpc/default.script"

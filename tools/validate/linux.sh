@@ -656,10 +656,19 @@ if [ "$MODE" = net ]; then
   ping -c 3 -W 2 "$IP" >"$OUT/ping.txt" 2>&1 && echo "net: ping ok" || bad "net: ping $IP"
   curl -s -m 10 "http://$IP/" >"$OUT/http.txt" 2>&1
   grep -q 'Linux on KlaussCPU' "$OUT/http.txt" && echo "net: http ok" || bad "net: http page"
-  SSH_ASKPASS="$RT/tools/validate/zephyr/askpass.sh" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 KLAUSSCPU_SSH_PASS=klausscpu \
-    timeout 90 setsid ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=60 -o PreferredAuthentications=password "root@$IP" 'uname -nm' \
-    </dev/null >"$OUT/ssh.txt" 2>&1
+  # The SD system image takes key logins only (build-rootfs.sh): the
+  # board key when there is one, else the initramfs's password login.
+  KEY=${BOARD_SSH_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+  if [ -f "$KEY" ]; then
+    timeout 90 ssh -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null -o ConnectTimeout=60 "root@$IP" 'uname -nm' </dev/null >"$OUT/ssh.txt" 2>&1
+  fi
+  if ! grep -q '^klausscpu klausscpu' "$OUT/ssh.txt" 2>/dev/null; then
+    SSH_ASKPASS="$RT/tools/validate/zephyr/askpass.sh" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 KLAUSSCPU_SSH_PASS=klausscpu \
+      timeout 90 setsid ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=60 -o PreferredAuthentications=password "root@$IP" 'uname -nm' \
+      </dev/null >>"$OUT/ssh.txt" 2>&1
+  fi
   grep -q '^klausscpu klausscpu' "$OUT/ssh.txt" && echo "net: ssh ok" || bad "net: ssh login"
   wait "$step"
   # run_step ran in the background, so check its console here.

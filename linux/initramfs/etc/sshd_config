@@ -5,7 +5,9 @@ Port 22
 PermitRootLogin yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication no
-AuthorizedKeysFile .ssh/authorized_keys
+# /etc/ssh/authorized_keys: root's keys from build-rootfs.sh, which then
+# turns PasswordAuthentication off and PermitRootLogin to prohibit-password.
+AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys
 PidFile /run/sshd.pid
 PrintMotd no
 # No reverse DNS lookup of every client: slow, and often no DNS here.

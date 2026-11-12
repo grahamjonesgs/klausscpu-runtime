@@ -20,8 +20,12 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../../../.." && pwd)
 B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 IP=${BOARD_IP:-192.168.68.59}
-read -r -a SSH <<<"${BOARD_SSH:-ssh root@$IP}"
-read -r -a SCP <<<"${BOARD_SCP:-scp}"
+KEY=${BOARD_SSH_KEY:-$HOME/.ssh/klausscpu_board_ed25519}
+# The board's host key is pinned in its own known_hosts on first contact.
+KO="-o UserKnownHostsFile=$HOME/.cache/klausscpu-board-known_hosts -o StrictHostKeyChecking=accept-new"
+[ -f "$KEY" ] && KO="$KO -i $KEY -o IdentitiesOnly=yes"
+read -r -a SSH <<<"${BOARD_SSH:-ssh $KO -o BatchMode=yes -o ConnectTimeout=20 root@$IP}"
+read -r -a SCP <<<"${BOARD_SCP:-scp $KO -o BatchMode=yes}"
 O=${TLB_OUT:-$RT/linux-ws/tlbmeas}
 mkdir -p "$O"; cd "$O"
 CC=("$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$RT/linux-ws/sysroot" -static -O2)

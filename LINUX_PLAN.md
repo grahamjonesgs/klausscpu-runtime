@@ -118,6 +118,27 @@ With the SD system image, rcS starts OpenSSH 10.2's `sshd`
 `/var/empty`) on 22, and Dropbear on 2222 as a fallback. The validator
 expects `rcS: ssh on port 22`; the next line names the server.
 
+**Key-only logins (2026-11-12).** When `build-rootfs.sh` has root's public
+keys, the system image takes key logins only on both ports:
+- **Where the keys come from:** `ROOTFS_AUTHORIZED_KEYS`, defaulting to
+  this PC's `~/.ssh/klausscpu_board_ed25519.pub` and `~/.ssh/id_ed25519.pub`.
+  They become `/etc/ssh/authorized_keys`.
+- **sshd** reads that file (`AuthorizedKeysFile`) with
+  `PasswordAuthentication no` and `PermitRootLogin prohibit-password`.
+- **rcS** copies the keys to `/root/.ssh` on /data for Dropbear on 2222 and
+  starts Dropbear with `-s`, which refuses passwords.
+- **Without keys** an image keeps password logins and the build says so;
+  `ROOTFS_AUTHORIZED_KEYS=none` forces that.
+- **The initramfs fallback** (no SD system) keeps Dropbear with the
+  password, for recovery. So does the UART console.
+- **The scripts** (`board-check.sh`, `linux.sh net`, the dynlink, libffi
+  and tlb `board.sh`) log in with `BOARD_SSH_KEY` (default
+  `~/.ssh/klausscpu_board_ed25519`). They pin the board's host key in
+  `~/.cache/klausscpu-board-known_hosts`.
+- **Checked on the board:** a password login is refused on 22 and on 2222
+  ("Permission denied (publickey)"), both keys log in on both ports, and
+  board-check.sh passes 16/16.
+
 Measured on the board (perf-hw-a, both negotiating mlkem768x25519-sha256,
 ecdsa-sha2-nistp256 and chacha20-poly1305, password login):
 
