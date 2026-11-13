@@ -36,11 +36,3 @@ dependencies = [
 [[package]]
 name = "klauss-sys"
 version = "0.1.0"
-
-[[package]]
-name = "rust1"
-version = "0.1.0"
-dependencies = [
- "klauss-io",
- "klauss-llext-rt",
-]
