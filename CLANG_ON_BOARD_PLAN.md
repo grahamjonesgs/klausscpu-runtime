@@ -217,6 +217,11 @@ how to add libraries.
 
 ## Decisions for Graham (ask before M4)
 
+**Answered 2026-11-13:** a separate `toolchain.img`; static tools; clang,
+lld and the binutils (`llvm-ar`, `llvm-nm`, `llvm-objdump`, `llvm-readelf`);
+Buildroot's C++ on (`BR2_TOOLCHAIN_EXTERNAL_CXX`, the shared C++ libraries
+in the system image).
+
 - **Where the toolchain lives:** a separate `toolchain.img` (recommended) or a
   bigger system image.
 - **Static or shared tools:** static (recommended for start-up time) or
@@ -328,3 +333,56 @@ how to add libraries.
   - installing the shared C++ libraries in the system image.
 
   The board run uses copies from /tmp with LD_LIBRARY_PATH.
+
+### M2 follow-ups (2026-11-13)
+
+- **libffi's two C++ tests** (`unwindtest`, `unwindtest_ffi_call`) now run
+  in `libffi/run.sh`. Both pass at -O0 and -O2: exceptions unwind through
+  the port's assembly.
+- **Buildroot C++ is on** (shared build): `BR2_TOOLCHAIN_EXTERNAL_CXX`, the
+  wrapper's `g++`/`c++` run clang++, and `BR2_TOOLCHAIN_EXTRA_LIBS="libc++
+  libc++abi libunwind"`. That option takes bare names: Buildroot adds `.so*`
+  itself, and the old name `BR2_TOOLCHAIN_EXTRA_EXTERNAL_LIBS` trips
+  Buildroot's legacy check. The libraries are copied into the target's
+  `/lib` and also `/usr/lib` (about 1.4 MB duplicated).
+
+### M3 (2026-11-13): built; runs on the board
+
+- **`linux/toolchain/build-native-llvm.sh`** (llvm 2f0e77af makes
+  `klausscpu` a CMake host architecture). The first build compiled all
+  3002 steps with no compiler error and took about 10 minutes on the
+  Beelink.
+- **Sizes, stripped, MinSizeRel:**
+  - separate tools: clang 56 MB, lld 34 MB, llvm-ar/nm/objdump/readobj
+    4–6 MB each (111 MB in all);
+  - the multicall build (`NATIVE_MULTICALL=1`, one static `llvm` binary
+    with symlinks): 64 MB for all of them. This one goes into the image.
+- **On the board:** `clang --version`, `ld.lld --version` and
+  `clang -cc1 -fsyntax-only` work, 2–4 s each from /data the first time.
+- **M5 early (`native-clang/board.sh`):** 38 sources at -O2 (zlib, bzip2,
+  dynlink tests, linux/userland), objects byte-identical to the cross
+  clang's except `.comment` (the version string, which names each build's
+  commit).
+- **Compile times on the board, -O2:**
+  - zlib deflate.c: 105 s;
+  - bzip2 compress.c: 176 s;
+  - libc++ test eh.cpp: 164 s;
+  - small files: 2–20 s.
+
+  This is far slower than hoped. M6 has to find out why.
+
+### M4 (2026-11-13): image built
+
+- **`linux/toolchain/build-toolchain-image.sh`:** `toolchain.img`,
+  127 MiB with 104 MiB used. It holds:
+  - the multicall binary;
+  - clang's resource headers and the Linux builtins;
+  - the sysroot at `/opt/llvm/klausscpu-linux-musl`. That is the driver's
+    built-in default (`<bindir>/../klausscpu-linux-musl`), so there is no
+    config file and no wrapper.
+- **Boot and install:** rcS mounts `/linux/toolchain.img` read-only at
+  `/opt/llvm`, swapping in a staged `.next` first. `install-toolchain`
+  works like `install-rootfs`, and `/opt/llvm/bin` is on PATH.
+- **libc.so check:** the board's `/lib/libc.so` is the sysroot's
+  `libc.so` after `llvm-strip --strip-all`, because Buildroot strips it.
+  The script prints that hash.
