@@ -246,3 +246,85 @@ how to add libraries.
 ## Results
 
 (Fill in per milestone: commits, test counts, sizes, timings.)
+
+### M1 (2026-11-13): done, llvm 537f135c
+
+- Landing pads get the exception pointer in **R0** and the selector in **R1**
+  (`getExceptionPointerRegister` / `getExceptionSelectorRegister`; clang's
+  `__builtin_eh_return_data_regno` 0 / 1). ABI.md has a new "Exceptions"
+  section, which the libunwind port follows. It covers DWARF columns 0–15
+  (GPRs), 16 (SP) and 17 (the return-address column), the CFI, and which
+  code has unwind tables. OPEN_ITEMS #26 is closed.
+- **One fix beyond the plan:** a function with dynamic allocas has no
+  reserved call frame, and such a function with landing pads now gets
+  `DW_CFA_GNU_args_size` before every call. Without it, a catch inside a loop
+  leaked the call's stack arguments on every catch.
+- **CFI checked with llvm-dwarfdump:**
+  - the CIE: SP+8, RA at CFA-8;
+  - ENTER frames;
+  - PUSH/GETSP frames;
+  - R7 realignment;
+  - MachineOutliner FDEs.
+- **Tests:** `landingpad.ll` (O0/O2), `klausscpu-eh-regno.c`; the KlaussCPU
+  lit suites (179) pass.
+- **Opus review:** no blocker. Its jumpto finding was in an earlier draft
+  and was already fixed; its doc points are in.
+- **Unwind tables:** the Linux triple still defaults to none for C (x86-64,
+  AArch64 and RISC-V default to asynchronous tables). This doesn't matter
+  for C++ code. Left as is.
+
+### M2 (2026-11-13): runtime built; emulator and board pass
+
+- **llvm 54b72456:**
+  - the libunwind KlaussCPU port (`Registers_klausscpu`,
+    `__unw_getcontext`, `jumpto`, x86-64 style: SP is set last);
+  - driver changes for the Linux triple:
+    - libc++ is the default C++ library;
+    - `<sysroot>/include/c++/v1` is on the include path;
+    - `clang++` links `-lc++ -lc++abi -lunwind`;
+    - every link gets `--eh-frame-hdr`, static ones too;
+  - libc++ `<bitset>` `count()` avoids `_BitInt` on KlaussCPU, because the
+    target has no `_BitInt`.
+- **`linux/cxx/build.sh`:** builds libunwind, libc++abi and libc++ with
+  CMake (`linux/cxx/klausscpu-linux.cmake`) and installs them into
+  `linux-ws/dyn/sysroot`, static (-fPIC) and shared. That needs a fresh
+  configure plus about 2 min on 24 cores. Sizes:
+  - `libc++.so.1` 1.26 MB;
+  - `libc++abi.so.1` 357 KB;
+  - `libunwind.so.1` 54 KB.
+
+  A static hello-with-exceptions is 488 KB, a PIE 5.7 KB.
+- **`linux/userland/tests/cxx/run.sh` (emulator, one boot, 23 s) and
+  `board.sh` (board, 21 s):** 13 programs, all pass on both (0 failing
+  checks).
+  - **eh.cpp:** 23 checks, built at -O0/-O2/-Oz, both static and as a PIE
+    linked to a shared library (`eh_lib.cpp`), plus two -O2 variants:
+    - without ENTER/LEAVE (PUSH/GETSP frames);
+    - without shrink-wrapping, with leaf frame pointers.
+
+    It covers:
+    - throw/catch locally and across frames, with destructors;
+    - rethrow, `catch (...)`, a throw from inside a handler;
+    - catch by base and by pointer;
+    - `exception_ptr`, `current_exception`;
+    - callee-saved registers restored by the unwinder;
+    - `new[]` with a throwing constructor;
+    - `uncaught_exceptions`;
+    - GNU_args_size: 2000 catches in a VLA frame with SP unchanged;
+    - a realigned frame;
+    - exceptions in threads and across threads;
+    - `_Unwind_Backtrace`;
+    - throwing into, out of and through the library.
+  - **stdlib.cpp:** 24 checks (static -O0/-O2, PIE -O2): strings,
+    containers, `<format>`, `<charconv>`, `<regex>`, iostreams, threads,
+    mutex, condition variables, atomics, `std::filesystem` on /tmp.
+  - **terminate.cpp:** a throw out of `noexcept` reaches the terminate
+    handler; an uncaught exception prints libc++abi's message and ends in
+    SIGABRT.
+- **Still open in M2:**
+  - the upstream libc++abi/libunwind test subsets;
+  - Buildroot's `BR2_TOOLCHAIN_EXTERNAL_CXX`;
+  - libffi's two C++ tests;
+  - installing the shared C++ libraries in the system image.
+
+  The board run uses copies from /tmp with LD_LIBRARY_PATH.
