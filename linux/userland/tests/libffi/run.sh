@@ -2,16 +2,17 @@
 # linux/userland/tests/libffi/run.sh [testsuite] [ctypes]: the libffi port
 # (linux/buildroot/external/patches/libffi) on the klausscc emulator.
 #
-# testsuite: libffi's own testsuite (libffi.call, libffi.closures,
-#   libffi.complex at -O0 and -O2, libffi.bhaible's test-call and
-#   test-callback) plus this directory's abi.c (KlaussCPU ABI corners: the
+# testsuite: libffi's own testsuite (libffi.call, libffi.closures with its
+#   two C++ unwind tests, libffi.complex at -O0 and -O2, libffi.bhaible's
+#   test-call and test-callback) plus this directory's abi.c (KlaussCPU ABI
+#   corners: the
 #   32-bit sign extension, aggregates split between R3 and the stack, sret,
 #   the variadic home area, closures called from compiled code), built as
 #   PIE programs against the shared libffi and musl, run under the dynamic
 #   loader in the emulator by ffirun (one boot), and checked on the host:
 #   exit status 0 and, as DejaGnu does, the test's dg-output patterns
-#   (check.py).  Not run, reported UNSUPPORTED: the C++ tests (no C++
-#   runtime in the sysroot) and libffi.go (no Go closures in the port).
+#   (check.py).  Not run, reported UNSUPPORTED: libffi.go (no Go closures
+#   in the port).
 # ctypes: Buildroot's Python 3.14 (br-output-dyn: python3, libpython,
 #   the standard library without its tests, _ctypes and libffi) in the
 #   initramfs, running ctypes_smoke.py (a second boot).
@@ -86,6 +87,9 @@ dir /lib 0755 0 0
 dir /test 0755 0 0
 file /lib/ld-musl-klausscpu.so.1 $OUT/ld-musl-klausscpu.so.1 0755 0 0
 file /lib/libffi.so.8 $OUT/libffi.so.8 0755 0 0
+file /lib/libc++.so.1 $(realpath "$DYN_SYSROOT/lib/libc++.so.1") 0755 0 0
+file /lib/libc++abi.so.1 $(realpath "$DYN_SYSROOT/lib/libc++abi.so.1") 0755 0 0
+file /lib/libunwind.so.1 $(realpath "$DYN_SYSROOT/lib/libunwind.so.1") 0755 0 0
 file /bin/ffirun $OUT/ffirun 0755 0 0
 file /test/list $OUT/list 0644 0 0
 EOF
@@ -122,8 +126,14 @@ if [[ " $MODES " == *" testsuite "* ]]; then
 				echo "$d/$b$o $t $o -I$TS/$d"
 			done
 		done
+		# The C++ tests (unwindtest*: exceptions thrown through ffi_call
+		# and through closures) need the C++ runtime (linux/cxx/build.sh).
 		for t in "$TS/$d"/*.cc; do
-			[ -e "$t" ] && echo "$d/$(basename "$t") (C++: no C++ runtime in the sysroot)" >>unsupported.txt
+			[ -e "$t" ] || continue
+			b=$(basename "$t" .cc)
+			for o in $OPTS; do
+				echo "$d/$b$o $t $o -I$TS/$d"
+			done
 		done
 	done >build.jobs
 	for t in "$TS"/libffi.go/*.c; do
@@ -145,7 +155,9 @@ if [[ " $MODES " == *" testsuite "* ]]; then
 	build_one() {
 		local name=$1 src=$2; shift 2
 		local exe=bin/${name//\//__}
-		"${TCC[@]}" "$@" "$src" -o "$exe" >"$exe.log" 2>&1 || mv "$exe.log" "$exe.compile-error"
+		local cc=("${TCC[@]}")
+		case $src in *.cc) cc[0]=$DYN_BIN/clang++ ;; esac
+		"${cc[@]}" "$@" "$src" -o "$exe" >"$exe.log" 2>&1 || mv "$exe.log" "$exe.compile-error"
 	}
 	echo "building $(wc -l <build.jobs) test programs"
 	while read -r name src rest; do
