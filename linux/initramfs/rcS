@@ -157,6 +157,22 @@ if [ -f /mnt/linux/swap.img ]; then
 	fi
 fi
 
+# The toolchain (CLANG_ON_BOARD_PLAN.md): /linux/toolchain.img on the card
+# (install-toolchain), read-only at /opt/llvm.  An image staged while the
+# old one was mounted (toolchain.img.next) replaces it first.
+if [ -f /mnt/linux/toolchain.img.next ]; then
+	rm -f /mnt/linux/toolchain.img && mv /mnt/linux/toolchain.img.next /mnt/linux/toolchain.img &&
+		sync && echo "rcS: toolchain: installed the staged toolchain.img.next"
+fi
+if [ -f /mnt/linux/toolchain.img ]; then
+	mkdir -p /opt/llvm
+	if mount -t ext4 -o ro,loop /mnt/linux/toolchain.img /opt/llvm 2>/tmp/toolchain.log; then
+		echo "rcS: toolchain at /opt/llvm"
+	else
+		echo "rcS: WARNING: mounting /linux/toolchain.img failed (see /tmp/toolchain.log)"
+	fi
+fi
+
 if [ -r /data/etc/rc.local ]; then
 	echo "rcS: running /data/etc/rc.local"
 	sh /data/etc/rc.local </dev/null &

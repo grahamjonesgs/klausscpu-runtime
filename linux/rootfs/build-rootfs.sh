@@ -79,7 +79,9 @@ fi
 "${CC[@]}" "$RT/linux/userland/keystore/kskey.c" -o "$ST/usr/bin/kskey"
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
-cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" "$ST/usr/bin/"
+cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" \
+  "$RT/linux/userland/install-toolchain" "$ST/usr/bin/"
+mkdir -p "$ST/opt/llvm"	# the toolchain image's mount point (rcS)
 install -D -m 755 "$RT/linux/userland/adduser-ssh" "$ST/usr/sbin/adduser-ssh"
 install -D -m 755 "$RT/linux/userland/overlay" "$ST/usr/sbin/overlay"
 if [ -x "$DB" ]; then

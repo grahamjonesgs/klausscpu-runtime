@@ -32,6 +32,10 @@
 # -r or -no-pie; and -Wl,--undefined-version, as GNU ld (lld's default
 # refuses a version script naming a symbol the library doesn't define:
 # zlib's names ones its configure leaves out).
+# C++ (the shared toolchain only; CLANG_ON_BOARD_PLAN M2): $P-g++ and $P-c++
+# run clang++ with libc++, libc++abi and libunwind from the sysroot
+# (linux/cxx/build.sh installs them there); their headers, usr/include/c++/v1,
+# come before the libc headers, as libc++ needs.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../.." && pwd)
@@ -108,6 +112,8 @@ for a in "\$@"; do
 	esac
 done
 pre=(--target=klausscpu-unknown-linux-musl --sysroot="\$sysroot")
+cc="$B/clang"
+case "\$mode" in g++|c++) cc="$B/clang++"; pre+=(-isystem "\$sysroot/usr/include/c++/v1") ;; esac
 [ "\$mode" = cpp ] && exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" -E "\${args[@]}"
 [ "\$mode" = as ] && exec "$B/clang" "\${pre[@]}" -c -x assembler "\${args[@]}"
 # The sysroot's directories come last, as gcc's do: -idirafter after every
@@ -115,12 +121,15 @@ pre=(--target=klausscpu-unknown-linux-musl --sysroot="\$sysroot")
 # newer ones), and -L after the package's own (its freshly built libraries
 # must win over what staging holds).
 $LINKMODE
-exec "$B/clang" "\${pre[@]}" -idirafter "\$sysroot/usr/include" \\
+exec "\$cc" "\${pre[@]}" -idirafter "\$sysroot/usr/include" \\
 	"\${link[@]}" "\${pic[@]}" -ffunction-sections -fdata-sections -Wno-unused-command-line-argument \\
 	"\${args[@]}" \$([ \$compile_only = 1 ] || echo "-L\$sysroot/usr/lib")
 EOF
 chmod +x "$OUT/bin/$P-gcc"
 for m in cc cpp as; do ln -s "$P-gcc" "$OUT/bin/$P-$m"; done
+if [ "$SHARED" = 1 ] && [ -f "$SR/lib/libc++.so.1" ]; then
+  for m in g++ c++; do ln -s "$P-gcc" "$OUT/bin/$P-$m"; done
+fi
 ln -s "$B/ld.lld" "$OUT/bin/$P-ld"
 for t in ar ranlib nm objcopy objdump readelf strip size strings addr2line; do
   ln -s "$B/llvm-$t" "$OUT/bin/$P-$t"

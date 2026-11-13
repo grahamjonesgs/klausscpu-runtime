@@ -1,0 +1,65 @@
+#!/bin/sh
+# install-toolchain [-z] <url>|- [sha256]: put the toolchain image (clang,
+# lld, the sysroot; linux/toolchain/build-toolchain-image.sh) on the SD card
+# as /linux/toolchain.img, which rcS mounts read-only at /opt/llvm.  As
+# install-rootfs: "-" reads the image from stdin, -z unpacks gzip (whose
+# CRC-32 and length check catch a damaged transfer):
+#   gzip -1c toolchain.img | ssh root@<board> install-toolchain -z -
+# The new image is written beside the old one.  When no image is mounted it
+# replaces toolchain.img and is mounted at once; otherwise it is staged as
+# toolchain.img.next, which rcS puts in place at the next boot.
+set -e
+gz=0
+if [ "${1:-}" = -z ]; then
+	gz=1
+	shift
+fi
+url=${1:-}
+want=${2:-}
+[ -n "$url" ] || { echo "usage: install-toolchain [-z] <url>|- [sha256]" >&2; exit 2; }
+[ -b /dev/mmcblk0p1 ] || { echo "install-toolchain: no SD card" >&2; exit 1; }
+mkdir -p /mnt
+grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
+mkdir -p /mnt/linux
+new=/mnt/linux/toolchain.img.new
+rm -f "$new"
+fail() {
+	echo "install-toolchain: $1, keeping the old image" >&2
+	rm -f "$new"
+	exit 1
+}
+if [ "$url" = - ]; then
+	echo "install-toolchain: reading the image from stdin"
+	if [ $gz = 1 ]; then
+		gunzip -c >"$new" || fail "gunzip failed (bad CRC or truncated input)"
+	else
+		cat >"$new" || fail "cannot write $new"
+	fi
+else
+	echo "install-toolchain: downloading $url"
+	if [ $gz = 1 ]; then
+		wget -O - "$url" | gunzip -c >"$new" || fail "download or gunzip failed"
+	else
+		wget -O "$new" "$url" || fail "download failed"
+	fi
+fi
+[ $gz = 1 ] && echo "install-toolchain: gzip CRC-32 and length OK"
+if [ -n "$want" ]; then
+	got=$(sha256sum "$new" | cut -d' ' -f1)
+	[ "$got" = "$want" ] || fail "SHA-256 mismatch ($got)"
+fi
+sync
+if grep -q " /opt/llvm " /proc/mounts; then
+	# In use: replacing a FAT file that is mounted leaks its clusters.
+	rm -f /mnt/linux/toolchain.img.next
+	mv "$new" /mnt/linux/toolchain.img.next
+	sync
+	echo "install-toolchain: staged as /linux/toolchain.img.next; it replaces toolchain.img at the next boot"
+else
+	rm -f /mnt/linux/toolchain.img.next /mnt/linux/toolchain.img
+	mv "$new" /mnt/linux/toolchain.img
+	sync
+	mkdir -p /opt/llvm
+	mount -t ext4 -o ro,loop /mnt/linux/toolchain.img /opt/llvm &&
+		echo "install-toolchain: /linux/toolchain.img installed and mounted at /opt/llvm"
+fi
