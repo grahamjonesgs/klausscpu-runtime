@@ -55,3 +55,7 @@ linux-ws/
 !linux/toolchain-tests/*.s
 # The musl port's hand-written assembly
 !linux/musl/src/*/klausscpu/*.s
+
+# Python bytecode caches (test and tool scripts)
+__pycache__/
+*.pyc

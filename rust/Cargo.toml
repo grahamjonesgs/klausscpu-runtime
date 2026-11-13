@@ -7,7 +7,6 @@
 resolver = "2"
 members = [
     "hello",
-    "rust1",
 ]
 
 # As klausscpu-llvm's crates/ workspace (its Cargo.toml says why).
