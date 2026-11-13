@@ -3,3 +3,13 @@ export PS1='\u@\h:\w $ '
 # The time zone, from /data/etc/TZ (a POSIX TZ string such as SAST-2); UTC
 # without it.
 [ -r /data/etc/TZ ] && export TZ="$(cat /data/etc/TZ)"
+# bash, the login shell on the SD system (busybox ash reads this file too,
+# and skips this part): history kept across sessions in ~/.bash_history
+# (on /data), and ~/.bashrc for each user's own settings.
+if [ -n "$BASH_VERSION" ]; then
+	HISTSIZE=5000
+	HISTFILESIZE=10000
+	HISTCONTROL=ignoredups
+	shopt -s histappend checkwinsize
+	[ -r ~/.bashrc ] && . ~/.bashrc
+fi

@@ -19,8 +19,11 @@ case $key in
 ssh-ed25519\ *|ecdsa-sha2-nistp256\ *|ssh-rsa\ *) ;;
 *) echo "adduser-ssh: not an OpenSSH public key: $key" >&2; exit 2 ;;
 esac
+# bash as the login shell when the system has it, else busybox's sh.
+shell=/bin/sh
+[ -x /bin/bash ] && grep -qx /bin/bash /etc/shells && shell=/bin/bash
 if ! grep -q "^$name:" /etc/passwd; then
-	adduser -D -s /bin/sh "$name"
+	adduser -D -s $shell "$name"
 	echo "$name:*" | chpasswd -e
 fi
 [ -n "$grp" ] && addgroup "$name" "$grp"

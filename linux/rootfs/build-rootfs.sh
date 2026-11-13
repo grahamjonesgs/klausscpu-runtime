@@ -249,6 +249,13 @@ if [ "${ROOTFS_BUILDROOT:-0}" = 1 ]; then
   echo "buildroot: merged $(tar -tf "$BRT" | grep -c -E '^\./(usr/)?s?bin/[^/]+$') programs from $BRT"
   install -m 755 "$RT/linux/userland/tests/buildroot-test.sh" "$T/"
 fi
+# bash, when the image has it (Buildroot): a login shell (/etc/shells:
+# Dropbear refuses a shell not listed there) and root's default.  The
+# scripts (rcS, init) and the console's recovery shell stay /bin/sh.
+if [ -x "$ST/bin/bash" ]; then
+  grep -qx /bin/bash "$ST/etc/shells" || echo /bin/bash >>"$ST/etc/shells"
+  sed -i 's#^\(root:[^:]*:0:0:[^:]*:[^:]*:\)/bin/sh$#\1/bin/bash#' "$ST/etc/users.default/passwd"
+fi
 
 tar --owner=0 --group=0 --numeric-owner -C "$ST" -cf "$WS/rootfs.tar" .
 rm -f "$OUTIMG"
