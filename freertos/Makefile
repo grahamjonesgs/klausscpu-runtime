@@ -161,7 +161,9 @@ LWIP_APIS := \
     $(LWIP_DIR)/src/apps/sntp/sntp.c
 
 LWIP_SRCS  := $(LWIP_CORE) $(LWIP_IPV4) $(LWIP_NETIF) $(LWIP_APIS)
-LWIP_OBJS  := $(LWIP_SRCS:.c=.lo)   # .lo = compiled with NET_CFLAGS
+# .lo = compiled with NET_CFLAGS; in $(OBJ)/lwip, not next to the sources in
+# the lwip clone (which would show them as untracked files there).
+LWIP_OBJS  := $(patsubst $(LWIP_DIR)/%.c,$(OBJ)/lwip/%.lo,$(LWIP_SRCS))
 
 LWIP_PORT_SRCS := \
     $(RUNTIME)/lwip_port/ethernetif.c \
@@ -267,6 +269,10 @@ telnet/pic_loader.o: telnet/pic_loader.c | check-kernel
 	$(CC) $(NET_CFLAGS) -Itelnet -I$(FATFS_DIR) -c -o $@ $<
 
 # lwIP sources — use .lo extension to distinguish from CFLAGS-compiled .o
+$(OBJ)/lwip/%.lo: $(LWIP_DIR)/%.c | check-kernel
+	@mkdir -p $(dir $@)
+	$(CC) $(NET_CFLAGS) -c -o $@ $<
+
 %.lo: %.c | check-kernel
 	$(CC) $(NET_CFLAGS) -c -o $@ $<
 
@@ -382,6 +388,7 @@ console_demo.bin: console_demo.elf
 -include $(wildcard \
     *.d \
     $(OBJ)/*.d \
+    $(OBJ)/lwip/src/*/*.d $(OBJ)/lwip/src/*/*/*.d \
     ssh/*.d telnet/*.d demo/*.d \
     portable/KlaussCPU/*.d \
     $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d)
@@ -400,11 +407,13 @@ clean:
 	      portable/KlaussCPU/*.d \
 	      $(KERNEL)/*.d $(KERNEL)/portable/MemMang/*.d
 	# Sweep any stale shared-source objects a PRE-obj/ build left at the repo
-	# root / ../src / ../fatfs / ../lwip_port (harmless if already absent).
+	# root / ../src / ../fatfs / ../lwip_port / the lwip clone (harmless if
+	# already absent).
 	rm -f $(RUNTIME)/crt0.o $(RUNTIME)/uart_stubs.o $(RUNTIME)/stdio_handles.o \
 	      $(RUNTIME)/crt-*.o \
 	      $(RUNTIME)/src/syscalls.o $(RUNTIME)/src/setjmp.o $(RUNTIME)/src/mdio.o \
 	      $(RUNTIME)/src/eth.o $(RUNTIME)/src/sd.o $(RUNTIME)/src/diskio.o \
 	      $(RUNTIME)/src/crypto_hw.o $(RUNTIME)/src/*.d \
 	      $(RUNTIME)/fatfs/ff.o $(RUNTIME)/fatfs/ffsystem.o $(RUNTIME)/fatfs/ffunicode.o \
-	      $(RUNTIME)/lwip_port/ethernetif.lo $(RUNTIME)/lwip_port/*.d 2>/dev/null; true
+	      $(RUNTIME)/lwip_port/ethernetif.lo $(RUNTIME)/lwip_port/*.d \
+	      $(LWIP_SRCS:.c=.lo) $(LWIP_SRCS:.c=.d) 2>/dev/null; true
