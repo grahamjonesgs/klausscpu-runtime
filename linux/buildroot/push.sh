@@ -15,8 +15,11 @@
 # image, which starts clean (or `overlay reset`).
 #   -n   list what would be pushed, push nothing
 #   -p   also make the package part of the image from now on: add it to
-#        external/configs/klausscpu_defconfig (then rebuild the image as
-#        usual when convenient)
+#        external/configs/klausscpu_defconfig once it built and was pushed
+#        (then rebuild the image as usual when convenient)
+# Switching a package on can change options of packages already built (mc
+# turns on ncurses' wide characters): those are rebuilt, with every built
+# package that depends on them, and pushed too.
 #   BOARD_SSH, BOARD_SSH_KEY, BOARD_IP  as tools/validate/board-check.sh
 # Take the board first (the board protocol): this script does not lock.
 set -euo pipefail
@@ -60,26 +63,56 @@ for p in "$@"; do
 		echo "$v=y" >>"$BO/.config"
 		changed=1
 	fi
-	if [ $PERM = 1 ] && ! grep -q "^$v=y" "$HERE/external/configs/klausscpu_defconfig"; then
-		echo "$v=y" >>"$HERE/external/configs/klausscpu_defconfig"
-		echo "push.sh: $v=y added to klausscpu_defconfig"
-	fi
 done
 [ $changed = 1 ] && "${MK[@]}" olddefconfig >/dev/null
 for p in "$@"; do
 	grep -q "^BR2_PACKAGE_$(up "$p")=y" "$BO/.config" ||
 		{ echo "push.sh: $p can't be selected (a dependency that is off?)" >&2; exit 2; }
 done
-
-# Build them; then the packages to take files from: them and every
-# package they depend on.
-if ! BR_SHARED=1 "$HERE/build.sh" "$@" >"$WS/push-build.log" 2>&1; then
-	tail -20 "$WS/push-build.log"
+restore() {
 	if [ $changed = 1 ]; then
 		cp "$BO/.config.push-backup" "$BO/.config"
 		"${MK[@]}" olddefconfig >/dev/null
 		echo "push.sh: the .config is as it was" >&2
 	fi
+}
+
+# Options the change set or cleared for packages already built: each
+# such package (the longest BR2_PACKAGE_<pkg> prefix of the symbol) is
+# rebuilt from scratch, with the built packages that depend on it.
+REBUILD=""
+if [ $changed = 1 ]; then
+	syms=$({ diff <(grep '^BR2_PACKAGE_' "$BO/.config.push-backup" | sort) \
+		<(grep '^BR2_PACKAGE_' "$BO/.config" | sort) || true; } | sed -n 's/^[<>] \(BR2_PACKAGE_[A-Z0-9_]*\)=.*/\1/p' | sort -u)
+	enabled=$("${MK[@]}" show-targets 2>/dev/null | tr ' ' '\n' | grep -v '^host-\|^$' | tr '\n' ' ')
+	built() { [ -f "$("${MK[@]}" printvars VARS="$(up "$1")_DIR" QUOTED_VARS=NO 2>/dev/null |
+		sed "s/^[A-Z0-9_]*_DIR=//; s/'//g")/.stamp_built" ]; }
+	for sym in $syms; do
+		best=""
+		for n in $enabled; do
+			k=BR2_PACKAGE_$(up "$n")
+			case $sym in "${k}_"*) [ ${#n} -gt ${#best} ] && best=$n ;; esac
+		done
+		[ -n "$best" ] && built "$best" && REBUILD="$REBUILD $best"
+	done
+	for n in $REBUILD; do
+		for r in $("${MK[@]}" "$n-show-recursive-rdepends" 2>/dev/null); do
+			case " $enabled " in *" $r "*) built "$r" && REBUILD="$REBUILD $r" ;; esac
+		done
+	done
+	REBUILD=$(echo $REBUILD | tr ' ' '\n' | sort -u | tr '\n' ' ')
+	if [ -n "${REBUILD// /}" ]; then
+		echo "push.sh: options changed for built packages: rebuilding $REBUILD"
+		for n in $REBUILD; do "${MK[@]}" "$n-dirclean" >/dev/null; done
+	fi
+fi
+
+# Build them; then the packages to take files from: them and every
+# package they depend on.
+if ! BR_SHARED=1 "$HERE/build.sh" "$@" $REBUILD >"$WS/push-build.log" 2>&1; then
+	tail -20 "$WS/push-build.log"
+	restore
+	[ -n "${REBUILD// /}" ] && echo "push.sh: rebuild $REBUILD with the old options before the next image (make <pkg>-dirclean; build.sh)" >&2
 	echo "push.sh: build failed (see $WS/push-build.log)" >&2
 	exit 1
 fi
@@ -87,7 +120,7 @@ fi
 # image's), and the files each installed (build/<pkg>/.files-list.txt,
 # written as it installs; packages-file-list.txt is only gathered by a
 # whole build).
-PKGS=$(for p in "$@"; do echo "$p"; "${MK[@]}" "$p-show-recursive-depends" 2>/dev/null | tr ' ' '\n'; done |
+PKGS=$(for p in "$@" $REBUILD; do echo "$p"; "${MK[@]}" "$p-show-recursive-depends" 2>/dev/null | tr ' ' '\n'; done |
 	grep -v '^host-\|^toolchain\|^skeleton\|^musl-compat-headers$\|^$' | sort -u)
 FL=$(mktemp)
 cat "$BO"/build/*/.files-list.txt >"$FL"
@@ -125,9 +158,19 @@ done
 n=$(wc -l <"$ST/list")
 echo "push.sh: $(echo $PKGS | wc -w) package(s) ($*, with dependencies): $n file(s) differ from the image"
 sed 's|^|  /|' "$ST/list"
-[ "$n" -gt 0 ] || exit 0
-[ $DRY = 1 ] && exit 0
+perm() {
+	[ $PERM = 1 ] || return 0
+	for p in "$@"; do
+		v=BR2_PACKAGE_$(up "$p")
+		grep -q "^$v=y" "$HERE/external/configs/klausscpu_defconfig" && continue
+		echo "$v=y" >>"$HERE/external/configs/klausscpu_defconfig"
+		echo "push.sh: $v=y added to klausscpu_defconfig"
+	done
+}
+[ "$n" -gt 0 ] || { perm "$@"; exit 0; }
+[ $DRY = 1 ] && { perm "$@"; exit 0; }
 "${SSH[@]}" "grep -q '^overlay / ' /proc/mounts" ||
 	{ echo "push.sh: the board's root is not the overlay (overlay status): nothing pushed" >&2; exit 1; }
 tar -C "$ST/root" --owner=0 --group=0 --numeric-owner -czf - . | "${SSH[@]}" 'tar -xzf - -C / && sync'
 echo "push.sh: pushed to the board (overlay files lists them; overlay reset or a new image removes them)"
+perm "$@"
