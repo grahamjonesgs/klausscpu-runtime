@@ -341,12 +341,15 @@ Now the root can be changed in place.
     `-L`) to compile-only runs. The wrapper now drops them with
     -c/-S/-E, as gcc ignores them. zlib, htop and sqlite rebuilt
     byte-identical after strip, and meson's `sizeof(int)` is 4 again.
-    glib2 (and so `mc`) then configures but stops in `gatomic.c`:
-    clang's KlaussCPU target says atomics are lock-free
-    (`__CLANG_ATOMIC_*_LOCK_FREE 2`) but doesn't define gcc's
-    `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1/2/4/8`, which each clang target
-    defines itself. That is a compiler question (klausscpu-llvm), not
-    patched here.
+    glib2 then stopped in `gatomic.c`: clang's KlaussCPU target said
+    atomics are lock-free (`__CLANG_ATOMIC_*_LOCK_FREE 2`) but didn't
+    define gcc's `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1/2/4/8`. It does since
+    klausscpu-llvm 220ef830 (the `__sync_*_N` calls behind them are
+    lock-free: LR/SC in musl). glib 2.86.5 and mc 4.8.33 now build. On the
+    board, glib's atomics from 4 threads add up exactly (200k g_atomic_*
+    operations, compare-and-exchange loops, refcounts, a GThreadPool), and
+    `mc --version` runs. Neither is in the image; `push.sh mc` would add
+    it (glib2, PCRE2 and wide ncurses come with it).
 
 ### The SD card: system image and data image
 
