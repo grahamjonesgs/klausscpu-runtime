@@ -196,6 +196,13 @@ reboots and image updates:
 - **`su` and root's password:** `su` uses root's password, which is the
   well-known default (`klausscpu`, in `linux/initramfs/etc/shadow`) until
   root changes it (`passwd` as root; it lasts, in /data/etc/shadow).
+- **To lock root's password**, use `echo 'root:*' | chpasswd -e`, not
+  `passwd -l`. busybox's `passwd -l` prefixes the hash with `!`, which
+  OpenSSH takes as a locked account and so refuses root's keys on port 22
+  (Dropbear on 2222 still lets them in), and with them board-check.sh,
+  push.sh and install-rootfs. `*` matches no password (`su` to root is
+  refused) and leaves key logins and sudo alone. Done on the board
+  2026-11-13.
 
 Measured on the board (perf-hw-a, both negotiating mlkem768x25519-sha256,
 ecdsa-sha2-nistp256 and chacha20-poly1305, password login):
