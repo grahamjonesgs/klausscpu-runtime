@@ -346,6 +346,15 @@ in the system image).
   Buildroot's legacy check. The libraries are copied into the target's
   `/lib` and also `/usr/lib` (about 1.4 MB duplicated).
 
+- Upstream suites (`linux/userland/tests/cxx/upstream.sh`,
+  `upstream_plan.py` evaluates each test's lit lines): libunwind's and
+  libc++abi's own tests, static, -O0 and -O2 on the emulator: all 70
+  runnable tests pass at both levels (forceunwind, signal_frame,
+  unw_getcontext/unw_resume, unwind_01..06, forced_unwind1..3, catch_*,
+  dynamic_cast*, the demangler, guard_threaded_test with a 600 s timeout);
+  31 unsupported (other architectures, AIX, no-exceptions builds, the
+  `.sh.*` lit-shell tests).
+
 ### M3 (2026-11-13): built; runs on the board
 
 - **`linux/toolchain/build-native-llvm.sh`** (llvm 2f0e77af makes
