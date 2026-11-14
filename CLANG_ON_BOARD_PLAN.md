@@ -395,3 +395,68 @@ in the system image).
 - **libc.so check:** the board's `/lib/libc.so` is the sysroot's
   `libc.so` after `llvm-strip --strip-all`, because Buildroot strips it.
   The script prints that hash.
+
+### M4 on the board (2026-11-14)
+
+- **Installed:** the new system image (busybox with loop mounts, the new
+  rcS, `install-toolchain`, libc++ in `/lib`) and `/linux/toolchain.img`.
+- **board-check after the reboot:** 16 PASS, 0 FAIL. rcS mounts
+  `/opt/llvm`, and `clang` is on PATH in login shells.
+- **On the board, from /opt/llvm:**
+  - `clang -O2 h.c -o h && ./h` works, static and `-pie`, in 2–5 s;
+  - `clang++ hello.cpp`, with exceptions, compiles, links and runs.
+
+### M5 (2026-11-14): passes
+
+`native-clang/board.sh`, with `NC_SKIP=cxx-stdlib` (its compile alone takes
+over an hour, because the board swaps):
+- **Objects:** 102 compiles, -O2 and -O0, are byte-identical to the cross
+  clang's (ignoring `.comment`). The corpus: zlib including `example.c`,
+  bzip2, the dynlink tests, linux/userland, six bare-metal programs (their
+  own triple) and the libc++ tests `eh.cpp` and `eh_lib.cpp`.
+- **Links:** 5 programs linked on the board by its lld are byte-identical
+  to the cross lld's links: eh, musltest, strtest, zlib's example, bzip2.
+- **Runs:** all five run correctly on the board: eh 23/23, musltest PASS,
+  strtest PASS, zlib's example, and a bzip2 round trip.
+- **Earlier run:** `cxx-stdlib` was also identical at -O2 and -O0, in 94/94
+  objects.
+- **Time:** the board took 3024 s for the 102 compiles.
+
+### M6 so far (2026-11-14)
+
+**Board, perfstat (`native-clang/perf.sh`; counters in
+`linux-ws/native-perf/counters.txt`):**
+
+| compile | MinSizeRel clang | Release clang | instructions | CPI | peak RSS |
+|---|---|---|---|---|---|
+| hello.c -O2 | 2 s | 1 s | 0.03 G | 5.3 | 46 MB |
+| zlib deflate.c -O0 | 34 s | 29 s | 0.59 G | 5.7 | 50 MB |
+| zlib deflate.c -O2 | 109 s | 90 s | 2.14 G | 5.1 | 55 MB |
+| C++ hello (`<string>`, `<vector>`), any -O | 255 s | 213 s | 3.7 G | 6.8 | 65 MB |
+
+- **The Release build** executes 24% fewer instructions and is about 17%
+  faster, at 90 MB against 64 MB. The image now takes it.
+- **C++ time is header parsing.** A precompiled header of
+  `<cstdio> <stdexcept> <string> <vector>`, built once on the board
+  (4.5 min, 11 MB), cuts the C++ hello from 213 s to 44 s.
+- **Where the cycles go:**
+  - instruction-fetch misses: ~40%;
+  - D-cache stalls: 36–45%;
+  - `stall_muldiv`: 6–9%. It is mostly the TLB's +1 EX cycle per load and
+    store (the CPU session), not division.
+- **The TLB refill handler** (32 instructions) runs 10 times per 1000
+  instructions: 31–36% of all executed instructions (klausscc model).
+- **The text-page spread** (klausscc profile): 90% of instructions run in
+  98–199 of the ~840 64 KiB text pages, against 32 TLB entries.
+  `clang-order.txt.gz` (lld `--symbol-ordering-file`, `NATIVE_ORDER=1`)
+  packs the hot functions together.
+- **Hardware candidates** sent to the CPU session, and from there to
+  Graham: its ranking is
+  1. a hardware page-table walker, or a refill assist;
+  2. translation in parallel with the D-cache;
+  3. a 128 KiB L2;
+  4. a 32 KiB 2-way I-cache;
+  5. an 8-entry return stack.
+
+  The klausscc models behind it (L2, I-cache shapes, return stack,
+  DIV/MOD, refill cost) are on klausscc master (1f99640).
