@@ -10,6 +10,10 @@
 #   NP_FILES    corpus names, a subset of: hello zlib-deflate sqlite-part
 #               cxx-hello (default all)
 #   NP_OUT      work directory (default linux-ws/native-perf)
+#   NP_WARMUP   unmeasured runs of each compile first (default 1): the first
+#               run also pages clang's binary in from the SD card (kernel
+#               instructions in the global counters), which made repeated
+#               measurements differ by 7-9%
 #   BOARD_*     as in board.sh.  Take the board first: this script does not lock.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -53,6 +57,9 @@ ls -la f
     for name in $FILES; do
       for o in $OPTS; do
         case $name in cxx-hello) file=$name.ii drv=$c++ ;; *) file=$name.i drv=$c ;; esac
+        for _ in $(seq "${NP_WARMUP:-1}"); do
+          "${SSH[@]}" "cd $BD && $drv --target=$T $o -c $file -o out.o" >/dev/null 2>&1 || true
+        done
         echo "== $c $name $o"
         "${SSH[@]}" "cd $BD && s=\$(date +%s) && ./perfstat $drv --target=$T $o -c $file -o out.o 2>&1; echo \"wall \$((\$(date +%s) - s)) s\""
       done
