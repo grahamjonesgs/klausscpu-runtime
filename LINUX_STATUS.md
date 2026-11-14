@@ -37,17 +37,19 @@ scripts find each other relative to that.
 
 ## Hardware state
 
-- **Flash:** the QSPI flash holds klaussCPU master 1dc3a55 (tlbwalk
-  de0694d, written 2026-11-14), and power-up boots it. `CPU_FEATURES` reads
+- **Flash:** the QSPI flash holds klaussCPU master e242c1d (tlbx db67f3f,
+  written 2026-11-14), and power-up boots it. `CPU_FEATURES` reads
   0x03F0_200D: 32 TLB entries, LR/SC, DCBZ, misaligned 64-bit accesses trap
   (emulated by the kernel), and the hardware TLB walker (bit 25, MMU_PLAN
-  §11.8).
+  §11.8). The data TLB lookup sits in the first EX cycle (§11.9), with no
+  extra cycle per load or store.
   - **The walker** refills useg misses from the page tables without an
     exception. The kernel (runtime dc07cb5) turns it on;
     `/proc/klausscpu_tlbwalk` shows it and takes 0 or 1, and `notlbwalk` on
     the command line keeps it off.
   - **Rollback:** the RTL session's `~/.cache/kbuild/rollback/README.txt`
-    (the pre-walker QSPI dump, or the tlb32 bitstream a92ce08).
+    (the pre-tlbx dump, the walker bitstream de0694d, or the pre-walker
+    dump).
 - **The emulator matches it:** klausscc defaults to 32 TLB entries and the
   walker. Whole-instruction restart after a walk is as in the RTL (klausscc
   cc309a6). `--tlb-entries 16` and `--no-tlb-walker` model older
