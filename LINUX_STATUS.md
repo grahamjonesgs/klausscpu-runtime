@@ -90,6 +90,8 @@ scripts find each other relative to that.
 | `data.img` | `/data` (224 MiB, read-write): `/root`, `/home`, `/data/etc` (users, passwords, settings), `/data/overlay` |
 | `swap.img` | 256 MiB swap, turned on by rcS |
 | `rootfs-static.img` | the previous, statically linked system, kept for going back |
+| `toolchain.img` | clang, lld and the sysroot (ext4, 156 MiB, read-only at `/opt/llvm`; `install-toolchain`, `linux/toolchain/build-toolchain-image.sh`) |
+| `toolchain.img.next` | a toolchain image staged by `install-toolchain` while `/opt/llvm` was mounted; rcS swaps it in at boot |
 
 ## Kernels
 
@@ -115,7 +117,11 @@ scripts find each other relative to that.
 | Put a hand-made file on the board | `scp` it: it lands in the overlay. To keep it, also put it in the repo (`linux/userland`, `linux/initramfs/etc`, `build-rootfs.sh`) |
 | See or clear the overlay | `overlay status`, `overlay files`, `overlay reset` (at the next boot) |
 | Check the whole board | `tools/validate/board-check.sh [--boot] [--quick]`: 16 checks, about 8 min, takes both locks |
-| Emulator tests | `tools/validate/linux.sh <out> <mode>` (modes in its header); `linux/userland/tests/{dynlink,libffi}/run.sh` |
+| Emulator tests | `tools/validate/linux.sh <out> <mode>` (modes in its header); `linux/userland/tests/{dynlink,libffi,cxx}/run.sh` |
+| Build the C++ runtime (libunwind, libc++abi, libc++) | `linux/cxx/build.sh` (installs into `linux-ws/dyn/sysroot`) |
+| Build clang for the board | `NATIVE_MULTICALL=1 NATIVE_BUILD_TYPE=Release NATIVE_BUILD=../klausscpu-llvm/build-native-klausscpu-multi-o2 linux/toolchain/build-native-llvm.sh` (about 10 min) |
+| Build and install the toolchain image (about 5 min, no reboot) | `linux/toolchain/build-toolchain-image.sh`, then on the board `umount /opt/llvm`, then `gzip -1c linux-ws/toolchain.img \| ssh root@board install-toolchain -z -` (while `/opt/llvm` is mounted it is staged for the next boot instead) |
+| Check the board's compiler | `linux/userland/tests/native-clang/board.sh` (identity with the cross clang, links, runs; `NC_SKIP=cxx-stdlib` saves an hour), `perf.sh` (timings under perfstat) |
 
 - **A new image clears the overlay:** installing one moves the overlay's
   changes to `/data/overlay/upper.old` at boot, so pushed packages must be in
@@ -135,9 +141,60 @@ scripts find each other relative to that.
   `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1/2/4/8`.
 - **Buildroot's compiler wrapper** (`linux/buildroot/toolchain.sh`) drops
   link-only options when only compiling, so meson works.
-- **No C++ runtime for KlaussCPU Linux yet:** no libc++, libc++abi or
-  libunwind, and C++ exceptions don't compile (llvm `OPEN_ITEMS.md` #26). This
-  is the first milestone of `CLANG_ON_BOARD_PLAN.md`.
+- **C++:** libc++, libc++abi and libunwind (KlaussCPU port) exist for the
+  Linux triple, static and shared (`linux/cxx/build.sh`); `clang++ x.cpp`
+  links them. Exceptions use R0/R1 at landing pads (ABI.md "Exceptions").
+  Buildroot has C++ on, and the system image carries the shared libraries.
+
+## Compiling on the board
+
+The board compiles and links its own programs with `/opt/llvm/bin/clang`
+(on PATH in login shells). The objects and links are byte-identical to the
+cross clang's (`CLANG_ON_BOARD_PLAN.md` M5).
+
+```
+clang -O2 hello.c -o hello            # static, like the cross driver
+clang -O2 -fPIE -pie hello.c -o hello # dynamic, against /lib/libc.so
+clang++ -O2 prog.cpp -o prog          # libc++, libc++abi, libunwind
+clang -O2 -fPIC -shared lib.c -o libx.so
+```
+
+- **Where things are:** the headers and libraries are in
+  `/opt/llvm/klausscpu-linux-musl/{include,lib}`, the driver's default
+  sysroot, so no `--sysroot` is needed. clang's own headers are in
+  `/opt/llvm/lib/clang/23/include`.
+- **Libraries of your own** go anywhere, given `-I`/`-L`. Install shared ones
+  where the loader looks (`/lib`, `/usr/lib`, the overlay keeps them), or
+  use `-Wl,-rpath`.
+- **The tools:** `ld.lld`, `llvm-ar`, `llvm-nm`, `llvm-objdump` and
+  `llvm-readelf` are in `/opt/llvm/bin` too.
+- **What to expect** (the Release-built clang, quiet board):
+
+  | compile | time |
+  |---|---|
+  | C hello, -O2 | 1–2 s |
+  | zlib deflate.c (2000 lines), -O0 / -O1 / -O2 | 29 / 73 / 90 s |
+  | all of zlib (16 files at -O2, link, run the test) | 7.5 min |
+  | C++ hello with `<string>` and `<vector>` | 3.5 min, whatever the -O (header parsing) |
+  | the same with a precompiled header | 44 s |
+
+- **Use -O0 or -O1 while developing:** codegen is most of the C time.
+- **For C++, precompile the headers you use.** The PCH must be built with
+  the same -O level and options it will be used with:
+
+  ```
+  printf '#include <string>\n#include <vector>\n' > common.h
+  clang++ -O2 -x c++-header common.h -o common.h.pch   # once, ~4.5 min
+  clang++ -O2 -include-pch common.h.pch prog.cpp -o prog
+  ```
+
+- **Memory:** a compile peaks at 50–80 MB. A big C++ file that includes
+  much of libc++ swaps and takes over an hour (libc++'s own test
+  `stdlib.cpp`: 80 min). Keep C++ translation units small.
+- **Why it's slow:** clang's code is far bigger than the I-cache and the
+  TLB's reach. CPI is 5–7, and the TLB refill handler is about a third of
+  the instructions executed. See `CLANG_ON_BOARD_PLAN.md` M6. The
+  hardware candidates are with the CPU session.
 
 ## Performance, where the time goes
 
