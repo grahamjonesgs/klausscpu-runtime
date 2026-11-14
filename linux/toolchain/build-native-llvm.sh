@@ -9,6 +9,7 @@
 #   KLAUSSCPU_SYSROOT   default linux-ws/dyn/sysroot
 #   NATIVE_BUILD        build directory (default klausscpu-llvm/build-native-klausscpu)
 #   NATIVE_RECONFIGURE=1  configure again from scratch
+#   NATIVE_BUILD_TYPE   CMAKE_BUILD_TYPE (default MinSizeRel)
 #   NATIVE_MULTICALL=1  one multicall binary, bin/llvm (LLVM_TOOL_LLVM_DRIVER_BUILD),
 #                       with the tools as symlinks to it, as busybox does:
 #                       the tools share one copy of LLVM (target llvm-driver)
@@ -35,7 +36,7 @@ mkdir -p "$BUILD"
 if [ ! -f "$BUILD/build.ninja" ]; then
   cmake -G Ninja -S "$LLVM_SRC/llvm" -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$RT/linux/cxx/klausscpu-linux.cmake" \
-    -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DCMAKE_BUILD_TYPE=${NATIVE_BUILD_TYPE:-MinSizeRel} \
     -DLLVM_ENABLE_PROJECTS="clang;lld" \
     -DLLVM_TARGETS_TO_BUILD="" -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=KlaussCPU \
     -DLLVM_HOST_TRIPLE=klausscpu-unknown-linux-musl \
