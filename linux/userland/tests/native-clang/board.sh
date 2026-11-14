@@ -98,7 +98,7 @@ while read -r id triple o file cc; do
 done <jobs
 echo "corpus: $(ls i | wc -l) sources, $(wc -l <jobs) compiles, $(du -sh i | cut -f1) preprocessed"
 
-# ---- links: "name|driver|-O2 objects|run command|success pattern" ----
+# ---- links: "name|driver|-O2 objects|run command|success pattern" (no | in a field) ----
 : >links
 if grep -q -- '-O2 ' jobs; then
   have() { for o in "$@"; do [ -f "host/$o" ] || return 1; done; }
@@ -109,7 +109,7 @@ if grep -q -- '-O2 ' jobs; then
   lk strtest clang "userland-strtest-O2.o" "./strtest" "^strtest: PASS"
   lk zlib-example clang "$(cd host && ls zlib-*-O2.o | tr '\n' ' ')" "./zlib-example /tmp/nc-zlib.gz" "inflate with dictionary"
   lk bzip2 clang "$(cd host && ls bzip2-*-O2.o | tr '\n' ' ')" \
-    "./bzip2 -c <$BDIR/i/bzip2-compress.i >t.bz2 && ./bzip2 -dc <t.bz2 | cmp - $BDIR/i/bzip2-compress.i && echo BZIP2-ROUNDTRIP-OK" \
+    "./bzip2 -c <$BDIR/i/bzip2-compress.i >t.bz2 && ./bzip2 -dc <t.bz2 >t.out && cmp t.out $BDIR/i/bzip2-compress.i && echo BZIP2-ROUNDTRIP-OK" \
     "^BZIP2-ROUNDTRIP-OK"
 fi
 mkdir -p host/link
