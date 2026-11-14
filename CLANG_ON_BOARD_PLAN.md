@@ -460,3 +460,22 @@ over an hour, because the board swaps):
 
   The klausscc models behind it (L2, I-cache shapes, return stack,
   DIV/MOD, refill cost) are on klausscc master (1f99640).
+- **Hot-function ordering made things worse.** `--symbol-ordering-file`,
+  hottest first, from the klausscc profile of the MinSizeRel binary:
+
+  | variant | deflate -O2 | C++ hello -O2 | refills per 1000 instructions |
+  |---|---|---|---|
+  | unordered Release | 91 s | 218 s | 8.5 / 10.1 |
+  | every executed function ordered | 110 s | 240 s | 13.5 / 14.0 |
+  | only the 300 hottest ordered | 98 s | 228 s | 9.5 / 11.7 |
+
+  The extra instructions are the refill handler's. A pure hotness order
+  mixes every phase of clang (lexer, parser, Sema, codegen) into one block,
+  so each phase's code spreads over all of it. The link order, by library
+  and source file, already keeps a phase's code together, and the 32-entry
+  round-robin TLB rewards that. A call-graph-aware order (lld
+  `--call-graph-profile-sort`) would need call edges, which the profile
+  lacks. The option was removed.
+- **The board's `/linux/toolchain.img` now holds the unordered Release
+  build:** 156 MiB, 129 MiB used. It went on with `umount /opt/llvm` and
+  `install-toolchain -z -`, 5.3 min, no reboot needed.

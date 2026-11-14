@@ -10,13 +10,6 @@
 #   NATIVE_BUILD        build directory (default klausscpu-llvm/build-native-klausscpu)
 #   NATIVE_RECONFIGURE=1  configure again from scratch
 #   NATIVE_BUILD_TYPE   CMAKE_BUILD_TYPE (default MinSizeRel)
-#   NATIVE_ORDER=1      link with lld --symbol-ordering-file from
-#                       linux/toolchain/clang-order.txt.gz: clang's functions
-#                       hottest first (a klausscc profile of clang compiling C
-#                       and C++, CLANG_ON_BOARD_PLAN.md M6), which packs the
-#                       hot code into a few 64 KiB pages (the board's TLB
-#                       reaches 32) instead of spreading it over ~650.
-#                       Applied to an existing build directory too (relink).
 #   NATIVE_MULTICALL=1  one multicall binary, bin/llvm (LLVM_TOOL_LLVM_DRIVER_BUILD),
 #                       with the tools as symlinks to it, as busybox does:
 #                       the tools share one copy of LLVM (target llvm-driver)
@@ -67,13 +60,9 @@ if [ ! -f "$BUILD/build.ninja" ]; then
     "${MULTI[@]}" \
     >"$BUILD/configure.log" 2>&1 || { tail -40 "$BUILD/configure.log"; exit 1; }
 fi
+# Hot-function ordering (lld --symbol-ordering-file from a klausscc profile)
+# was tried and made the board slower: CLANG_ON_BOARD_PLAN.md M6.
 LDFLAGS="-static"
-if [ "${NATIVE_ORDER:-0}" = 1 ]; then
-  gunzip -c "$HERE/clang-order.txt.gz" >"$BUILD/clang-order.txt"
-  LDFLAGS="$LDFLAGS -Wl,--symbol-ordering-file=$BUILD/clang-order.txt -Wl,--no-warn-symbol-ordering"
-fi
-# The link flags are set on every run, so switching the order on or off
-# relinks an existing build.
 cmake -S "$LLVM_SRC/llvm" -B "$BUILD" -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" >>"$BUILD/configure.log" 2>&1 ||
   { tail -5 "$BUILD/configure.log"; exit 1; }
 ninja -C "$BUILD" $TARGETS
