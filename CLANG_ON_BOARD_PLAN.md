@@ -515,3 +515,19 @@ over an hour, because the board swaps):
     run first.
 - **Next RTL item:** removing the +1 EX cycle that every load and store
   pays under TE=1.
+- **RTL item 2: the TLB lookup moved into the first EX cycle** (klaussCPU
+  tlbx db67f3f, 2026-11-14). Warm `perf.sh`, against the walker image:
+
+  | | `stall_muldiv` | `if_miss` | cycles | wall |
+  |---|---|---|---|---|
+  | deflate -O2 | 7.7% → 0.3% of cycles | +0.63 G | −0.8% | 91 → 90 s |
+  | C++ hello -O2 | 5.6% → 0.2% of cycles | +1.33 G | −2.7% | 204 → 199 s |
+
+  The hold is gone, but most of those cycles were overlapped with an
+  I-fetch miss already in progress, so the I-side miss shows instead. The
+  front end, I-cache misses to DRAM, is the binding constraint. That argues
+  for the I-cache and the L2 (with its own I path) next.
+- **Miss spacing** (klausscc 946473b): a D fill comes within 7
+  instructions of an I fill or writeback 54% (deflate) and 72% (C++) of the
+  time. The L2 design therefore gets a writeback buffer and separate I/D
+  request paths, with demand D fills ahead of the I prefetch.
