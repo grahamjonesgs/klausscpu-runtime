@@ -37,17 +37,21 @@ scripts find each other relative to that.
 
 ## Hardware state
 
-- **Flash:** the QSPI flash holds klaussCPU 166885e (tlb32 a92ce08), and
-  power-up boots it. `CPU_FEATURES` reads 0x01F0_200D: 32 TLB entries, LR/SC,
-  DCBZ, and misaligned 64-bit accesses trap (emulated by the kernel).
-- **The emulator matches it:** klausscc defaults to 32 TLB entries;
-  `--tlb-entries 16` models older bitstreams.
-  - **The exception is the TLB walker.** Since klausscc da7b41f the
-    emulator also models the hardware TLB walker (klaussCPU MMU_PLAN §11.8,
-    CPU_FEATURES[25]), which the QSPI bitstream does not have yet.
-    `--no-tlb-walker` models the board as it is.
-  - **The kernel** (runtime dc07cb5) turns the walker on when the feature
-    bit says so, and runs as before without it.
+- **Flash:** the QSPI flash holds klaussCPU master 1dc3a55 (tlbwalk
+  de0694d, written 2026-11-14), and power-up boots it. `CPU_FEATURES` reads
+  0x03F0_200D: 32 TLB entries, LR/SC, DCBZ, misaligned 64-bit accesses trap
+  (emulated by the kernel), and the hardware TLB walker (bit 25, MMU_PLAN
+  §11.8).
+  - **The walker** refills useg misses from the page tables without an
+    exception. The kernel (runtime dc07cb5) turns it on;
+    `/proc/klausscpu_tlbwalk` shows it and takes 0 or 1, and `notlbwalk` on
+    the command line keeps it off.
+  - **Rollback:** the RTL session's `~/.cache/kbuild/rollback/README.txt`
+    (the pre-walker QSPI dump, or the tlb32 bitstream a92ce08).
+- **The emulator matches it:** klausscc defaults to 32 TLB entries and the
+  walker. Whole-instruction restart after a walk is as in the RTL (klausscc
+  cc309a6). `--tlb-entries 16` and `--no-tlb-walker` model older
+  bitstreams.
 
 ## Board access and the board protocol (important)
 
