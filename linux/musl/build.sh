@@ -21,6 +21,11 @@
 #                       (klausscpu-llvm main from 432b009) and a
 #                       workspace of its own (LINUX_WS): the default static
 #                       build is unchanged.
+#   MUSL_MALLOC         the allocator, configure's --with-malloc: mallocng
+#                       (default) or oldmalloc.  oldmalloc needs a workspace
+#                       of its own (LINUX_WS): only the board's native clang
+#                       links it (linux/toolchain/build-native-llvm.sh
+#                       NATIVE_MALLOC=oldmalloc).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../.." && pwd)
@@ -28,10 +33,15 @@ WS=${LINUX_WS:-$RT/linux-ws}
 KWS=${LINUX_KERNEL_WS:-$WS}
 B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 SHARED=${MUSL_SHARED:-0}
+MALLOC=${MUSL_MALLOC:-mallocng}
+case $MALLOC in mallocng|oldmalloc) ;; *) echo "musl: MUSL_MALLOC is mallocng or oldmalloc"; exit 1 ;; esac
 # The shared build has a workspace of its own: its libc.a, libc.so and
 # sysroot must not mix with the default static one.
 if [ "$SHARED" = 1 ] && [ "$(realpath -m "$WS")" = "$(realpath -m "$RT/linux-ws")" ]; then
   echo "musl: MUSL_SHARED=1 needs LINUX_WS set to a workspace of its own"; exit 1
+fi
+if [ "$MALLOC" != mallocng ] && [ "$(realpath -m "$WS")" = "$(realpath -m "$RT/linux-ws")" ]; then
+  echo "musl: MUSL_MALLOC=$MALLOC needs LINUX_WS set to a workspace of its own"; exit 1
 fi
 SRC=$WS/musl
 SYSROOT=$WS/sysroot
@@ -112,7 +122,7 @@ OPTIMIZE_GLOBS = internal/*.c malloc/*.c string/*.c
 ALL_TOOLS =
 TOOL_LIBS =
 ADD_CFI = no
-MALLOC_DIR = mallocng
+MALLOC_DIR = $MALLOC
 WRAPCC_GCC = \$(CC)
 MAK
 # libc.a from non-PIC objects in both modes (configure's choice when the

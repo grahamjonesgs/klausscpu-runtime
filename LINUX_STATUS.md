@@ -191,18 +191,28 @@ clang -O2 -fPIC -shared lib.c -o libx.so
   | the same with a precompiled header | 44 s |
 
 - **Use -O0 or -O1 while developing:** codegen is most of the C time.
-- **For C++, precompile the headers you use.** The PCH must be built with
-  the same -O level and options it will be used with:
+- **For C++, use a precompiled header.** `clang-pch` builds one of the
+  common libc++ headers once per option set, into `~/.cache/clang-pch`, and
+  prints the flag that uses it. Pass it the options that change what the
+  headers mean: -O level, -std, -D, and -f flags such as -fno-exceptions.
 
   ```
-  printf '#include <string>\n#include <vector>\n' > common.h
-  clang++ -O2 -x c++-header common.h -o common.h.pch   # once, ~4.5 min
-  clang++ -O2 -include-pch common.h.pch prog.cpp -o prog
+  clang++ -O2 $(clang-pch -O2) prog.cpp -o prog
   ```
+
+  The first use of an option set takes about 6 minutes and writes 14 MB.
+  After that, the C++ hello compiles and links in about 53 s instead of
+  3.5 minutes. `clang-pch [options] -- header...` takes your own header
+  list. clang refuses a PCH built with different options and names the
+  difference.
 
 - **Memory:** a compile peaks at 50–80 MB. A big C++ file that includes
   much of libc++ swaps and takes over an hour (libc++'s own test
   `stdlib.cpp`: 80 min). Keep C++ translation units small.
+- **Fixed cost:** a trivial C compile is about 19 M instructions, of which
+  about 13 M is fixed per-process start-up: page faults, ~1800 option
+  registrations, malloc. A link starts `ld.lld` as a second process.
+  Fault-around of 16 pages (kernel 0876dbb) cut 5–11% of it.
 - **Why it's slow:** clang's code is far bigger than the I-cache and the
   TLB's reach. CPI is 5–7, and the TLB refill handler is about a third of
   the instructions executed. See `CLANG_ON_BOARD_PLAN.md` M6. The
