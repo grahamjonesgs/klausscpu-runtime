@@ -27,6 +27,9 @@ void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr
 bool klausscpu_misaligned_user(struct pt_regs *regs, unsigned long cause);
 void klausscpu_misaligned_init(void);
 unsigned long klausscpu_misaligned_count(void);	/* emulated since boot */
+/* mm/tlbwalk.c: the hardware TLB walker, when CPU_FEATURES[25] says so. */
+void klausscpu_tlbwalk_init(void);
+unsigned long klausscpu_tlb_walks(void);	/* walker refills since boot */
 asmlinkage void klausscpu_ret_from_fork(struct task_struct *prev, struct pt_regs *regs,
 					int (*fn)(void *), void *arg);
 #endif

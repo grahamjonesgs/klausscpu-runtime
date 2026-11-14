@@ -21,6 +21,11 @@
 #define SR_TLB_INDEX	0x32	/* index, [31] P (TLBP missed) */
 #define SR_ASID		0x33
 #define SR_TLBVEC	0x34
+/* The hardware TLB walker (klaussCPU MMU_PLAN §11.8, CPU_FEATURES[25]). */
+#define SR_TLB_PTB	0x35	/* [26:3] PA of the current useg pgd */
+#define SR_TLB_WALK	0x36	/* [0] EN, [12:8] RR: the next walker refill's entry */
+#define SR_TLB_WCNT	0x37	/* 48-bit count of walker refills */
+#define TLB_WALK_EN	0x1
 
 #define STATUS_UM	0x1
 #define STATUS_DI	0x2
@@ -95,6 +100,7 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define CPU_FEAT_TLB_ENTRIES(f)	(((f) >> 8) & 0xff)
 #define CPU_FEAT_SDNATIVE	(1UL << 21)	/* native SD controller, INT2 cascade */
 #define CPU_FEAT_MAL64		(1UL << 23)	/* STATUS.MAL64 implemented */
+#define CPU_FEAT_TLBWALK	(1UL << 25)	/* the hardware TLB walker (SR_TLB_PTB...) */
 
 #ifndef __ASSEMBLER__
 

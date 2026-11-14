@@ -205,5 +205,6 @@ void __init trap_init(void)
 {
 	mtsr(SR_TLBVEC, (unsigned long)klausscpu_tlb_refill);
 	mtsr(SR_EVEC, (unsigned long)klausscpu_exc_vector);
+	klausscpu_tlbwalk_init();
 	klausscpu_misaligned_init();
 }

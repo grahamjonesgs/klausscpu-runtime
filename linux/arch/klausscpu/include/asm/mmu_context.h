@@ -12,6 +12,10 @@
 #include <linux/mm_types.h>
 #include <asm/tlbflush.h>
 #include <asm/klausscpu.h>
+#include <asm/page.h>
+
+/* The CPU has the hardware TLB walker (CPU_FEATURES[25]; mm/tlbwalk.c). */
+extern bool klausscpu_tlb_walker;
 
 #define ASID_MASK		0xffUL
 #define ASID_VERSION_MASK	(~ASID_MASK)
@@ -72,6 +76,10 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	check_mmu_context(next);
 	mtsr(SR_ASID, next->context.asid & ASID_MASK);
 	mtsr(SR_SCRATCH1, (unsigned long)next->pgd);
+	/* The hardware walker's pgd (mm/tlbwalk.c): kept current whether
+	 * the walker is on or not, so it can be switched on at any time. */
+	if (klausscpu_tlb_walker)
+		mtsr(SR_TLB_PTB, __pa(next->pgd));
 	local_irq_restore(flags);
 }
 #define switch_mm switch_mm
