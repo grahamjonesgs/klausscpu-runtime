@@ -489,3 +489,12 @@ over an hour, because the board swaps):
     bddd5e3;
   - kernel support (`mm/tlbwalk.c`, gated on CPU_FEATURES[25]) and a
     klausscc model are in progress.
+- **The walker's software side is done** (2026-11-14):
+  - klausscc da7b41f: the model, on by default; `--no-tlb-walker` models
+    today's bitstream;
+  - runtime dc07cb5: kernel support, with `/proc/klausscpu_tlbwalk` to
+    switch it at run time.
+- **On the emulator, clang compiling deflate.c -O2** goes from 2.10 G to
+  1.45 G instructions (−31%). All 20.1 M refills are the walker's. My
+  board estimate is about 10% faster compiles; the RTL session's bitstream
+  will measure it.
