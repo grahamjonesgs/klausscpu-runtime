@@ -498,3 +498,20 @@ over an hour, because the board swaps):
   1.45 G instructions (−31%). All 20.1 M refills are the walker's. My
   board estimate is about 10% faster compiles; the RTL session's bitstream
   will measure it.
+- **The walker on the board** (klaussCPU tlbwalk de0694d, CPU_FEATURES
+  0x03F0200D, tested by the RTL session; going to QSPI):
+  - checks: the bare-metal suite, test_tlb, test_exc and board-check all
+    pass;
+  - a walk costs ~27 cycles against ~140 for tlbex.S;
+  - clang -O2, the same refills either way (13.9 M on deflate, 31 M on the
+    C++ hello):
+    - deflate: 1.83 G → 1.36–1.49 G instructions, 105 s → 91–100 s;
+    - C++ hello: 3.24 G → 2.28–2.46 G instructions, 230 s → 207–214 s.
+
+    That's ~20–25% fewer instructions and 5–10% less time.
+  - the object files are identical with the walker on and off.
+  - A first run also pages clang in from the card, and those kernel
+    instructions land in the global counters: `perf.sh` now does a warm-up
+    run first.
+- **Next RTL item:** removing the +1 EX cycle that every load and store
+  pays under TE=1.
