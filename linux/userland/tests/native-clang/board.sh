@@ -9,6 +9,14 @@
 # clang itself (or a host dependency in it).  The .comment section (clang's
 # version string, which names the commit each was built from) is left out of
 # the comparison; the two strings are printed.
+#
+# Then programs are linked on the board from its -O2 objects (static, as the
+# driver links by default), the links compared with the cross lld's links
+# of the host objects (also without .comment), and run on the board, each
+# checked for its own success line: libc++'s tests (eh, stdlib), musltest,
+# strtest, zlib's example and a bzip2 round trip.
+#   NC_SKIP     an extended regex of corpus names to leave out (e.g.
+#               'cxx-stdlib': its -O2 compile takes over an hour on the board)
 #   NC_CORPUS   corpus names (default: see CORPUS below)
 #   NC_OPTS     optimisation levels (default "-O2 -O0")
 #   NC_OUT      work directory (default linux-ws/native-clang)
@@ -17,6 +25,7 @@
 #   BOARD_SSH, BOARD_SCP, BOARD_IP, BOARD_SSH_KEY as in ../libffi/board.sh
 # Take the board first (the board protocol): this script does not lock.
 set -euo pipefail
+{	# read whole before it runs: the script may be edited meanwhile
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../../../.." && pwd)
 SRC=$(cd "$RT/.." && pwd)
@@ -41,8 +50,11 @@ cd "$OUT"
 CORPUS=()
 add() { CORPUS+=("$1|$2|$3|${4:-}|${5:-}"); }
 PICO=$RT/picolibc-install
-for f in "$BR"/libzlib-*/{adler32,compress,crc32,deflate,infback,inffast,inflate,inftrees,trees,uncompr,zutil}.c; do
+for f in "$BR"/libzlib-*/{adler32,compress,crc32,deflate,gzclose,gzlib,gzread,gzwrite,infback,inffast,inflate,inftrees,trees,uncompr,zutil}.c; do
   [ -f "$f" ] && add "zlib-$(basename "$f" .c)" $T "$f" "-DHAVE_UNISTD_H -I$(dirname "$f")"
+done
+for f in "$BR"/libzlib-*/test/example.c; do
+  [ -f "$f" ] && add zlib-example $T "$f" "-DHAVE_UNISTD_H -I$(dirname "$f")/.."
 done
 for f in "$BR"/bzip2-*/{blocksort,huffman,crctable,randtable,compress,decompress,bzlib,bzip2}.c; do
   [ -f "$f" ] && add "bzip2-$(basename "$f" .c)" $T "$f" "-D_FILE_OFFSET_BITS=64 -I$(dirname "$f")"
@@ -66,6 +78,7 @@ done
 : >jobs
 for e in "${CORPUS[@]}"; do
   IFS='|' read -r name triple src extra cc <<<"$e"
+  if [ -n "${NC_SKIP:-}" ] && grep -qE "^(${NC_SKIP})\$" <<<"$name"; then echo "SKIP $name (NC_SKIP)"; continue; fi
   case $src in *.cpp) drv=clang++ ext=ii ;; *) drv=clang ext=i ;; esac
   sr=; [ "$triple" = $T ] && sr=--sysroot=$SR
   if ! "$B/$drv" --target="$triple" $sr $extra -E "$src" -o "i/$name.$ext" 2>"i/$name.err"; then
@@ -85,6 +98,26 @@ while read -r id triple o file cc; do
 done <jobs
 echo "corpus: $(ls i | wc -l) sources, $(wc -l <jobs) compiles, $(du -sh i | cut -f1) preprocessed"
 
+# ---- links: "name|driver|-O2 objects|run command|success pattern" ----
+: >links
+if grep -q -- '-O2 ' jobs; then
+  have() { for o in "$@"; do [ -f "host/$o" ] || return 1; done; }
+  lk() { local objs=$3; have $objs && echo "$1|$2|$objs|$4|$5" >>links || true; }
+  lk eh clang++ "cxx-eh-O2.o cxx-eh_lib-O2.o" "./eh" "^DONE eh failures=0"
+  lk stdlib clang++ "cxx-stdlib-O2.o" "./stdlib" "^DONE stdlib failures=0"
+  lk musltest clang "userland-musltest-O2.o" "./musltest" "^musltest: PASS"
+  lk strtest clang "userland-strtest-O2.o" "./strtest" "^strtest: PASS"
+  lk zlib-example clang "$(cd host && ls zlib-*-O2.o | tr '\n' ' ')" "./zlib-example /tmp/nc-zlib.gz" "inflate with dictionary"
+  lk bzip2 clang "$(cd host && ls bzip2-*-O2.o | tr '\n' ' ')" \
+    "./bzip2 -c <$BDIR/i/bzip2-compress.i >t.bz2 && ./bzip2 -dc <t.bz2 | cmp - $BDIR/i/bzip2-compress.i && echo BZIP2-ROUNDTRIP-OK" \
+    "^BZIP2-ROUNDTRIP-OK"
+fi
+mkdir -p host/link
+while IFS='|' read -r name drv objs _; do
+  (cd host && "$B/$drv" --target=$T --sysroot="$SR" -o "link/$name" $objs) ||
+    { echo "FAIL host-link $name"; fail=$((fail + 1)); }
+done <links
+
 # ---- the board ----
 "${SSH[@]}" "rm -rf $BDIR && mkdir -p $BDIR/i $BDIR/o"
 "${SCP[@]}" -q i/* jobs "root@$IP:$BDIR/i/"
@@ -97,7 +130,16 @@ start=$(date +%s)
   echo \"\$id \$((\$(date +%s) - s))\" >>../o/times
 done <jobs"
 echo "board: $(( $(date +%s) - start )) s for $(wc -l <jobs) compiles"
-"${SCP[@]}" -q "root@$IP:$BDIR/o/*" board/
+# Link with the board's own lld (its default sysroot), then run.
+"${SCP[@]}" -q links "root@$IP:$BDIR/o/"
+"${SSH[@]}" "mkdir -p $BDIR/o/link && cd $BDIR/o && while IFS='|' read -r name drv objs run pat; do
+  case \$drv in clang++) d=$BOARD_CLANG++ ;; *) d=$BOARD_CLANG ;; esac
+  s=\$(date +%s)
+  \$d --target=$T -o link/\$name \$objs 2>link/\$name.err && rm -f link/\$name.err
+  echo \"link-\$name \$((\$(date +%s) - s))\" >>times
+  [ -x link/\$name ] && (cd link && sh -c \"\$run\" >\$name.out 2>&1; echo \"exit=\$?\" >>\$name.out)
+done <links"
+"${SCP[@]}" -q -r "root@$IP:$BDIR/o/*" board/
 "${SSH[@]}" "rm -rf $BDIR"
 
 # ---- compare ----
@@ -114,11 +156,29 @@ while read -r id _; do
     echo "FAIL $id: objects differ ($(cmp "host/$id.o" "board/$id.o" | head -1))"; fail=$((fail + 1))
   fi
 done <jobs
+while IFS='|' read -r name _ _ _ pat; do
+  if [ -f "board/link/$name.err" ] || [ ! -f "board/link/$name" ]; then
+    echo "FAIL link-$name: board link failed: $(head -3 "board/link/$name.err" 2>/dev/null | tr '\n' ' ')"; fail=$((fail + 1)); continue
+  fi
+  if "$B/llvm-objcopy" -R .comment "host/link/$name" cmp-h.o && "$B/llvm-objcopy" -R .comment "board/link/$name" cmp-b.o &&
+     cmp -s cmp-h.o cmp-b.o; then
+    same=$((same + 1))
+  else
+    echo "FAIL link-$name: links differ ($(cmp cmp-h.o cmp-b.o | head -1))"; fail=$((fail + 1))
+  fi
+  if grep -qE "$pat" "board/link/$name.out" && grep -q '^exit=0' "board/link/$name.out"; then
+    echo "PASS run-$name"
+  else
+    echo "FAIL run-$name: $(tail -3 "board/link/$name.out" | tr '\n' ' ')"; fail=$((fail + 1))
+  fi
+done <links
 rm -f cmp-h.o cmp-b.o
 for w in host board; do
   f=$(ls $w/*.o 2>/dev/null | head -1)
   [ -n "$f" ] && echo "INFO $w: $("$B/llvm-readelf" -p .comment "$f" | grep -o 'clang version.*')"
 done
 sort -k2 -n -r board/times | head -5 | sed 's/^/INFO slowest: /'
-echo "RESULT: $same identical, $fail failing"
+echo "RESULT: $same identical (objects and links), $fail failing"
 [ "$fail" = 0 ]
+exit
+}

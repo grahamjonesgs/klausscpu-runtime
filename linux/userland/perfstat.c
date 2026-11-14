@@ -5,11 +5,13 @@
  * before it and read after it, and print them.  -d N divides every count
  * by N (per iteration of a benchmark loop of N iterations).  The counters
  * are global, so the result includes the kernel, other processes and idle
- * cycles: run it on an otherwise quiet system.
+ * cycles: run it on an otherwise quiet system.  Also printed: the
+ * command's user and system time and its peak resident size (wait4).
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -54,7 +56,8 @@ int main(int argc, char **argv)
 		perror(argv[i]);
 		_exit(127);
 	}
-	if (pid < 0 || waitpid(pid, &st, 0) < 0) {
+	struct rusage ru;
+	if (pid < 0 || wait4(pid, &st, 0, &ru) < 0) {
 		perror("perfstat");
 		return 1;
 	}
@@ -82,5 +85,8 @@ int main(int argc, char **argv)
 	if (ins)
 		fprintf(stderr, "  CPI %.2f (busy cycles / instructions %.2f)\n",
 			(double)cyc / ins, (double)busy / ins);
+	fprintf(stderr, "  user %.2f s, sys %.2f s, maxrss %ld KiB\n",
+		ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6,
+		ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6, ru.ru_maxrss);
 	return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
 }
