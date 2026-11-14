@@ -479,3 +479,13 @@ over an hour, because the board swaps):
 - **The board's `/linux/toolchain.img` now holds the unordered Release
   build:** 156 MiB, 129 MiB used. It went on with `umount /opt/llvm` and
   `install-toolchain -z -`, 5.3 min, no reboot needed.
+- **M5 again, on the installed Release clang** (2026-11-14): 102 objects
+  and 5 links identical, all 5 programs run correctly. The 102 compiles
+  took 2415 s, against 3024 s with the MinSizeRel build: 20% faster.
+- **The hardware TLB walker** (klaussCPU MMU_PLAN §11.8, spec v1 frozen
+  2026-11-14, Graham's choice of the CPU session's first item):
+  - the RTL session is building it on klaussCPU branch `tlbwalk`;
+  - the SR names `tlb_ptb`, `tlb_walk` and `tlb_wcnt` are in klausscpu-llvm
+    bddd5e3;
+  - kernel support (`mm/tlbwalk.c`, gated on CPU_FEATURES[25]) and a
+    klausscc model are in progress.
