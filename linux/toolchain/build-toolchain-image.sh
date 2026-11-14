@@ -8,7 +8,7 @@
 #                        with NATIVE_MULTICALL=1), and as symlinks to it
 #                        clang, clang++, cc, c++, ld.lld, lld, llvm-ar,
 #                        llvm-ranlib, llvm-nm, llvm-objdump, llvm-readelf,
-#                        llvm-readobj
+#                        llvm-readobj; clang-pch (precompiled libc++ headers)
 #   /opt/llvm/lib/clang/<ver>/include   clang's resource headers
 #   /opt/llvm/lib/clang/<ver>/lib/klausscpu-unknown-linux-musl  the Linux
 #                        compiler-rt builtins
@@ -53,6 +53,9 @@ mkdir -p "$ST/bin" "$ST/lib/clang/$VER/lib/$TRIPLE" "$ST/klausscpu-linux-musl"
 for t in clang clang++ cc c++ ld.lld lld llvm-ar llvm-ranlib llvm-nm llvm-objdump llvm-readelf llvm-readobj; do
   ln -s llvm "$ST/bin/$t"
 done
+# clang-pch: precompiled libc++ headers, built once per option set in
+# ~/.cache/clang-pch (C++ compiles about 5x faster).
+install -m 755 "$HERE/clang-pch" "$ST/bin/clang-pch"
 
 # clang's resource directory: headers and the Linux builtins.
 cp -r "$RES/include" "$ST/lib/clang/$VER/include"

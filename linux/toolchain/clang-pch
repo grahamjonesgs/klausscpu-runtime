@@ -1,0 +1,62 @@
+#!/bin/sh
+# clang-pch [options] [-- header...]: a precompiled header of common libc++
+# headers for compiling C++ on the board, built once and kept in
+# ~/.cache/clang-pch.  It prints the options that use it, so:
+#
+#   clang++ -O2 $(clang-pch -O2) prog.cpp -o prog
+#
+# A C++ compile spends nearly all its time parsing headers (a hello with
+# <string> and <vector>: about 3.5 minutes; with a precompiled header about
+# 45 s).  The header is prepended to the program, so the program's own
+# #includes of the same headers cost nothing more.
+#
+# [options] must be the compile's options that change what the headers mean:
+# -O level (it defines __OPTIMIZE__), -std=, -D/-U, -f flags such as
+# -fno-exceptions or -fno-rtti, -I for headers of your own.  clang refuses a
+# precompiled header built with different ones, with an error that names the
+# difference.  Each distinct set gets its own file; the first use of a set
+# builds it (minutes; the progress goes to stderr).
+#
+# Without "-- header...", the headers are <algorithm> <cstdint> <cstdio>
+# <cstdlib> <cstring> <exception> <functional> <iostream> <map> <memory>
+# <sstream> <stdexcept> <string> <utility> <vector>.
+#   CLANG_PCH_DIR  where the files go (default ~/.cache/clang-pch)
+#   CXX            the compiler (default clang++ beside this script)
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+CXX=${CXX:-$here/clang++}
+dir=${CLANG_PCH_DIR:-${HOME:-/tmp}/.cache/clang-pch}
+opts=
+headers=
+seen_dd=0
+for a in "$@"; do
+	if [ $seen_dd = 1 ]; then
+		headers="$headers $a"
+	elif [ "$a" = -- ]; then
+		seen_dd=1
+	else
+		opts="$opts $a"
+	fi
+done
+[ -n "$headers" ] || headers="algorithm cstdint cstdio cstdlib cstring exception functional iostream map memory sstream stdexcept string utility vector"
+# The key: the compiler (its version names the build), the options and the
+# headers.
+key=$({ "$CXX" --version | head -1; echo "$opts"; echo "$headers"; } | md5sum | cut -c1-16)
+pch=$dir/$key.pch
+if [ ! -s "$pch" ]; then
+	mkdir -p "$dir"
+	src=$dir/$key.h
+	: >"$src.tmp"
+	for h in $headers; do
+		case $h in
+		\<*\>|\"*\") echo "#include $h" ;;
+		*) echo "#include <$h>" ;;
+		esac >>"$src.tmp"
+	done
+	mv "$src.tmp" "$src"
+	echo "clang-pch: building $pch (once for these options; minutes)" >&2
+	# shellcheck disable=SC2086
+	"$CXX" $opts -x c++-header "$src" -o "$pch.tmp"
+	mv "$pch.tmp" "$pch"
+fi
+echo "-include-pch $pch"
