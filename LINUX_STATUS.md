@@ -42,6 +42,12 @@ scripts find each other relative to that.
   DCBZ, and misaligned 64-bit accesses trap (emulated by the kernel).
 - **The emulator matches it:** klausscc defaults to 32 TLB entries;
   `--tlb-entries 16` models older bitstreams.
+  - **The exception is the TLB walker.** Since klausscc da7b41f the
+    emulator also models the hardware TLB walker (klaussCPU MMU_PLAN §11.8,
+    CPU_FEATURES[25]), which the QSPI bitstream does not have yet.
+    `--no-tlb-walker` models the board as it is.
+  - **The kernel** (runtime dc07cb5) turns the walker on when the feature
+    bit says so, and runs as before without it.
 
 ## Board access and the board protocol (important)
 
