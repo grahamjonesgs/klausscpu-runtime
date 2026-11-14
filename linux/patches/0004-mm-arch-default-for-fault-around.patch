@@ -1,0 +1,31 @@
+diff --git a/mm/memory.c b/mm/memory.c
+index 8b0c2c735..b9b81e246 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -5871,8 +5871,25 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
+ 	return ret;
+ }
+ 
++/* An architecture with large pages may want more than one page around. */
++#ifndef ARCH_FAULT_AROUND_BYTES
++#define ARCH_FAULT_AROUND_BYTES 65536
++#endif
+ static unsigned long fault_around_pages __read_mostly =
+-	65536 >> PAGE_SHIFT;
++	ARCH_FAULT_AROUND_BYTES >> PAGE_SHIFT;
++
++/* fault_around_bytes=N on the command line, as the debugfs file below. */
++static int __init fault_around_bytes_param(char *s)
++{
++	unsigned long val;
++
++	if (kstrtoul(s, 0, &val))
++		return -EINVAL;
++	val = clamp(val, PAGE_SIZE, PTRS_PER_PTE * PAGE_SIZE);
++	fault_around_pages = rounddown_pow_of_two(val) >> PAGE_SHIFT;
++	return 0;
++}
++early_param("fault_around_bytes", fault_around_bytes_param);
+ 
+ #ifdef CONFIG_DEBUG_FS
+ static int fault_around_bytes_get(void *data, u64 *val)

@@ -37,6 +37,14 @@
 #define PGDIR_SIZE	(_AC(1, UL) << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE - 1))
 #define PTRS_PER_PTE	(_AC(1, UL) << PTE_INDEX_BITS)		/* 1024 */
+
+/*
+ * Fault-around (mm/memory.c, patches/0004): map up to 16 cached pages of a
+ * file around a faulting address, not just the one.  With 64 KiB pages the
+ * generic 64 KiB default is a single page, so every page of a big program
+ * (clang touches ~750 of its text pages per compile) took its own fault.
+ */
+#define ARCH_FAULT_AROUND_BYTES	(16 * PAGE_SIZE)
 #define PTRS_PER_PGD	(_AC(1, UL) << (32 - PGDIR_SHIFT))	/* 64 */
 
 /* A PTE table: PTE_FRAG_NR of them share a page. */
