@@ -594,3 +594,18 @@ over an hour, because the board swaps):
   The RTL session is building the baseline (branch `l2`; hit latency 3
   cycles). The kernel support is ready, gated on CPU_FEATURES[26]:
   `/proc/klausscpu_l2`, the counters and `/proc/cpuinfo`.
+- **The ordered Release clang is in `toolchain.img` on the board** (llvm
+  bddd5e3, the same commit as the host compiler). M5 identity test: 107/107
+  objects and links identical, all 5 programs run. The whole corpus took
+  1847 s, against 2415 s two days earlier.
+- **SD card:** native 4-bit at 25 MHz, by PIO. An idle read runs at 6.8 MB/s
+  with the CPU 99% busy, so the CPU copying through the FIFO is the limit,
+  not the bus (12.5 MB/s).
+  - **SD DMA (spec v1, offsets frozen) is approved by Graham,** to follow
+    the L2, because it helps every SD user, not just clang. It comes with
+    D-cache range clean/invalidate ops: CPU_FEATURES[27], CACHE_OP_ADDR
+    0xF005_0030, CACHE_OP_LEN 0xF005_0038, CACHE_CTRL[4]/[5].
+  - **An agent is writing** the klausscc model and the Linux driver (dma_map,
+    ARCH_DMA_MINALIGN 32, arch_sync_dma_* on the range ops).
+  - **asm/cacheflush.h's comment was wrong:** the D-cache does not snoop
+    DMA. Fixed.
