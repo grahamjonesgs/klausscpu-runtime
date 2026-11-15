@@ -41,21 +41,32 @@ static int l2_open(struct inode *inode, struct file *file)
 	return single_open(file, l2_show, NULL);
 }
 
+/* BUSY clears within a few ms (512 sets, at most 4 dirty lines each). */
+static int l2_wait_idle(void)
+{
+	int i;
+
+	for (i = 0; i < 100000 && (readq(l2_ctrl()) & KL_L2_CTRL_BUSY); i++)
+		udelay(1);
+	return readq(l2_ctrl()) & KL_L2_CTRL_BUSY ? -EIO : 0;
+}
+
 static ssize_t l2_write(struct file *file, const char __user *buf,
 			size_t len, loff_t *pos)
 {
 	char c;
-	int i;
 
 	if (!len || get_user(c, buf))
 		return -EFAULT;
 	if (c != '0' && c != '1')
 		return -EINVAL;
+	/* The L2 drops a write to L2_CTRL while BUSY, so wait before as well
+	 * as after (turning it off writes the dirty lines back first; the
+	 * core and the other masters keep running meanwhile). */
+	if (l2_wait_idle())
+		return -EIO;
 	writeq(c == '1' ? KL_L2_CTRL_EN : 0, l2_ctrl());
-	/* Turning it off writes the dirty lines back first. */
-	for (i = 0; i < 100000 && (readq(l2_ctrl()) & KL_L2_CTRL_BUSY); i++)
-		udelay(1);
-	if (readq(l2_ctrl()) & KL_L2_CTRL_BUSY)
+	if (l2_wait_idle())
 		return -EIO;
 	return len;
 }
