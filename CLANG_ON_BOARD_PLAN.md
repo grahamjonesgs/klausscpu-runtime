@@ -558,3 +558,39 @@ over an hour, because the board swaps):
 - **Next:** the L2 (item 3), with a timed klausscc model first; RAS 8
   (item 5); and a faster malloc for clang (musl oldmalloc, being
   evaluated).
+- **Page-cache pressure** (2026-11-15). The 90 MB binary plus 65–80 MB of
+  RSS exceed the board's ~121 MB, so clang's text pages are evicted and
+  re-read from the SD card during a compile, by PIO in a kernel thread.
+  - **The cost:** deflate takes 546–724 major faults and spends 14–17% of
+    its cycles outside the process. The C++ hello takes 1055–1193 major
+    faults, 11–12%. `perfstat` now prints the faults and the share outside
+    the command.
+  - **This was the old "20% gap"** between the emulator and the board.
+    Calibrate against the process's user+sys time, not the global cycles.
+- **Hot-function ordering, reversed: now adopted.** `NATIVE_ORDER=1`, with
+  the order file restored. The page cache's working set now fits, so the
+  re-reads go away, but the denser layout doubles the TLB refills, which
+  the walker makes cheap.
+
+  | | major faults | outside the process | clang CPU time | total |
+  |---|---|---|---|---|
+  | deflate -O2 | 546–697 → 0–6 | 14–17% → 0.5% | +8% | 69–72 s → 64 s (−7 to −11%) |
+  | C++ hello -O2 | 1055–1077 → 44–52 | 11% → 0.5% | +5% | 166 s → 155 s (−6%) |
+
+  The TLB refills go 13.9 → 28.3 M and 31.1 → 51.1 M. Without the walker
+  ordering had been a loss.
+- **A faster malloc was tried and rejected** (`NATIVE_MALLOC=oldmalloc`,
+  measured on the emulator): −0.3 to −0.7% user instructions, but on C++
+  the anonymous peak grows 11% (40 → 45 MB), which triples the major
+  faults. mallocng stays.
+- **The timed L2 model** (klausscc 442306f; calibrated on process cycles,
+  rc = 44): the baseline 128 KiB 4-way L2 with 64 B sectored lines gives
+  −19% (deflate) and −22% (C++). Also measured:
+  - 8-way: +1.5–1.8 points;
+  - 32 B lines: only −14%;
+  - next-line prefetch: +1 point for +35% DDR reads;
+  - a 2-entry write buffer is ample.
+
+  The RTL session is building the baseline (branch `l2`; hit latency 3
+  cycles). The kernel support is ready, gated on CPU_FEATURES[26]:
+  `/proc/klausscpu_l2`, the counters and `/proc/cpuinfo`.

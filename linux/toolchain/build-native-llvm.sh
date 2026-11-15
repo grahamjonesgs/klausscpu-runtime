@@ -13,6 +13,18 @@
 #   NATIVE_MULTICALL=1  one multicall binary, bin/llvm (LLVM_TOOL_LLVM_DRIVER_BUILD),
 #                       with the tools as symlinks to it, as busybox does:
 #                       the tools share one copy of LLVM (target llvm-driver)
+#   NATIVE_ORDER=1      link with lld --symbol-ordering-file from
+#                       linux/toolchain/clang-order.txt.gz: clang's functions
+#                       hottest first (a klausscc profile of clang compiling C
+#                       and C++).  On the board's 121 MB the 90 MB binary's
+#                       text pages are evicted and re-read from the SD card
+#                       during a compile (11-17% of the time); packed hot code
+#                       fits, so the re-reads go, at the cost of ~2x the TLB
+#                       refills (cheap with the hardware walker): -7..-11%
+#                       (deflate) and -6% (C++) wall on the walker + 64 KiB
+#                       I-cache image.  Without the walker it was slower
+#                       (CLANG_ON_BOARD_PLAN.md M6).  The link flags are set
+#                       on every run, so it also relinks an existing build.
 #   NATIVE_MALLOC       the allocator linked into the binary: mallocng (default,
 #                       the sysroot's libc.a) or oldmalloc: a libc.a from the
 #                       same musl tree and patches built with MALLOC_DIR=oldmalloc
@@ -74,9 +86,11 @@ if [ ! -f "$BUILD/build.ninja" ]; then
     "${MULTI[@]}" \
     >"$BUILD/configure.log" 2>&1 || { tail -40 "$BUILD/configure.log"; exit 1; }
 fi
-# Hot-function ordering (lld --symbol-ordering-file from a klausscc profile)
-# was tried and made the board slower: CLANG_ON_BOARD_PLAN.md M6.
 LDFLAGS="-static"
+if [ "${NATIVE_ORDER:-0}" = 1 ]; then
+  gunzip -c "$HERE/clang-order.txt.gz" >"$BUILD/clang-order.txt"
+  LDFLAGS="$LDFLAGS -Wl,--symbol-ordering-file=$BUILD/clang-order.txt -Wl,--no-warn-symbol-ordering"
+fi
 case ${NATIVE_MALLOC:-mallocng} in
 mallocng) ;;
 oldmalloc)
