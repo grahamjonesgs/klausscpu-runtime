@@ -23,6 +23,10 @@
 #                       whole: no mallocng object is linked, and nothing else in
 #                       libc changes.  Only this binary's link changes, not the
 #                       system's libc (CLANG_ON_BOARD_PLAN.md M6).
+#                       Measured on the emulator (2026-11-15): -0.3 to -0.7% user
+#                       instructions, but the C++ hello's anonymous peak grows 11%
+#                       (40 -> 45 MB), squeezing clang's text out of the page cache
+#                       (3x the major faults): not the default.
 # MinSizeRel, no assertions, only the KlaussCPU target, no zlib/zstd/
 # libxml2/terminfo, no threads, no plugins.
 set -euo pipefail
