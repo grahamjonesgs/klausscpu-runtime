@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #define PERF_FILE "/proc/klausscpu_perf"
+#define HZ_MHZ 100	/* the board's clock */
 #define MAXC 64
 
 static char names[MAXC][32];
@@ -85,8 +86,20 @@ int main(int argc, char **argv)
 	if (ins)
 		fprintf(stderr, "  CPI %.2f (busy cycles / instructions %.2f)\n",
 			(double)cyc / ins, (double)busy / ins);
-	fprintf(stderr, "  user %.2f s, sys %.2f s, maxrss %ld KiB\n",
+	fprintf(stderr, "  user %.2f s, sys %.2f s, maxrss %ld KiB, faults %ld minor %ld major\n",
 		ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6,
-		ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6, ru.ru_maxrss);
+		ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6, ru.ru_maxrss,
+		ru.ru_minflt, ru.ru_majflt);
+	/* The counters are global: cycles beyond the command's user + sys
+	 * time went to other work (e.g. re-reading evicted pages of a big
+	 * binary from the SD card in a kernel thread; the idle loop polls, so
+	 * idle_cycles stays 0). */
+	{
+		double cpu = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 +
+			     ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
+		if (cyc)
+			fprintf(stderr, "  outside the command: %.1f%% of cycles (at %d MHz)\n",
+				100.0 * (1 - cpu * HZ_MHZ * 1e6 / cyc), HZ_MHZ);
+	}
 	return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
 }

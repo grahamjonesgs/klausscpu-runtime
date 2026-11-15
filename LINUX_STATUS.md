@@ -37,8 +37,10 @@ scripts find each other relative to that.
 
 ## Hardware state
 
-- **Flash:** the QSPI flash holds klaussCPU master f799182 (icache 823b5ea,
-  written 2026-11-15), and power-up boots it. `CPU_FEATURES` reads
+- **Flash:** the QSPI flash holds klaussCPU master d7f3994 (btic-fix
+  079d686, written 2026-11-15), and power-up boots it. It is the 64 KiB
+  I-cache image f799182 plus fixes for the BTIC on code that rewrites
+  branches in place. `CPU_FEATURES` reads
   0x03F0_200D: 32 TLB entries, LR/SC, DCBZ, misaligned 64-bit accesses trap
   (emulated by the kernel), and the hardware TLB walker (bit 25, MMU_PLAN
   §11.8).
@@ -53,7 +55,7 @@ scripts find each other relative to that.
     `/proc/klausscpu_tlbwalk` shows it and takes 0 or 1, and `notlbwalk` on
     the command line keeps it off.
   - **Rollback:** the RTL session's `~/.cache/kbuild/rollback/README.txt`
-    (the pre-icache dump or the tlbx bitstream db67f3f, and the older
+    (the pre-btic-fix dump or the icache bitstream 823b5ea, and the older
     images).
 - **The emulator matches it:** klausscc defaults to 32 TLB entries and the
   walker. Whole-instruction restart after a walk is as in the RTL (klausscc
