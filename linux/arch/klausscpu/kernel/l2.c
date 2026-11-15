@@ -54,18 +54,18 @@ static int l2_wait_idle(void)
 static ssize_t l2_write(struct file *file, const char __user *buf,
 			size_t len, loff_t *pos)
 {
-	char c;
+	int on, err = klausscpu_proc_bool(buf, len, &on);
 
-	if (!len || get_user(c, buf))
-		return -EFAULT;
-	if (c != '0' && c != '1')
-		return -EINVAL;
+	if (err)
+		return err;
+	if (on < 0)
+		return len;
 	/* The L2 drops a write to L2_CTRL while BUSY, so wait before as well
 	 * as after (turning it off writes the dirty lines back first; the
 	 * core and the other masters keep running meanwhile). */
 	if (l2_wait_idle())
 		return -EIO;
-	writeq(c == '1' ? KL_L2_CTRL_EN : 0, l2_ctrl());
+	writeq(on ? KL_L2_CTRL_EN : 0, l2_ctrl());
 	if (l2_wait_idle())
 		return -EIO;
 	return len;

@@ -26,6 +26,24 @@ static void __init probe_cpu(void)
 		CPU_FEAT_TLB_ENTRIES(f));
 }
 
+int klausscpu_proc_bool(const char __user *buf, size_t len, int *val)
+{
+	char kbuf[16], *s;
+	size_t n = min(len, sizeof(kbuf) - 1);
+
+	if (copy_from_user(kbuf, buf, n))
+		return -EFAULT;
+	kbuf[n] = 0;
+	s = strim(kbuf);
+	if (!*s)
+		*val = -1;
+	else if ((s[0] == '0' || s[0] == '1') && !s[1])
+		*val = s[0] - '0';
+	else
+		return -EINVAL;
+	return 0;
+}
+
 static int show_cpuinfo(struct seq_file *m, void *v)
 {
 	/* ICACHE_INFO (0xF005_0018): [7:0] ways, [23:8] sets, [31:24] line

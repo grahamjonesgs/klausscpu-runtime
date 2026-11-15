@@ -27,10 +27,22 @@ void do_page_fault(struct pt_regs *regs, unsigned long cause, unsigned long addr
 bool klausscpu_misaligned_user(struct pt_regs *regs, unsigned long cause);
 void klausscpu_misaligned_init(void);
 unsigned long klausscpu_misaligned_count(void);	/* emulated since boot */
+/* setup.c: parse a /proc switch write ("0"/"1", whitespace ignored).
+ * Returns 0 with *val 0 or 1, or *val -1 for an empty / whitespace-only
+ * write (writev hands each iovec over separately: "1" then "\n"), or
+ * -EFAULT / -EINVAL.  The caller returns len on success. */
+int klausscpu_proc_bool(const char __user *buf, size_t len, int *val);
 /* kernel/l2.c: the unified L2, when CPU_FEATURES[26] says so. */
 bool klausscpu_has_l2(void);
-/* mm/dma-noncoherent.c: the D-cache range clean/invalidate ops exist. */
+/* mm/cacheflush.c: the cache range ops (CPU_FEATURES[27]) exist. */
 bool klausscpu_dcache_range_ops(void);
+/* Cache walks that did not finish in time, since boot. */
+unsigned long klausscpu_cache_timeouts(void);
+/* Clean and/or invalidate the D-cache over [paddr, +size); false on a
+ * walk timeout. */
+bool klausscpu_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv);
+/* A device wrote [paddr, +size): the I-cache side (lazy, see cacheflush.c). */
+void klausscpu_icache_dma_written(phys_addr_t paddr, size_t size);
 /* mm/tlbwalk.c: the hardware TLB walker, when CPU_FEATURES[25] says so. */
 void klausscpu_tlbwalk_init(void);
 unsigned long klausscpu_tlb_walks(void);	/* walker refills since boot */

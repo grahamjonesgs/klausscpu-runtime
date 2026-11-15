@@ -83,15 +83,15 @@ static int tlbwalk_open(struct inode *inode, struct file *file)
 static ssize_t tlbwalk_write(struct file *file, const char __user *buf,
 			     size_t len, loff_t *pos)
 {
-	char c;
+	int on, err;
 
 	if (!klausscpu_tlb_walker)
 		return -ENODEV;
-	if (!len || get_user(c, buf))
-		return -EFAULT;
-	if (c != '0' && c != '1')
-		return -EINVAL;
-	walker_enable(c == '1');
+	err = klausscpu_proc_bool(buf, len, &on);
+	if (err)
+		return err;
+	if (on >= 0)
+		walker_enable(on);
 	return len;
 }
 
