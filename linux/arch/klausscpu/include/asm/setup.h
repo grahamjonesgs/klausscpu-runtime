@@ -29,6 +29,8 @@ void klausscpu_misaligned_init(void);
 unsigned long klausscpu_misaligned_count(void);	/* emulated since boot */
 /* kernel/l2.c: the unified L2, when CPU_FEATURES[26] says so. */
 bool klausscpu_has_l2(void);
+/* mm/dma-noncoherent.c: the D-cache range clean/invalidate ops exist. */
+bool klausscpu_dcache_range_ops(void);
 /* mm/tlbwalk.c: the hardware TLB walker, when CPU_FEATURES[25] says so. */
 void klausscpu_tlbwalk_init(void);
 unsigned long klausscpu_tlb_walks(void);	/* walker refills since boot */

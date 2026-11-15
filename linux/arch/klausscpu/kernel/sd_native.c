@@ -15,12 +15,29 @@
  * FIFO_THRESH says one can move; the controller stops the card's clock
  * between blocks when the FIFO is full or empty, so a slow handler only
  * slows the transfer.
+ *
+ * DMA (SDM_CAPS[10], the SD DMA spec v1): a data command with SDM_CFG
+ * DMA_EN moves its blocks between the card and one contiguous DDR range at
+ * SDM_DMA_ADDR, and DATA_DONE comes when they are all moved.  So with DMA
+ * the host takes one segment per request (max_segs = 1, up to 1 MiB), maps
+ * it with the streaming DMA API (mm/dma-noncoherent.c cleans the D-cache
+ * for it and waits for the walk before the command starts the DMA, and
+ * invalidates it before the core sees the data), and gets one interrupt at
+ * the end.  A request the engine can't take (several segments, a block
+ * size not a multiple of 8, a buffer not 8-byte aligned, or for a read not
+ * owning whole 32-byte cache lines) goes by PIO.  Before the buffer is
+ * unmapped the engine is stopped (DMA_EN = 0 aborts one in flight) and
+ * DMA_BUSY waited out; the card side is recovered as with PIO (FIFO
+ * reset, CMD12).  klausscpu_sd.dma=0 (at boot, or at run time in
+ * /sys/module/klausscpu_sd/parameters/dma) keeps PIO, for A/B runs.
  */
 #include <linux/bitfield.h>
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/jiffies.h>
 #include <linux/mmc/core.h>
 #include <linux/mmc/host.h>
@@ -40,6 +57,15 @@
 static bool sd_native = true;
 module_param_named(native, sd_native, bool, 0444);
 MODULE_PARM_DESC(native, "Use the native SD controller when present (else SPI)");
+
+static bool ksd_dma_param = true;
+module_param_named(dma, ksd_dma_param, bool, 0644);
+MODULE_PARM_DESC(dma, "Move data by DMA where the controller can (else PIO through the FIFO)");
+
+/* Data requests by DMA and by PIO since boot. */
+static unsigned long ksd_dma_requests, ksd_pio_requests;
+module_param_named(native_dma_requests, ksd_dma_requests, ulong, 0444);
+module_param_named(native_pio_requests, ksd_pio_requests, ulong, 0444);
 
 /* Errors the mmc core recovered from (or not): it logs only failures. */
 static unsigned long ksd_cmd_errors, ksd_data_errors, ksd_timeouts;
@@ -75,6 +101,7 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define  ST_DATA_BUSY	BIT(1)
 #define  ST_CARD	BIT(3)
 #define  ST_THRESH	BIT(4)
+#define  ST_DMA_BUSY	BIT(5)
 #define  ST_CMD_DONE	BIT(8)
 #define  ST_DATA_DONE	BIT(9)
 #define  ST_CMD_TIMEOUT	BIT(16)
@@ -88,22 +115,26 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define  ST_WRITE_NOTOK	BIT(24)
 #define  ST_BUSY_TIMEOUT BIT(25)
 #define  ST_FIFO_ERR	BIT(26)
-#define  ST_STICKY	(ST_CMD_DONE | ST_DATA_DONE | GENMASK(26, 16))
+#define  ST_DMA_ERR	BIT(27)		/* the DMA address left DDR */
+#define  ST_STICKY	(ST_CMD_DONE | ST_DATA_DONE | GENMASK(27, 16))
 #define  ST_CMD_ERRS	(ST_CMD_TIMEOUT | ST_CMD_CRC | ST_CMD_END | ST_CMD_IDX)
-#define  ST_DATA_ERRS	(GENMASK(24, 20) | ST_BUSY_TIMEOUT | ST_FIFO_ERR)
+#define  ST_DATA_ERRS	(GENMASK(24, 20) | ST_BUSY_TIMEOUT | ST_FIFO_ERR | ST_DMA_ERR)
 #define SDM_IRQ_EN	0x130
 #define SDM_TIMEOUT	0x138		/* [31:0] data, [63:32] busy, in clocks */
 #define SDM_CFG		0x140
 #define  CFG_4BIT	BIT(0)
+#define  CFG_DMA_EN	BIT(1)
 #define  CFG_CLK_ON	BIT(2)
 #define SDM_FIFO	0x148
-#define  FIFO_RESET	BIT(31)
+#define  FIFO_RESET	BIT(31)		/* also aborts a DMA */
+#define SDM_DMA_ADDR	0x150		/* 64-bit PA, [2:0] read 0, advances */
 #define SDM_BLKDONE	0x158
 #define SDM_DATA	0x180
 #define SDM_CAPS	0x1f8
 #define  CAPS_VERSION	GENMASK(7, 0)
 #define  CAPS_4BIT	BIT(8)
 #define  CAPS_HS	BIT(9)
+#define  CAPS_DMA	BIT(10)
 #define  CAPS_FIFO_BLKS	GENMASK(23, 16)
 
 #define KSD_REF_HZ	100000000	/* CLK = 100 MHz / (2 (div + 1)) */
@@ -113,6 +144,8 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define KSD_POWER_OFF_MS 20
 #define KSD_READ_TMO_MS	100		/* the reset values' 100 ms / 500 ms */
 #define KSD_BUSY_TMO_MS	500
+/* DMA_BUSY drops "within a few hundred cycles" of DMA_EN = 0. */
+#define KSD_DMA_STOP_US	1000
 
 enum ksd_state { KSD_IDLE, KSD_SBC, KSD_CMD, KSD_STOP };
 
@@ -127,6 +160,10 @@ struct ksd_host {
 	bool cmd_done;			/* KSD_CMD: the command's response is in */
 	unsigned int moved;		/* blocks moved through the FIFO */
 	int pio_err;			/* the buffer ended before the data */
+	bool dma_cap;			/* SDM_CAPS[10] */
+	bool dma;			/* this request's data is mapped and moves by DMA */
+	enum dma_data_direction dma_dir;
+	dma_addr_t dma_start;		/* its SDM_DMA_ADDR */
 	u32 data_tmo;			/* SDM_TIMEOUT[31:0] for this request */
 	u32 busy_tmo;			/* SDM_TIMEOUT[63:32] */
 	unsigned long deadline;		/* watchdog, jiffies */
@@ -326,6 +363,89 @@ static int ksd_pio(struct ksd_host *h, unsigned int limit)
 	return err;
 }
 
+/* ---- DMA ---- */
+
+/*
+ * The engine can take data: one segment, whole FIFO words per block (a
+ * 4-mod-8 block's last word is half used), DMA_ADDR's 8-byte alignment,
+ * and a read must own every cache line it writes (ARCH_DMA_MINALIGN), as
+ * the invalidate after it drops them whole.
+ */
+static bool ksd_dma_usable(struct ksd_host *h, struct mmc_data *data)
+{
+	unsigned int len = data->blocks * data->blksz;
+	unsigned int align = (data->flags & MMC_DATA_READ) ? ARCH_DMA_MINALIGN : 8;
+	struct scatterlist *sg = data->sg;
+
+	if (!h->dma_cap || !READ_ONCE(ksd_dma_param))
+		return false;
+	if (data->sg_len != 1 || sg->length < len || data->blksz % 8)
+		return false;
+	return !(sg->offset % align) && !(len % align);
+}
+
+/*
+ * Map the buffer (the D-cache clean is done, and waited for, when this
+ * returns) and point the engine at it; the data command starts the DMA.
+ */
+static bool ksd_dma_start(struct ksd_host *h, struct mmc_data *data)
+{
+	h->dma_dir = mmc_get_dma_dir(data);
+	if (dma_map_sg(mmc_dev(h->mmc), data->sg, data->sg_len, h->dma_dir) != 1)
+		return false;
+	h->dma_start = sg_dma_address(data->sg);
+	wr(h, SDM_DMA_ADDR, h->dma_start);
+	h->cfg |= CFG_DMA_EN;
+	wr(h, SDM_CFG, h->cfg);
+	h->dma = true;
+	return true;
+}
+
+/*
+ * The request's DMA is over, or must be: DMA_EN = 0 (which aborts a DMA in
+ * flight), wait for DMA_BUSY to drop, and unmap, which invalidates the
+ * buffer's lines for the CPU.  The engine must not touch the buffer after
+ * it is unmapped: if it won't stop, leaving SD mode abandons it.
+ */
+static void ksd_dma_stop(struct ksd_host *h)
+{
+	struct mmc_data *data = h->mrq->data;
+	u64 st;
+
+	if (!h->dma)
+		return;
+	h->cfg &= ~CFG_DMA_EN;
+	wr(h, SDM_CFG, h->cfg);
+	if (readq_poll_timeout_atomic(h->base + SDM_STATUS, st, !(st & ST_DMA_BUSY),
+				      1, KSD_DMA_STOP_US)) {
+		dev_err(mmc_dev(h->mmc), "DMA did not stop (STATUS %llx, DMA_ADDR %llx): leaving SD mode\n",
+			st, rd(h, SDM_DMA_ADDR));
+		wr(h, SD_CTRL, rd(h, SD_CTRL) & ~CTRL_SD_MODE);
+		ksd_write_ctrl(h);
+		WARN_ON(readq_poll_timeout_atomic(h->base + SDM_STATUS, st,
+						  !(st & ST_DMA_BUSY), 1, KSD_DMA_STOP_US));
+	}
+	dma_unmap_sg(mmc_dev(h->mmc), data->sg, data->sg_len, h->dma_dir);
+	h->dma = false;
+}
+
+/* Blocks the DMA got into DDR (a read) or fetched from it (a write). */
+static unsigned int ksd_dma_blocks(struct ksd_host *h, struct mmc_data *data)
+{
+	u64 at = rd(h, SDM_DMA_ADDR);
+
+	if (at < h->dma_start)
+		return 0;
+	return min_t(u64, div_u64(at - h->dma_start, data->blksz), data->blocks);
+}
+
+/* Abandon the data phase's data path: the DMA, then the FIFO. */
+static void ksd_data_abort(struct ksd_host *h)
+{
+	ksd_dma_stop(h);
+	wr(h, SDM_FIFO, FIFO_RESET);
+}
+
 /* ---- commands ---- */
 
 /*
@@ -373,7 +493,9 @@ static int ksd_send(struct ksd_host *h, struct mmc_command *cmd)
 		v |= CMD_DATA;
 		if (cmd->data->flags & MMC_DATA_WRITE)
 			v |= CMD_WRITE;
-		h->irq_en |= ST_DATA_DONE | ST_DATA_ERRS | ST_THRESH;
+		h->irq_en |= ST_DATA_DONE | ST_DATA_ERRS;
+		if (!h->dma)
+			h->irq_en |= ST_THRESH;
 	} else if (type == RESP_48B) {
 		h->irq_en |= ST_BUSY_TIMEOUT;
 		h->busy_tmo = max(h->busy_tmo, ksd_ms_clocks(h, max(cmd->busy_timeout, KSD_BUSY_TMO_MS)));
@@ -429,6 +551,7 @@ static struct mmc_request *ksd_finish(struct ksd_host *h)
 {
 	struct mmc_request *mrq = h->mrq;
 
+	ksd_dma_stop(h);
 	h->irq_en = 0;
 	wr(h, SDM_IRQ_EN, 0);
 	h->mrq = NULL;
@@ -442,6 +565,7 @@ static struct mmc_request *ksd_end_data(struct ksd_host *h, bool error)
 {
 	struct mmc_request *mrq = h->mrq;
 
+	ksd_dma_stop(h);		/* the data is in DDR: unmap it */
 	if (mrq->stop && (error || !mrq->sbc)) {
 		h->state = KSD_STOP;
 		if (!ksd_send(h, mrq->stop))
@@ -470,7 +594,7 @@ static struct mmc_request *ksd_advance(struct ksd_host *h)
 		return NULL;
 
 	case KSD_CMD:
-		if (data && !h->pio_err)
+		if (data && !h->dma && !h->pio_err)
 			h->pio_err = ksd_pio(h, data->blocks);
 		if (!h->cmd_done) {
 			if (!(h->acc & ST_CMD_DONE))
@@ -480,7 +604,7 @@ static struct mmc_request *ksd_advance(struct ksd_host *h)
 			if (mrq->cmd->error) {
 				/* A response error aborts the data phase (plan 4.2). */
 				if (data)
-					wr(h, SDM_FIFO, FIFO_RESET);
+					ksd_data_abort(h);
 				return ksd_finish(h);
 			}
 			if (!data)
@@ -499,24 +623,32 @@ static struct mmc_request *ksd_advance(struct ksd_host *h)
 			 * still in the FIFO: take them, drop the rest. */
 			good = min_t(u32, rd(h, SDM_BLKDONE) & 0xffff, data->blocks);
 			data->error = ksd_data_error(h->acc);
-			if (data->flags & MMC_DATA_READ)
+			if (h->dma)
+				/* A read's good blocks count once they are in DDR. */
+				h->moved = (data->flags & MMC_DATA_READ) ?
+					   min(good, ksd_dma_blocks(h, data)) : good;
+			else if (data->flags & MMC_DATA_READ)
 				ksd_pio(h, good);
 			data->bytes_xfered = min(good, h->moved) * data->blksz;
 			ksd_data_errors++;
 			dev_warn_ratelimited(mmc_dev(h->mmc),
-					     "CMD%u arg %08x: data error %d (STATUS %llx) after %u of %u blocks\n",
+					     "CMD%u arg %08x: data error %d (STATUS %llx) after %u of %u blocks%s\n",
 					     mrq->cmd->opcode, mrq->cmd->arg, data->error, h->acc,
-					     good, data->blocks);
-			wr(h, SDM_FIFO, FIFO_RESET);
+					     good, data->blocks, h->dma ? " (DMA)" : "");
+			ksd_data_abort(h);
 			return ksd_end_data(h, true);
 		}
 		if (!(h->acc & ST_DATA_DONE))
 			return NULL;
+		if (h->dma)
+			h->moved = ksd_dma_blocks(h, data);
 		if (h->moved < data->blocks) {
 			/* Done, but blocks short of the count: can't happen. */
+			dev_err(mmc_dev(h->mmc), "CMD%u: DATA_DONE after %u of %u blocks%s\n",
+				mrq->cmd->opcode, h->moved, data->blocks, h->dma ? " (DMA)" : "");
 			data->error = -EIO;
 			data->bytes_xfered = h->moved * data->blksz;
-			wr(h, SDM_FIFO, FIFO_RESET);
+			ksd_data_abort(h);
 			return ksd_end_data(h, true);
 		}
 		data->bytes_xfered = data->blocks * data->blksz;
@@ -577,8 +709,10 @@ static void ksd_watchdog(struct work_struct *work)
 			mrq->cmd->error = -ETIMEDOUT;
 		else
 			mrq->data->error = -ETIMEDOUT;
-		/* Clearing SD_MODE makes both engines abandon what they are
-		 * doing (plan 4.8); the core's recovery starts from there. */
+		/* Stop a DMA, then clearing SD_MODE makes both engines abandon
+		 * what they are doing (plan 4.8); the core's recovery starts
+		 * from there. */
+		ksd_dma_stop(h);
 		wr(h, SD_CTRL, rd(h, SD_CTRL) & ~CTRL_SD_MODE);
 		ksd_write_ctrl(h);
 		wr(h, SDM_FIFO, FIFO_RESET);
@@ -638,6 +772,11 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		wr(h, SDM_BLK, FIELD_PREP(BLK_SIZE, data->blksz) |
 			       FIELD_PREP(BLK_COUNT, data->blocks));
 		ms += data->blocks * (KSD_BUSY_TMO_MS / 2);
+		h->dma = false;
+		if (ksd_dma_usable(h, data) && ksd_dma_start(h, data))
+			ksd_dma_requests++;
+		else
+			ksd_pio_requests++;
 	}
 	ksd_write_timeout(h);
 	ms += max(mrq->cmd->busy_timeout, mrq->stop ? mrq->stop->busy_timeout : 0);
@@ -739,9 +878,12 @@ static int ksd_probe(struct platform_device *pdev)
 	h = mmc_priv(mmc);
 	h->mmc = mmc;
 	h->base = (void __iomem *)SD_BASE;
+	h->dma = false;
 	mutex_init(&h->lock);
 	INIT_DELAYED_WORK(&h->watchdog, ksd_watchdog);
 	caps = rd(h, SDM_CAPS);
+	/* DDR is below 4 GiB; the engine takes any 8-byte aligned address. */
+	h->dma_cap = (caps & CAPS_DMA) && !dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
 
 	/*
 	 * Native mode with the slot off: the card may still be in SPI mode
@@ -775,7 +917,10 @@ static int ksd_probe(struct platform_device *pdev)
 	mmc->max_blk_count = 65535;
 	mmc->max_req_size = 1024 * 1024;
 	mmc->max_seg_size = mmc->max_req_size;
-	mmc->max_segs = 256;
+	/* The DMA moves one contiguous range per command; with dma=0 at
+	 * probe, PIO keeps its scatter-gather (a later dma=1 then takes the
+	 * one-segment requests only). */
+	mmc->max_segs = (h->dma_cap && ksd_dma_param) ? 1 : 256;
 
 	irq = klausscpu_int2_irq(KL_INT2_SD);
 	if (!irq)
@@ -791,6 +936,9 @@ static int ksd_probe(struct platform_device *pdev)
 		 (unsigned int)FIELD_GET(CAPS_VERSION, caps),
 		 (unsigned int)FIELD_GET(CAPS_FIFO_BLKS, caps),
 		 (caps & CAPS_4BIT) ? "4-bit" : "1-bit", irq);
+	if (h->dma_cap)
+		dev_info(&pdev->dev, "DMA %s, D-cache %s\n", ksd_dma_param ? "on" : "off (dma=0)",
+			 klausscpu_dcache_range_ops() ? "range ops" : "whole-cache flushes");
 	return 0;
 }
 

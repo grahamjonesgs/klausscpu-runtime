@@ -7,6 +7,8 @@
 config KLAUSSCPU
 	def_bool y
 	select ARCH_HAS_PTE_SPECIAL
+	select ARCH_HAS_SYNC_DMA_FOR_CPU
+	select ARCH_HAS_SYNC_DMA_FOR_DEVICE
 	select ARCH_STACKWALK
 	select BUILDTIME_TABLE_SORT
 	select ARCH_WANT_FRAME_POINTERS
@@ -117,7 +119,10 @@ config KLAUSSCPU_SDNATIVE
 	  (CPU_FEATURES[21]): an mmc host, so the card is mmcblk0 through
 	  mmc_block, in 4-bit mode.  Where it is present, the SPI driver
 	  stands aside (klausscpu_sd.native=0 keeps SPI).  Elsewhere the
-	  probe finds nothing.
+	  probe finds nothing.  Data moves by DMA where the controller has
+	  it (SDM_CAPS[10]), else through its FIFO; klausscpu_sd.dma=0 (also
+	  at run time, /sys/module/klausscpu_sd/parameters/dma) keeps the
+	  FIFO.
 
 config KLAUSSCPU_ETH
 	bool "LiteEth Ethernet (eth0)"
