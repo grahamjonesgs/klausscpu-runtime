@@ -531,3 +531,30 @@ over an hour, because the board swaps):
   instructions of an I fill or writeback 54% (deflate) and 72% (C++) of the
   time. The L2 design therefore gets a writeback buffer and separate I/D
   request paths, with demand D fills ahead of the I prefetch.
+- **RTL item 4: the 64 KiB direct-mapped I-cache with 32 B lines**, plus a
+  4-entry micro-ITLB tagged by TLB index, and `PERF_IC_MISS` counting real
+  fills only (klaussCPU f799182, in QSPI since 2026-11-15). The emulator
+  sweep (klausscc f8f9d95) chose the shape. It also found that the old
+  `ic_miss` counted micro-ITLB refill cycles: that was the 3x gap.
+  - **The RTL session's warm `perf.sh`, against tlbx with the same
+    kernel:** deflate -O2 88 → 73 s (−17% cycles), C++ hello 196 → 168 s
+    (−14%). Against my tlbx numbers it's −20% and −17% cycles: deflate
+    ≈ 73 s, C++ hello ≈ 167 s.
+  - **Start-up:** `clang --version` −13%, `clang -O2 -c hello.c` −16%
+    (0.91 s), compile and link −15% (1.56 s).
+- **Kernel fault-around of 16 pages** (runtime 0876dbb, patches/0004):
+  clang --version −11% cycles, hello -c −5%, compile and link −5.5%.
+- **`clang-pch` on the board:** the first build for an option set takes
+  6 min (14 MB). After that the C++ hello compiles and links in ~53 s,
+  against ~210 s without.
+- **Where clang stands now** (2026-11-15), warm, -O2:
+
+  | compile | start of the day (MinSizeRel, no walker) | now |
+  |---|---|---|
+  | deflate.c | 109 s | ≈ 73 s |
+  | C++ hello | 255 s | ≈ 167 s, or ~45 s with `clang-pch` |
+  | hello.c | — | 0.9 s |
+
+- **Next:** the L2 (item 3), with a timed klausscc model first; RAS 8
+  (item 5); and a faster malloc for clang (musl oldmalloc, being
+  evaluated).

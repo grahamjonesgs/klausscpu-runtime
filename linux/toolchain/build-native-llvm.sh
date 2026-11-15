@@ -13,6 +13,16 @@
 #   NATIVE_MULTICALL=1  one multicall binary, bin/llvm (LLVM_TOOL_LLVM_DRIVER_BUILD),
 #                       with the tools as symlinks to it, as busybox does:
 #                       the tools share one copy of LLVM (target llvm-driver)
+#   NATIVE_MALLOC       the allocator linked into the binary: mallocng (default,
+#                       the sysroot's libc.a) or oldmalloc: a libc.a from the
+#                       same musl tree and patches built with MALLOC_DIR=oldmalloc
+#                       (configure's --with-malloc=oldmalloc) by linux/musl/build.sh
+#                       in NATIVE_MALLOC_WS (default linux-ws/musl-oldmalloc;
+#                       built or brought up to date on every run).  Its lib/ goes
+#                       first on the search path (-L), so -lc takes that libc.a
+#                       whole: no mallocng object is linked, and nothing else in
+#                       libc changes.  Only this binary's link changes, not the
+#                       system's libc (CLANG_ON_BOARD_PLAN.md M6).
 # MinSizeRel, no assertions, only the KlaussCPU target, no zlib/zstd/
 # libxml2/terminfo, no threads, no plugins.
 set -euo pipefail
@@ -63,6 +73,15 @@ fi
 # Hot-function ordering (lld --symbol-ordering-file from a klausscc profile)
 # was tried and made the board slower: CLANG_ON_BOARD_PLAN.md M6.
 LDFLAGS="-static"
+case ${NATIVE_MALLOC:-mallocng} in
+mallocng) ;;
+oldmalloc)
+  MWS=${NATIVE_MALLOC_WS:-$RT/linux-ws/musl-oldmalloc}
+  LINUX_WS=$MWS LINUX_KERNEL_WS=${LINUX_KERNEL_WS:-$RT/linux-ws} MUSL_MALLOC=oldmalloc \
+    "$RT/linux/musl/build.sh" >/dev/null
+  LDFLAGS="$LDFLAGS -L$MWS/sysroot/lib" ;;
+*) echo "NATIVE_MALLOC is mallocng or oldmalloc" >&2; exit 1 ;;
+esac
 cmake -S "$LLVM_SRC/llvm" -B "$BUILD" -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" >>"$BUILD/configure.log" 2>&1 ||
   { tail -5 "$BUILD/configure.log"; exit 1; }
 ninja -C "$BUILD" $TARGETS
