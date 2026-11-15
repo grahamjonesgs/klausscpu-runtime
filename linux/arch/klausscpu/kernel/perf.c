@@ -56,6 +56,9 @@ static const struct {
 	{ "mem_wait",		PERF_BASE + 0xE8 },
 	{ "ic_miss",		PERF_BASE + 0xF0 },
 	{ "ic_fill_cycles",	PERF_BASE + 0xF8 },
+	/* micro-ITLB refills (klaussCPU HW_PERF_PLAN §5); 0 before it.  Since
+	 * the same bitstream ic_miss counts real line fills only. */
+	{ "itlb_refills",	PERF_BASE + 0x110 },
 	{ "dc_read_hits",	CACHE_BASE + 0x40 },
 	{ "dc_read_misses",	CACHE_BASE + 0x48 },
 	{ "dc_write_hits",	CACHE_BASE + 0x50 },

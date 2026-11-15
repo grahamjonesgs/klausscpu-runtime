@@ -28,10 +28,17 @@ static void __init probe_cpu(void)
 
 static int show_cpuinfo(struct seq_file *m, void *v)
 {
+	/* ICACHE_INFO (0xF005_0018): [7:0] ways, [23:8] sets, [31:24] line
+	 * bytes, [63:32] total bytes; 0 on bitstreams without it. */
+	u64 ic = readq((void __iomem *)(MMIO_BASE + 0x00050018UL));
+
 	seq_printf(m, "processor\t: 0\ncpu\t\t: KlaussCPU\nfeatures\t: %08lx\n"
 		   "tlb entries\t: %lu\nclock\t\t: %d Hz\n",
 		   klausscpu_cpu_features, CPU_FEAT_TLB_ENTRIES(klausscpu_cpu_features),
 		   CONFIG_KLAUSSCPU_CPU_HZ);
+	if (ic)
+		seq_printf(m, "icache\t\t: %llu KiB, %llu-way, %llu B lines\n",
+			   (ic >> 32) / 1024, ic & 0xff, (ic >> 24) & 0xff);
 	return 0;
 }
 
