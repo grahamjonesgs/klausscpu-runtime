@@ -39,6 +39,13 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	if (ic)
 		seq_printf(m, "icache\t\t: %llu KiB, %llu-way, %llu B lines\n",
 			   (ic >> 32) / 1024, ic & 0xff, (ic >> 24) & 0xff);
+	if (klausscpu_has_l2()) {
+		u64 l2 = readq((void __iomem *)KL_L2_INFO);
+
+		seq_printf(m, "l2\t\t: %llu KiB, %llu-way, %llu B lines, %s\n",
+			   (l2 >> 32) / 1024, l2 & 0xff, (l2 >> 24) & 0xff,
+			   readq((void __iomem *)KL_L2_CTRL) & KL_L2_CTRL_EN ? "on" : "off");
+	}
 	return 0;
 }
 

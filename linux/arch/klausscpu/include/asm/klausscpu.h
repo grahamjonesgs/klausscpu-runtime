@@ -101,6 +101,13 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define CPU_FEAT_SDNATIVE	(1UL << 21)	/* native SD controller, INT2 cascade */
 #define CPU_FEAT_MAL64		(1UL << 23)	/* STATUS.MAL64 implemented */
 #define CPU_FEAT_TLBWALK	(1UL << 25)	/* the hardware TLB walker (SR_TLB_PTB...) */
+#define CPU_FEAT_L2		(1UL << 26)	/* the unified L2 (kernel/l2.c) */
+/* The L2 (klaussCPU branch l2; offsets provisional until its release). */
+#define KL_L2_INFO		(KL_CACHE_BASE + 0x20)	/* CACHE_INFO format */
+#define KL_L2_CTRL		(KL_CACHE_BASE + 0x28)	/* [0] EN, [1] WBINV, [8] BUSY */
+#define KL_L2_CTRL_EN		0x1
+#define KL_L2_CTRL_WBINV	0x2
+#define KL_L2_CTRL_BUSY		0x100
 
 #ifndef __ASSEMBLER__
 

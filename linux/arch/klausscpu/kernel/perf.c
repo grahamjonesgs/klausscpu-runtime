@@ -68,6 +68,24 @@ static const struct {
 	{ "dc_zero_lines",	CACHE_BASE + 0x70 },	/* DCBZ (HW_PERF_PLAN.md §1); 0 before it */
 };
 
+/* The L2's (CPU_FEATURES[26]; kernel/l2.c), 48-bit, cleared with the rest. */
+static const struct {
+	const char *name;
+	unsigned long addr;
+} l2_counters[] = {
+	{ "l2_i_hits",		PERF_BASE + 0x118 },
+	{ "l2_i_misses",	PERF_BASE + 0x120 },
+	{ "l2_d_hits",		PERF_BASE + 0x128 },
+	{ "l2_d_misses",	PERF_BASE + 0x130 },
+	{ "l2_wb_hits",		PERF_BASE + 0x138 },
+	{ "l2_wb_misses",	PERF_BASE + 0x140 },
+	{ "l2_ddr_read_beats",	PERF_BASE + 0x148 },	/* 8 B each */
+	{ "l2_ddr_write_beats",	PERF_BASE + 0x150 },
+	{ "l2_wbuf_full_stall",	PERF_BASE + 0x158 },
+	{ "l2_dma_hits",	PERF_BASE + 0x160 },
+	{ "l2_dma_misses",	PERF_BASE + 0x168 },
+};
+
 static int perf_show(struct seq_file *m, void *v)
 {
 	unsigned long walks = klausscpu_tlb_walks() - tlb_walks_base;
@@ -80,6 +98,10 @@ static int perf_show(struct seq_file *m, void *v)
 	seq_printf(m, "tlb_walks %lu\n", walks);
 	seq_printf(m, "misaligned_emulated %lu\n",
 		   klausscpu_misaligned_count() - misaligned_base);
+	if (klausscpu_has_l2())
+		for (i = 0; i < ARRAY_SIZE(l2_counters); i++)
+			seq_printf(m, "%s %llu\n", l2_counters[i].name,
+				   (unsigned long long)readq((void __iomem *)l2_counters[i].addr));
 	return 0;
 }
 

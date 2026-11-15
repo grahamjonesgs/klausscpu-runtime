@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 extra-y := vmlinux.lds
 
-obj-y := head.o entry.o setup.o traps.o irq.o time.o process.o signal.o \
+obj-y := head.o entry.o setup.o l2.o traps.o irq.o time.o process.o signal.o \
 	ptrace.o syscall_table.o early_printk.o hvc_uart.o \
 	stacktrace.o perf.o unaligned.o
 obj-$(CONFIG_KLAUSSCPU_SD) += sdcard.o sd_spi.o
