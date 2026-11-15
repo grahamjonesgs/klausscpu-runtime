@@ -609,3 +609,33 @@ over an hour, because the board swaps):
     ARCH_DMA_MINALIGN 32, arch_sync_dma_* on the range ops).
   - **asm/cacheflush.h's comment was wrong:** the D-cache does not snoop
     DMA. Fixed.
+- **zram was tried and rejected** (2026-11-15). The setup: LZ4, a 64 MiB
+  zram device ahead of the SD swap file, kernel `linux-ws/build-zram`.
+  Deflate and the C++ hello were compiled in parallel to force swapping.
+
+  | swap | wall time | swap-ins | major faults (C++ hello) |
+  |---|---|---|---|
+  | SD file only | 268 / 271 s | 128 | ~1k |
+  | zram, then SD | 645 / 629 s | ~5600 | ~17–18k |
+
+  zsmalloc needed 25 MB of RAM to hold 3.2 MB of compressed data (18.9 MB
+  uncompressed): with 64 KiB pages its per-zspage overhead is huge. That
+  squeezed clang's text out of the page cache. SD DMA is the lever for
+  swap instead.
+- **Call-graph ordering** (klausscc cef99da: call-edge profiles;
+  `KLAUSSCC_TLBSIM=rtl`). lld's cdsort on the call graph, with the other
+  executed functions appended ("CDSX"), measured on the emulator:
+
+  | order | main-TLB refills, deflate | main-TLB refills, C++ | text pages per compile |
+  |---|---|---|---|
+  | unordered link | 14.0 M | 31.1 M | 828–892 |
+  | hotness order (today) | 28.4 M | 51.3 M | 474–560 |
+  | CDSX | 6.4 M | 15.1 M | 278 |
+
+  The estimated TLB cost at today's 32 entries drops from 846/955 to
+  187/274 cycles per 1k instructions. The order is being re-profiled on a
+  broader training set before it replaces `clang-order.txt.gz`.
+- **TLB size sweep** (for the RTL session). With CDSX, a 64-entry or
+  128-entry 4-way TLB is worth only ~1.2–1.4%, and an 8-entry micro-ITLB
+  ~0.2%. The RTL session has deferred both: L2 → SD DMA (+ range ops,
+  RANGE_IINV) → RAS 8.
