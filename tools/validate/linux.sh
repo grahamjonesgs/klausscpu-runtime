@@ -616,7 +616,10 @@ EOF2
     # wbusy@1 hits a single-block write: sdinit's vfat mount marking the
     # file system dirty.  The rest land in the 2 MiB file's transfers.
     FAULTS="wcrc@1000 wbusy@1000 wbusy@1 rerr@3000 cmdto:18@8"
-    [ "$MODE" = sd-native ] && FAULTS="$FAULTS cmdto:13@5"
+    # cmdto:25: a multi-block write's command times out; with DMA the
+    # engine has already fetched a block into the FIFO (SD_NATIVE_PLAN
+    # §8.4), which the driver must reset before the core's retry.
+    [ "$MODE" = sd-native ] && FAULTS="$FAULTS cmdto:13@5 cmdto:25@2"
     BASE=$(grep -ao '^base [0-9]*' "$OUT/sd1.out" | awk '{print $2}')
     {
       echo 'cat /sys/block/mmcblk0/stat'
@@ -642,6 +645,7 @@ EOF2
       printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
       run_step "$n" 40000000000 2400 '$ '
       grep -aq 'klausscc sd: injected' "$OUT/$n.out" || bad "$n: the fault was never injected"
+      ! grep -aq 'started with words in the FIFO' "$OUT/$n.out" || bad "$n: a DMA data command started with words in the FIFO"
       read -r a b c < <(grep -ao '^stats [0-9]* [0-9]* [0-9]*' "$OUT/$n.out" | awk '{print $2, $3, $4}')
       echo "$n: stats ${a:-?} ${b:-?} ${c:-?} ($([ "$MODE" = sd-spi ] && echo 'multi_retries retries multi_fallbacks' || echo "data_errors cmd_errors (base ${BASE:-?}) timeouts"))"
       if [ "$MODE" = sd-spi ]; then

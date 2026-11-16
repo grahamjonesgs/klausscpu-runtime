@@ -159,15 +159,15 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 /* The wait for each step of stopping the engine (DMA_EN, FIFO reset,
  * SD_MODE).  DMA_EN = 0 lets the engine finish the block it is moving: up
  * to a block's 16-byte DDR transactions (32 for 512 B), one bus tenure
- * each, so tens of microseconds typically.  The RTL session's estimate of
- * the absolute worst (every transaction waiting ~3,100 cycles behind VGA
- * scanout and a CPU miss) is 32 x 3,100 cycles, about 1 ms, plus ~45 us of
- * card time for a read; realistic under Linux, well under 0.2 ms.  So 5 ms
- * before escalating.  A FIFO reset stops it after the transaction in
- * flight (~31 us worst; SD_NATIVE_PLAN §8.4).  Only an aborted transfer
- * waits here: after a normal one DMA_BUSY is already 0.  To be replaced by
- * the RTL's measured worst case. */
-#define KSD_DMA_STOP_US	5000
+ * each, so tens of microseconds typically.  Measured on the RTL (sddma
+ * 3ae5ed6, socsdabort: VGA, blitter, a miss-heavy CPU loop and whole-cache
+ * walks, 40 random aborts per case): at most 19,105 cycles (191 us); the
+ * bound, every transaction behind a full VGA burst or a walk, is 32 x
+ * ~2,800 cycles, about 0.9 ms.  So 2 ms before escalating.  A FIFO reset
+ * stops it after the transaction in flight (measured at most 2,691 cycles,
+ * 27 us).  Only an aborted transfer waits here: after a normal one
+ * DMA_BUSY is already 0. */
+#define KSD_DMA_STOP_US	2000
 /* DMA errors and stop failures before DMA is turned off for good, and
  * good DMA requests that forgive one. */
 #define KSD_DMA_TROUBLE_MAX 3
@@ -781,7 +781,11 @@ static struct mmc_request *ksd_advance(struct ksd_host *h)
 			h->cmd_done = true;
 			ksd_cmd_result(h, mrq->cmd);
 			if (mrq->cmd->error) {
-				/* A response error aborts the data phase (plan 4.2). */
+				/* A response error aborts the data phase (plan 4.2).
+				 * A DMA write's engine starts fetching at command
+				 * accept, so the FIFO may hold its block in progress
+				 * (plan 8.4): stopped, and the FIFO reset, before the
+				 * core's retry. */
 				if (data)
 					ksd_data_abort(h);
 				return ksd_finish(h);
