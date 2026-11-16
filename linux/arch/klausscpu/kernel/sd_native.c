@@ -156,8 +156,11 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define KSD_POWER_OFF_MS 20
 #define KSD_READ_TMO_MS	100		/* the reset values' 100 ms / 500 ms */
 #define KSD_BUSY_TMO_MS	500
-/* DMA_BUSY drops "within a few hundred cycles" of DMA_EN = 0: the wait
- * for each step of stopping the engine (DMA_EN, FIFO reset, SD_MODE). */
+/* The wait for each step of stopping the engine (DMA_EN, FIFO reset,
+ * SD_MODE).  DMA_EN = 0 lets the engine finish the block it is moving: up
+ * to a block's 16-byte DDR transactions (32 for 512 B), one bus tenure
+ * each, so tens of microseconds, more under heavy DDR traffic; a FIFO
+ * reset stops it after the transaction in flight (SD_NATIVE_PLAN §8.4). */
 #define KSD_DMA_STOP_US	1000
 /* DMA errors and stop failures before DMA is turned off for good, and
  * good DMA requests that forgive one. */
@@ -577,7 +580,11 @@ static void ksd_data_abort(struct ksd_host *h)
  * Start cmd.  The controller ignores SDM_CMD while CMD_BUSY is set, and a
  * data command while DATA_BUSY is (plan 4.8; other commands, CMD12
  * included, may run during a data phase): refuse (-EBUSY) rather than take
- * a later completion for this command's.
+ * a later completion for this command's.  It also ignores a data command
+ * while DMA_BUSY (plan §8.3: after a CMD12 or an abort the engine may still
+ * be finishing its block with DATA_BUSY clear); that is never the case
+ * here, as every DMA request ends in ksd_dma_stop(), which waits DMA_BUSY
+ * out (or panics), and ksd_dma_start() checks it again.
  */
 static int ksd_send(struct ksd_host *h, struct mmc_command *cmd)
 {
@@ -943,6 +950,8 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 
 		h->data_tmo = max(h->data_tmo, ksd_clocks(h, ns));
 		h->busy_tmo = max(h->busy_tmo, ksd_clocks(h, ns));
+		/* Empty for the data: a DMA read moves whatever is at the
+		 * FIFO's head to DDR (plan §8.2). */
 		wr(h, SDM_FIFO, FIFO_RESET);
 		wr(h, SDM_BLK, FIELD_PREP(BLK_SIZE, data->blksz) |
 			       FIELD_PREP(BLK_COUNT, data->blocks));

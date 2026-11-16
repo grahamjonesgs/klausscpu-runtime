@@ -275,6 +275,14 @@ dma_fault_boots() {
   cp "$OUT/dmafault.in" "$OUT/$n.in"
   printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
   run_step "$n" 40000000000 2400 '$ '
+  # With the range ops: mm/cacheflush.c's boot self-test (an unaligned
+  # 64 KiB buffer, 2049 lines, cleaned by two range ops, no whole-cache
+  # walk), and no range op the emulator's queue had to turn into one.
+  if [[ " ${SD_DMA_ARGS[*]} " == *" --dcache-range-ops "* ]]; then
+    grep -aq 'unaligned 64 KiB clean took 2 range ops, 0 whole-cache walks' "$OUT/$n.out" ||
+      bad "$n: the unaligned 64 KiB clean was not two range ops"
+    ! grep -aq 'range ops made whole-cache walks' "$OUT/$n.out" || bad "$n: range ops became whole-cache walks"
+  fi
   read -r w r < <(grep -ao '^dmareq [0-9]*' "$OUT/$n.out" | awk '{print $2}' | tr '\n' ' ')
   echo "$n: DMA commands before the write ${w:-?}, before the read-back ${r:-?}"
   [ -n "${w:-}" ] && [ -n "${r:-}" ] && [ "$r" -gt $(( w + 4 )) ] || { bad "$n: no DMA counts"; return; }

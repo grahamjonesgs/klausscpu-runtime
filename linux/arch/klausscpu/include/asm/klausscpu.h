@@ -82,7 +82,7 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define KL_CACHE_INVALIDATE	0x4	/* write back, then drop every line */
 #define KL_CACHE_ICACHE_INV	0x8
 #define KL_CACHE_RANGE_CLEAN	0x10	/* the lines of [OP_ADDR, +OP_LEN) */
-#define KL_CACHE_RANGE_INV	0x20	/* alone: drop them, no writeback */
+#define KL_CACHE_RANGE_INV	0x20	/* write back the dirty ones, then drop them */
 #define KL_CACHE_RANGE_IINV	0x40	/* drop them from the I-cache */
 #define KL_CACHE_STATUS		0x10
 #define KL_CACHE_MNT_BUSY	0x1	/* a walk is pending or running */

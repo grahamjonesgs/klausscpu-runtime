@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Cache maintenance through the cache controller (klaussCPU MMIO_MAP,
- * "Cache controller"; the SD DMA spec v1.2 for the range ops):
+ * "Cache controller" and "Range operations"; HW_PERF_PLAN §7 for the
+ * timings, measured on the RTL in simulation):
  *
  * - CACHE_CTRL FLUSH / INVALIDATE walk the whole D-cache (1024 sets x 2
- *   ways: ~2048 cycles + ~10 per dirty line).
+ *   ways: 4,097 cycles + ~3 per dirty line).
  * - With CPU_FEATURES[27], RANGE_CLEAN / RANGE_INV walk the D-cache lines
  *   of [CACHE_OP_ADDR, +CACHE_OP_LEN) (ADDR's [4:0] read 0: ceil(LEN / 32)
- *   lines from ADDR & ~31; ~8 + 2 per line + ~10 per dirty line), and
- *   RANGE_IINV drops the same lines from the I-cache (and its BTIC, next-
- *   line buffer and fetch window).  ADDR / LEN are copied when an op is
- *   accepted, so one written while CACHE_STATUS.MNT_BUSY queues behind the
- *   walk in flight with its own values.
+ *   lines from ADDR & ~31) and write the dirty ones back; RANGE_INV then
+ *   drops them (it never drops a dirty line unwritten).  A walk of n lines
+ *   visits min(n, 1024) sets: 1 + 2 cycles a set, + 6 for a set holding a
+ *   dirty line of the range (+ 3 for a second).  RANGE_IINV drops the same
+ *   lines from the I-cache (and the whole BTIC, next-line buffer and fetch
+ *   window), in min(n, 64) cycles.
+ * - ADDR / LEN are copied when an op is accepted.  The queue holds one
+ *   walk running and one waiting: a range op that finds another waiting, or
+ *   a whole-cache walk waiting, or that covers more than 2048 lines
+ *   (64 KiB), becomes a whole-cache walk (correct, but ~4,100 cycles).  So
+ *   a range of more than 2048 lines goes as several ops of at most 2048
+ *   (kl_range_op), each issued with the queue empty.
  * - ICACHE_INV drops the whole I-cache (a 64-cycle sweep).
  *
  * A walk is synchronous for the CPU's next cached access, not for MMIO:
@@ -24,8 +32,8 @@
  *
  * The register writes of one op are made with interrupts off, after
  * MNT_BUSY was seen clear, so that an op from an interrupt handler can't
- * interleave its CACHE_OP_ADDR / LEN with ours (a queued op keeps its
- * values, but the queue's depth is not specified); the wait for the walk
+ * interleave its CACHE_OP_ADDR / LEN with ours, and no op of ours meets
+ * another waiting (which would turn it into a whole-cache walk); the wait for the walk
  * runs with interrupts as the caller had them, and gives up after
  * KL_CACHE_WAIT_US, about four times the slowest walk.
  *
@@ -59,45 +67,59 @@
 #include <linux/bug.h>
 #include <linux/cacheflush.h>
 #include <linux/delay.h>
+#include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irqflags.h>
 #include <linux/mm.h>
 #include <linux/processor.h>
+#include <linux/sizes.h>
+#include <linux/slab.h>
 #include <asm/cache.h>
 #include <asm/klausscpu.h>
 #include <asm/setup.h>
 
 /*
- * The longest legal walk is ~25000 cycles (250 us at 100 MHz: a whole
- * D-cache with every line dirty, or a 64 KiB range of dirty lines); give
- * up after four times that.  It bounds the time a caller with interrupts
- * off spins here.
+ * The longest walk is ~11,300 cycles (113 us at 100 MHz: a range of 2048
+ * dirty lines, 1 + 2048 + 9 x 1024; a whole D-cache with every line dirty
+ * is ~10,250); give up after about nine times that.  It bounds the time a
+ * caller with interrupts off spins here.
  */
 #define KL_CACHE_WAIT_US	1000
 /* MNT_BUSY polls before the wait starts counting microseconds (a range
  * walk of a few KiB is over by then). */
 #define KL_CACHE_SPIN_POLLS	256
 
-/*
- * The crossover between a D-cache range walk and a whole-cache one: up to
- * this many bytes a buffer's lines are walked (~8 + 2 cycles per line), above
- * it the whole cache (~2048 cycles: 1024 sets x 2 ways), which a range walk
- * of 64 KiB (2048 lines, ~4100 cycles) has passed.  A whole INVALIDATE also
- * drops every other line, so the true crossover may be higher.  To be
- * measured on the board (CLANG_ON_BOARD_PLAN.md, SD DMA review n2).
- */
-#define KL_DCACHE_RANGE_MAX	(64 * 1024)
+/* The most lines one range op covers without becoming a whole-cache walk
+ * (the D-cache's 2048, 64 KiB; RTL RNG_MAX). */
+#define KL_RANGE_OP_LINES	2048
 
 /*
- * Up to this an I-cache invalidate is a RANGE_IINV of the lines, above it
- * the whole ICACHE_INV (a 64-cycle sweep, but everything the I-cache held
- * is fetched again).  One page goes by range, a larger folio by the sweep.
- * The RTL session aims at >= 1 line per cycle for the range kill and will
- * report the real figure; the crossover is to be measured on the board.
+ * The crossover between D-cache range walks and a whole-cache one, in
+ * lines (counted from the buffer's first line to its last, so an
+ * unaligned buffer counts its partial lines).  A range walk of n lines
+ * costs 1 + 2 x min(n, 1024) cycles clean, so up to 2048 lines (64 KiB)
+ * one op takes at most 2049 and two ops up to 4096 lines (128 KiB) at most
+ * 4098: the whole walk's 4,097.  Dirty lines cost a range walk ~6 each
+ * (4.5 when both lines of a set are) and a whole walk 3, but a whole walk
+ * also writes back every other dirty line, and a whole INVALIDATE drops
+ * every other line too.  So up to 128 KiB a buffer's lines are walked,
+ * above it the whole cache.  To be confirmed on the board.
  */
-#define KL_IINV_RANGE_MAX	PAGE_SIZE
+#define KL_DCACHE_RANGE_MAX_LINES	(2 * KL_RANGE_OP_LINES)
+
+/*
+ * The I-cache's lines (64 KiB of 32 B): a RANGE_IINV of this many or more
+ * sweeps the whole I-cache anyway (the range's index wraps over all of
+ * it), so it goes as ICACHE_INV, a 64-cycle sweep that needs no MNT_BUSY
+ * wait.  Below it RANGE_IINV keeps the rest of the I-cache, in min(n, 64)
+ * cycles.  A 64 KiB page or larger folio therefore takes ICACHE_INV.
+ */
+#define KL_ICACHE_LINES		2048
 
 static bool kl_dma_wrote_memory __read_mostly;
+
+/* The ops issued: range walks, whole-cache walks (the boot self-test). */
+static unsigned long kl_range_ops, kl_whole_ops;
 
 static void __iomem *kl_cache_reg(unsigned int off)
 {
@@ -159,16 +181,48 @@ static bool kl_cache_op(u64 ctrl, phys_addr_t paddr, size_t size)
 		/* The walk counts LEN from ADDR & ~31: cover the partial first line. */
 		writeq(start, kl_cache_reg(KL_CACHE_OP_ADDR));
 		writeq(size + (paddr - start), kl_cache_reg(KL_CACHE_OP_LEN));
+		kl_range_ops++;
+	} else {
+		kl_whole_ops++;
 	}
 	writeq(ctrl, kl_cache_reg(KL_CACHE_CTRL));
 	local_irq_restore(flags);
 	return kl_cache_wait() || kl_cache_timeout("after");
 }
 
+/* The cache lines [paddr, +size) touches (size > 0). */
+static unsigned long kl_cache_lines(phys_addr_t paddr, size_t size)
+{
+	return ((paddr + size - 1) >> L1_CACHE_SHIFT) - (paddr >> L1_CACHE_SHIFT) + 1;
+}
+
 /*
- * One D-cache walk over [paddr, +size): with the range ops up to
- * KL_DCACHE_RANGE_MAX, else the whole cache (INVALIDATE writes back before
- * it drops, so it is a clean and invalidate).  False if it timed out.
+ * A range op over [paddr, +size) as ops of at most KL_RANGE_OP_LINES lines
+ * each, split at line boundaries, so that none becomes a whole-cache walk
+ * (an unaligned 64 KiB buffer touches 2049 lines).  False if a walk timed
+ * out.
+ */
+static bool kl_range_op(u64 ctrl, phys_addr_t paddr, size_t size)
+{
+	phys_addr_t end = paddr + size;
+
+	while (paddr < end) {
+		phys_addr_t next = (paddr & ~(phys_addr_t)(L1_CACHE_BYTES - 1)) +
+				   KL_RANGE_OP_LINES * L1_CACHE_BYTES;
+		size_t n = min(end, next) - paddr;
+
+		if (!kl_cache_op(ctrl, paddr, n))
+			return false;
+		paddr += n;
+	}
+	return true;
+}
+
+/*
+ * The D-cache walks over [paddr, +size): with the range ops up to
+ * KL_DCACHE_RANGE_MAX_LINES lines, else the whole cache (INVALIDATE writes
+ * back before it drops, so it is a clean and invalidate).  False if one
+ * timed out.
  */
 static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 {
@@ -176,9 +230,9 @@ static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 
 	if (!size)
 		return true;
-	if (klausscpu_dcache_range_ops() && size <= KL_DCACHE_RANGE_MAX) {
+	if (klausscpu_dcache_range_ops() && kl_cache_lines(paddr, size) <= KL_DCACHE_RANGE_MAX_LINES) {
 		ctrl = (clean ? KL_CACHE_RANGE_CLEAN : 0) | (inv ? KL_CACHE_RANGE_INV : 0);
-		return kl_cache_op(ctrl, paddr, size);
+		return kl_range_op(ctrl, paddr, size);
 	}
 	return kl_cache_op(inv ? KL_CACHE_INVALIDATE : KL_CACHE_FLUSH, 0, 0);
 }
@@ -190,7 +244,7 @@ static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
  */
 static void kl_icache_inv(phys_addr_t paddr, size_t size)
 {
-	if (klausscpu_dcache_range_ops() && size <= KL_IINV_RANGE_MAX &&
+	if (klausscpu_dcache_range_ops() && size && kl_cache_lines(paddr, size) < KL_ICACHE_LINES &&
 	    kl_cache_op(KL_CACHE_RANGE_IINV, paddr, size))
 		return;
 	kl_icache_invalidate();
@@ -208,19 +262,22 @@ bool klausscpu_dma_clean(phys_addr_t paddr, size_t size)
 }
 
 /*
- * After a device wrote [paddr, +size): drop its D-cache lines, without a
- * writeback (nothing of the buffer is dirty: it was cleaned before the DMA
- * and the CPU kept off it during it), and see to the I-cache.
+ * After a device wrote [paddr, +size): invalidate its D-cache lines
+ * (RANGE_INV, which writes a dirty line back before it drops it; nothing
+ * of the buffer should be dirty: it was cleaned before the DMA and the CPU
+ * kept off it during it, else that writeback would land over the device's
+ * data), and see to the I-cache.
  *
- * Dropping is only safe for lines the buffer owns whole.  A line shared
- * with other data that the CPU wrote during the DMA would lose that write
- * if dropped, and clobber the device's bytes if written back: neither way
- * is right, and only the buffer's alignment (ARCH_DMA_MINALIGN for
- * kmalloc; the SD driver takes a read by DMA only when it owns whole
+ * This is only right for lines the buffer owns whole.  A line shared with
+ * other data that the CPU wrote during the DMA would clobber the device's
+ * bytes when written back (and lose the CPU's write if it were dropped):
+ * neither way is right, and only the buffer's alignment (ARCH_DMA_MINALIGN
+ * for kmalloc; the SD driver takes a read by DMA only when it owns whole
  * lines) keeps it from happening.  So an unaligned buffer is a bug: warn,
  * clean and invalidate its edge lines (right at least when the CPU did not
- * touch them during the DMA), and drop only the whole lines between them,
- * so that a neighbour's store made after the edge clean is not dropped.
+ * touch them during the DMA), and invalidate the whole lines between them.
+ * (Since RANGE_INV writes back too, one walk over the whole span would do
+ * the same; the separate edge walks date from reading it as a drop.)
  *
  * The I-cache: a folio that may be mapped executable (PG_dcache_clean,
  * see above) has the buffer's I-cache lines dropped now; the others are
@@ -257,6 +314,30 @@ bool klausscpu_dma_inval(phys_addr_t paddr, size_t size)
 	}
 	return ok;
 }
+
+/*
+ * Boot self-test, with the range ops: an unaligned 64 KiB buffer (2049
+ * lines) is cleaned by range ops, two of them, and no whole-cache walk.
+ */
+static int __init kl_cache_selftest(void)
+{
+	unsigned long range, whole;
+	void *buf;
+
+	if (!klausscpu_dcache_range_ops())
+		return 0;
+	buf = kmalloc(SZ_64K + 2 * L1_CACHE_BYTES, GFP_KERNEL);
+	if (!buf)
+		return 0;
+	range = kl_range_ops;
+	whole = kl_whole_ops;
+	klausscpu_dma_clean(virt_to_phys(buf) + 8, SZ_64K);
+	pr_info("klausscpu: cache range ops: an unaligned 64 KiB clean took %lu range ops, %lu whole-cache walks\n",
+		kl_range_ops - range, kl_whole_ops - whole);
+	kfree(buf);
+	return 0;
+}
+late_initcall(kl_cache_selftest);
 
 /*
  * A DMA engine the kernel did not start (one a loader left running) has
