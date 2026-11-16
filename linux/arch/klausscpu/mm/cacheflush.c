@@ -258,6 +258,17 @@ bool klausscpu_dma_inval(phys_addr_t paddr, size_t size)
 	return ok;
 }
 
+/*
+ * A DMA engine the kernel did not start (one a loader left running) has
+ * been writing memory: drop the whole I-cache and have every later
+ * executable mapping check for stale lines.
+ */
+void klausscpu_dma_stray_write(void)
+{
+	WRITE_ONCE(kl_dma_wrote_memory, true);
+	kl_icache_invalidate();
+}
+
 /* set_ptes() maps the folio of pte executable into user space. */
 void __sync_icache_dcache(pte_t pte)
 {

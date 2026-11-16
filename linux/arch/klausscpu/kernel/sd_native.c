@@ -181,6 +181,7 @@ struct ksd_host {
 	bool dma;			/* this request's data is mapped and moves by DMA */
 	bool dma_reset;			/* stopping the DMA reset the engine */
 	bool req_dma;			/* this request's data phase is by DMA */
+	bool unsent;			/* nothing of this request reached the controller */
 	unsigned int dma_trouble;	/* DMA errors and stop failures */
 	unsigned int dma_good;		/* good DMA requests, for the decay */
 	enum dma_data_direction dma_dir;
@@ -444,6 +445,7 @@ static int ksd_dma_wait(struct ksd_host *h, u64 *st)
  */
 static bool ksd_engine_stop(struct ksd_host *h, const char *when)
 {
+	char buf[32];
 	u64 st;
 
 	h->cfg &= ~CFG_DMA_EN;
@@ -464,8 +466,14 @@ static bool ksd_engine_stop(struct ksd_host *h, const char *when)
 		return true;
 	}
 	h->dma_cap = false;
-	panic("klausscpu-sd: the SD DMA engine does not stop %s (STATUS %llx, buffer %llx): it could write freed memory\n",
-	      when, st, (u64)h->dma_start);
+	/* dma_start is the address of the request now live, if there is one
+	 * (h->dma); otherwise the engine's target is unknown. */
+	if (h->dma)
+		snprintf(buf, sizeof(buf), "buffer %llx", (u64)h->dma_start);
+	else
+		snprintf(buf, sizeof(buf), "buffer address unknown");
+	panic("klausscpu-sd: the SD DMA engine does not stop %s (STATUS %llx, %s): it could write freed memory\n",
+	      when, st, buf);
 }
 
 /*
@@ -480,6 +488,7 @@ static bool ksd_engine_stop(struct ksd_host *h, const char *when)
 static bool ksd_dma_start(struct ksd_host *h, struct mmc_data *data)
 {
 	struct scatterlist *sg = data->sg;
+	unsigned int len = data->blocks * data->blksz;	/* what ksd_dma_usable() validated */
 
 	if (rd(h, SDM_STATUS) & ST_DMA_BUSY) {
 		/* Can't happen: ksd_dma_stop() leaves it idle or panics. */
@@ -492,7 +501,7 @@ static bool ksd_dma_start(struct ksd_host *h, struct mmc_data *data)
 	if (dma_map_sg_attrs(mmc_dev(h->mmc), sg, data->sg_len, h->dma_dir, DMA_ATTR_SKIP_CPU_SYNC) != 1)
 		return false;
 	h->dma_start = sg_dma_address(sg);
-	if (h->dma_start != sg_phys(sg) || !klausscpu_dma_clean(sg_phys(sg), sg->length))
+	if (h->dma_start != sg_phys(sg) || !klausscpu_dma_clean(sg_phys(sg), len))
 		goto unmap;
 	/* The address register ignores writes while DMA_BUSY and reads back
 	 * the live address: check that it took. */
@@ -532,12 +541,14 @@ static void ksd_dma_stop(struct ksd_host *h)
 {
 	struct mmc_data *data = h->mrq->data;
 	struct scatterlist *sg;
+	unsigned int len;
 
 	if (!h->dma)
 		return;
 	sg = data->sg;
+	len = data->blocks * data->blksz;
 	ksd_dma_halt(h);
-	if (h->dma_dir != DMA_TO_DEVICE && !klausscpu_dma_inval(sg_phys(sg), sg->length))
+	if (h->dma_dir != DMA_TO_DEVICE && !klausscpu_dma_inval(sg_phys(sg), len))
 		h->dma_reset = true;
 	dma_unmap_sg_attrs(mmc_dev(h->mmc), sg, data->sg_len, h->dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 	h->dma = false;
@@ -666,6 +677,15 @@ static struct mmc_request *ksd_finish(struct ksd_host *h)
 	struct mmc_request *mrq = h->mrq;
 
 	ksd_dma_stop(h);
+	/* Every request with a data phase is counted here, once, by how the
+	 * data phase ran (a DMA refused and sent again counts as PIO); one
+	 * that was never sent (-EBUSY) counts as neither. */
+	if (mrq->data && !h->unsent) {
+		if (h->req_dma)
+			ksd_dma_requests++;
+		else
+			ksd_pio_requests++;
+	}
 	h->irq_en = 0;
 	wr(h, SDM_IRQ_EN, 0);
 	h->mrq = NULL;
@@ -680,10 +700,6 @@ static struct mmc_request *ksd_end_data(struct ksd_host *h, bool error)
 	struct mmc_request *mrq = h->mrq;
 
 	ksd_dma_stop(h);		/* the data is in DDR: unmap it */
-	if (h->req_dma)
-		ksd_dma_requests++;
-	else
-		ksd_pio_requests++;
 	if (h->dma_reset) {
 		/* The engine had to be reset, or the invalidate failed: trust
 		 * none of the data. */
@@ -941,8 +957,11 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	mod_delayed_work(system_wq, &h->watchdog, msecs_to_jiffies(ms) + 1);
 
 	h->state = mrq->sbc ? KSD_SBC : KSD_CMD;
-	if (ksd_send(h, mrq->sbc ? mrq->sbc : mrq->cmd))
+	h->unsent = false;
+	if (ksd_send(h, mrq->sbc ? mrq->sbc : mrq->cmd)) {
+		h->unsent = true;
 		done = ksd_finish(h);
+	}
 	mutex_unlock(&h->lock);
 	if (done)
 		mmc_request_done(mmc, done);
@@ -1058,8 +1077,12 @@ static int ksd_probe(struct platform_device *pdev)
 	wr(h, SDM_CFG, 0);
 	/* A DMA a loader left running may still be writing memory the kernel
 	 * now owns: DMA_EN = 0 above aborts it; make sure it stopped. */
-	if (rd(h, SDM_STATUS) & ST_DMA_BUSY)
+	if (rd(h, SDM_STATUS) & ST_DMA_BUSY) {
 		ksd_engine_stop(h, "at probe");
+		/* Whatever it wrote since the kernel started may be stale in
+		 * the I-cache. */
+		klausscpu_dma_stray_write();
+	}
 
 	mmc->ops = &ksd_ops;
 	mmc->f_min = DIV_ROUND_UP(KSD_REF_HZ, 2 * 0x10000);

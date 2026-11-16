@@ -217,7 +217,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 			    pte_t *ptep, pte_t pte, unsigned int nr)
 {
 	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
-	if (pte_present(pte) && pte_exec(pte) && !pte_special(pte) && addr < TASK_SIZE)
+	if (pte_present(pte) && pte_exec(pte) && addr < TASK_SIZE)
 		__sync_icache_dcache(pte);
 	for (;;) {
 		set_pte(ptep, pte);

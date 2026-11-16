@@ -51,8 +51,30 @@ int main(int argc, char **argv)
 		printf("dmaexec: wrote %s\n", argv[2]);
 		return 0;
 	}
+	if (argc == 3 && !strcmp(argv[1], "-m")) {
+		page = mmap(NULL, 65536, PROT_READ | PROT_WRITE,
+			    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (page == MAP_FAILED) {
+			perror("mmap");
+			return 1;
+		}
+		fd = open(argv[2], O_RDONLY | O_DIRECT);
+		if (fd < 0 || pread(fd, page, BLOCK, 0) != BLOCK) {
+			perror(argv[2]);
+			return 1;
+		}
+		close(fd);
+		if (mprotect(page, 65536, PROT_READ | PROT_EXEC)) {
+			perror("mprotect");
+			return 1;
+		}
+		f = (int (*)(int))(void *)page;
+		b = f(1);
+		printf("dmaexec -m: %d %s\n", b, b == 12 ? "PASS" : "FAIL");
+		return b == 12 ? 0 : 1;
+	}
 	if (argc != 2) {
-		fprintf(stderr, "usage: dmaexec [-w] FILE\n");
+		fprintf(stderr, "usage: dmaexec [-w|-m] FILE\n");
 		return 2;
 	}
 	page = mmap(NULL, 65536, PROT_READ | PROT_WRITE | PROT_EXEC,

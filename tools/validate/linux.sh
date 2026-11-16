@@ -303,7 +303,8 @@ dma_fault_boots() {
   done
   # New code read by O_DIRECT (DMA) into an executable page that has
   # already run and stays mapped: the kernel must drop its I-cache lines
-  # when the DMA completes (linux/userland/dmaexec.c; the coherence
+  # when the DMA completes; and the same for a page that only becomes
+  # executable (mprotect) after the DMA (linux/userland/dmaexec.c [-m]; the coherence
   # checker, not the result, is the verdict on the emulator).
   n=dmaexec
   cp "$OUT/card-empty.img" "$OUT/$n.img"
@@ -311,10 +312,12 @@ dma_fault_boots() {
   {
     echo 'mount -t vfat /dev/mmcblk0p1 /mnt && /seed/dmaexec -w /mnt/code.bin && umount /mnt && echo 3 > /proc/sys/vm/drop_caches && mount -t vfat /dev/mmcblk0p1 /mnt && echo ready'
     echo 'r=$(cat /sys/module/klausscpu_sd/parameters/native_dma_requests); /seed/dmaexec /mnt/code.bin; echo dmaexec-dma $(( $(cat /sys/module/klausscpu_sd/parameters/native_dma_requests) - r ))'
+    echo 'r=$(cat /sys/module/klausscpu_sd/parameters/native_dma_requests); /seed/dmaexec -m /mnt/code.bin; echo dmaexec-m-dma $(( $(cat /sys/module/klausscpu_sd/parameters/native_dma_requests) - r ))'
   } >"$OUT/$n.in"
-  printf 'ready\ndmaexec: 45 12 PASS\n' >"$OUT/$n.expect"
+  printf 'ready\ndmaexec: 45 12 PASS\ndmaexec -m: 12 PASS\n' >"$OUT/$n.expect"
   run_step "$n" 20000000000 1200 '$ '
   grep -aq '^dmaexec-dma [1-9]' "$OUT/$n.out" || bad "$n: the O_DIRECT read was not a DMA"
+  grep -aq '^dmaexec-m-dma [1-9]' "$OUT/$n.out" || bad "$n: the O_DIRECT read of dmaexec -m was not a DMA"
   grep -aq 'DMA coherence problems: 0' "$OUT/$n.out" || bad "$n: DMA coherence problems (the I-cache was not invalidated?)"
   rm -f "$OUT/$n.img"
   # An engine nothing stops: the kernel panics before it unmaps the

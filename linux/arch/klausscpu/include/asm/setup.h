@@ -40,6 +40,7 @@ bool klausscpu_dcache_range_ops(void);
  * range, and after it wrote it; false if a D-cache walk timed out. */
 bool klausscpu_dma_clean(phys_addr_t paddr, size_t size);
 bool klausscpu_dma_inval(phys_addr_t paddr, size_t size);
+void klausscpu_dma_stray_write(void);
 /* mm/tlbwalk.c: the hardware TLB walker, when CPU_FEATURES[25] says so. */
 void klausscpu_tlbwalk_init(void);
 unsigned long klausscpu_tlb_walks(void);	/* walker refills since boot */
