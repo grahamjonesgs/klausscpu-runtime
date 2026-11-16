@@ -662,4 +662,7 @@ over an hour, because the board swaps):
 - **TLB size sweep** (for the RTL session). With CDSX, a 64-entry or
   128-entry 4-way TLB is worth only ~1.2–1.4%, and an 8-entry micro-ITLB
   ~0.2%. The RTL session has deferred both: L2 → SD DMA (+ range ops,
-  RANGE_IINV) → RAS 8.
+  RANGE_IINV). RAS 8 was dropped (Graham, 2026-11-16): about 0.3% in the
+  emulator, below the board's run-to-run noise, on a timing-sensitive path.
+  After SD DMA, the emulator re-ranks the next RTL candidates on the L2 +
+  CDSX baseline.
