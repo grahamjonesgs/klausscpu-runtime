@@ -143,7 +143,7 @@ scripts find each other relative to that.
 | Check the whole board | `tools/validate/board-check.sh [--boot] [--quick]`: 16 checks, about 8 min, takes both locks |
 | Emulator tests | `tools/validate/linux.sh <out> <mode>` (modes in its header); `linux/userland/tests/{dynlink,libffi,cxx}/run.sh` |
 | Build the C++ runtime (libunwind, libc++abi, libc++) | `linux/cxx/build.sh` (installs into `linux-ws/dyn/sysroot`) |
-| Build clang for the board | `NATIVE_MULTICALL=1 NATIVE_BUILD_TYPE=Release NATIVE_BUILD=../klausscpu-llvm/build-native-klausscpu-multi-o2 linux/toolchain/build-native-llvm.sh` (about 10 min) |
+| Build clang for the board | `NATIVE_MULTICALL=1 NATIVE_BUILD_TYPE=Release NATIVE_PROFDATA=default NATIVE_LTO=Thin NATIVE_ORDER=1 NATIVE_BUILD=../klausscpu-llvm/build-native-klausscpu-pgo-lto linux/toolchain/build-native-llvm.sh` (PGO + ThinLTO + call-graph order; about 8 min; the profile is `linux/toolchain/clang.profdata.xz`, remade by `linux/toolchain/pgo-profile.sh`) |
 | Build and install the toolchain image (about 5 min, no reboot) | `linux/toolchain/build-toolchain-image.sh`, then on the board `umount /opt/llvm`, then `gzip -1c linux-ws/toolchain.img \| ssh root@board install-toolchain -z -` (while `/opt/llvm` is mounted it is staged for the next boot instead) |
 | Check the board's compiler | `linux/userland/tests/native-clang/board.sh` (identity with the cross clang, links, runs; `NC_SKIP=cxx-stdlib` saves an hour), `perf.sh` (timings under perfstat) |
 
@@ -192,15 +192,19 @@ clang -O2 -fPIC -shared lib.c -o libx.so
   use `-Wl,-rpath`.
 - **The tools:** `ld.lld`, `llvm-ar`, `llvm-nm`, `llvm-objdump` and
   `llvm-readelf` are in `/opt/llvm/bin` too.
-- **What to expect** (the Release-built clang, quiet board):
+- **What to expect** (the PGO + ThinLTO clang of 2026-11-17, quiet board,
+  `perf.sh`, user + sys):
 
   | compile | time |
   |---|---|
-  | C hello, -O2 | 1–2 s |
-  | zlib deflate.c (2000 lines), -O0 / -O1 / -O2 | 29 / 73 / 90 s |
-  | all of zlib (16 files at -O2, link, run the test) | 7.5 min |
-  | C++ hello with `<string>` and `<vector>` | 3.5 min, whatever the -O (header parsing) |
-  | the same with a precompiled header | 44 s |
+  | C hello, -O2 | about 1 s |
+  | zlib deflate.c (2000 lines), preprocessed, -O0 / -O2 | 10 / 30 s |
+  | the C++ hello with `<string>` and `<vector>`, preprocessed, -O0 / -O2 | 76 / 78 s (header parsing) |
+
+  Older figures, taken before the hardware TLB walker, I-cache, L2 and the
+  PGO build (so now about 3x faster): all of zlib (16 files at -O2, link,
+  run the test) 7.5 min; the C++ hello from source 3.5 min, 44 s with a
+  precompiled header.
 
 - **Use -O0 or -O1 while developing:** codegen is most of the C time.
 - **For C++, use a precompiled header.** `clang-pch` builds one of the
@@ -225,10 +229,11 @@ clang -O2 -fPIC -shared lib.c -o libx.so
   about 13 M is fixed per-process start-up: page faults, ~1800 option
   registrations, malloc. A link starts `ld.lld` as a second process.
   Fault-around of 16 pages (kernel 0876dbb) cut 5–11% of it.
-- **Why it's slow:** clang's code is far bigger than the I-cache and the
-  TLB's reach. CPI is 5–7, and the TLB refill handler is about a third of
-  the instructions executed. See `CLANG_ON_BOARD_PLAN.md` M6. The
-  hardware candidates are with the CPU session.
+- **Why it's slow:** clang's code (94 MB) is far bigger than the I-cache,
+  the L2 and the TLB's reach: CPI is 3.3 (C) to 5.1 (C++), most of it
+  instruction fetch and D-cache misses. M6 of `CLANG_ON_BOARD_PLAN.md`
+  took deflate.c -O2 from 109 s to 30 s (hardware TLB walker, I-cache, L2,
+  a call-graph function order, PGO + ThinLTO); that work is finished.
 
 ## Performance, where the time goes
 

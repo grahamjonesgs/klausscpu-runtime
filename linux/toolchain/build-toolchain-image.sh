@@ -21,9 +21,11 @@
 #
 # Programs built on the board run against the system image's /lib/libc.so,
 # which must be the sysroot's: the script prints the sysroot's hash.
-#   NATIVE_BUILD        default klausscpu-llvm/build-native-klausscpu-multi-o2 (the
-#                       Release build: 24% fewer instructions, ~17% faster on the
-#                       board than MinSizeRel, 90 MB instead of 64 MB)
+#   NATIVE_BUILD        default klausscpu-llvm/build-native-klausscpu-pgo-lto, the
+#                       board's binary since 2026-11-17: Release + PGO + ThinLTO +
+#                       its CDSX order (build-native-llvm.sh's board recipe; 20% /
+#                       12% faster than the Release + CDSX build-native-klausscpu-
+#                       multi-o2 on deflate.c / the C++ hello -O2 on the board)
 #   KLAUSSCPU_LLVM_BIN  host toolchain (default ../klausscpu-llvm/build/bin):
 #                       the builtins come from its resource directory
 #   KLAUSSCPU_SYSROOT   default linux-ws/dyn/sysroot
@@ -32,7 +34,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=$(cd "$HERE/../.." && pwd)
 B=${KLAUSSCPU_LLVM_BIN:-$(cd "$RT/../klausscpu-llvm/build/bin" && pwd)}
-NB=${NATIVE_BUILD:-$(cd "$B/../.." && pwd)/build-native-klausscpu-multi-o2}
+NB=${NATIVE_BUILD:-$(cd "$B/../.." && pwd)/build-native-klausscpu-pgo-lto}
 SR=${KLAUSSCPU_SYSROOT:-$RT/linux-ws/dyn/sysroot}
 ST=${TC_STAGE:-$RT/linux-ws/toolchain-stage}
 OUTIMG=${1:-$RT/linux-ws/toolchain.img}

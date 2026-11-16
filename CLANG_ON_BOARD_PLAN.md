@@ -666,3 +666,75 @@ over an hour, because the board swaps):
   emulator, below the board's run-to-run noise, on a timing-sensitive path.
   After SD DMA, the emulator re-ranks the next RTL candidates on the L2 +
   CDSX baseline.
+
+### M6 done (2026-11-17): PGO + ThinLTO, and the end of the clang-speed work
+
+Graham decided (2026-11-16) to finish M6 with one software item: a
+profile-guided, ThinLTO build of the board's clang, adopted if it won.
+
+**The build** is in `linux/toolchain/build-native-llvm.sh`
+(`NATIVE_PROFDATA=default NATIVE_LTO=Thin NATIVE_ORDER=1`; the header has the
+recipe). It has three parts:
+- **Profile:** `linux/toolchain/clang.profdata.xz`, made by
+  `linux/toolchain/pgo-profile.sh`. An instrumented x86 clang of the same
+  configuration compiles *for KlaussCPU* on ten training compiles. bzip2
+  `decompress.c` and libc++ `terminate.cpp` are held out. About 10% of
+  functions lose their profile to CFG hash mismatches between the x86 and the
+  KlaussCPU build.
+- **ThinLTO:** the link needs `-Wl,--lto-O2` at its end. AddLLVM gives the
+  multicall `llvm-driver` `--lto-O0`, which would leave the LTO unoptimised.
+- **Order:** a fresh CDSX order from the new binary. lld's cdsort from the PGO
+  call-graph profile alone was worse, with 30–80% more main-TLB refills.
+
+A PGO build needed a backend fix: klausscpu-llvm bd5e2a47 (`.reloc
+BFD_RELOC_NONE` for `.cg_profile`, Opus-reviewed, lit tests).
+`llvm/lib/Target/KlaussCPU/NATIVE_TOOLCHAIN.md` in klausscpu-llvm explains the
+build for people starting from the LLVM side.
+
+**Emulator** (cycles from the timed L2 model, against the Release + CDSX
+binary; deflate and C++ hello -O2 trained, bzip2 decompress and terminate.cpp
+held out):
+
+| | deflate | C++ hello | bzip2 decompress (held out) | terminate (held out) |
+|---|---|---|---|---|
+| PGO + CDSX | −11% | −11% | −8% | −10% |
+| PGO + ThinLTO + CDSX | −19% | −14% | −14% | −11% |
+
+**Board** (sddma 3ae5ed6 in QSPI, `perf.sh`, user + sys, one run after a
+warm-up), Release + CDSX → PGO + ThinLTO + CDSX:
+
+| | user+sys | instructions | CPI | main-TLB refills | major faults | peak RSS |
+|---|---|---|---|---|---|---|
+| deflate -O2 | 37.6 → **30.2 s (−20%)** | 1.134 → 0.925 G | 3.32 → 3.26 | 6.53 → 4.95 M | 0 → 0 | 37 → 46 MB |
+| C++ hello -O2 | 88.6 → **77.5 s (−12.5%)** | 1.843 → 1.521 G | 4.82 → 5.11 | 14.9 → 12.2 M | 7 → 5 | 69 → 77 MB |
+| deflate -O0 | — → 9.9 s | 0.270 G | 3.67 | 1.33 M | 1 | 39 MB |
+| C++ hello -O0 | — → 76.3 s | 1.504 G | 5.15 | 12.0 M | 78 | 76 MB |
+
+- **Binary size:** the binary is 94 MB (90.7 before).
+- **Memory:** ThinLTO's extra resident text did not bring back page-cache
+  pressure.
+- **M5 identity:** with the new binary, 109 identical objects and links, 0
+  failing (`NC_SKIP=cxx-stdlib`).
+- **board-check:** passes.
+- **Rollback:** the previous image is `linux-ws/toolchain.img.cdsx-prev`.
+
+**M6 overall**, deflate.c / C++ hello -O2 on the board:
+
+| | deflate.c | C++ hello |
+|---|---|---|
+| MinSizeRel, no hardware help (start of M6) | 109 s | 255 s |
+| now | 30 s | 78 s |
+
+The gains, in order:
+1. Release build.
+2. Hardware TLB walker.
+3. I-cache.
+4. L2.
+5. Call-graph function order.
+6. PGO + ThinLTO.
+
+**The clang-speed work ends here (Graham, 2026-11-16):**
+- No more hardware performance items. The CPU session now does only the known
+  correctness fixes.
+- The SD DMA work closed with the measured cache range-op crossovers (runtime
+  2bdd9d8).

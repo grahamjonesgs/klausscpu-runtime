@@ -43,6 +43,15 @@
 #                       818 / 495 / 378, 864 / 513 / 308
 #                       (CLANG_ON_BOARD_PLAN.md M6).  The link flags are set on
 #                       every run, so it also relinks an existing build.
+#                       Since 2026-11-17 clang-order.txt.gz is the CDSX order of
+#                       the PGO + ThinLTO binary (NATIVE_PROFDATA=default
+#                       NATIVE_LTO=Thin), re-profiled on the same ten workloads:
+#                       14,608 functions.  It fits only that configuration (the
+#                       Release order above is the previous file).  Emulator, vs
+#                       the previous Release + old order board binary (timed L2
+#                       model cycles, deflate / C++ hello / bzip2 decompress.c /
+#                       terminate.cpp -O2): -19 / -14 / -14 / -11%; main-TLB
+#                       refills -24 / -18 / -21 / -20%; objects byte-identical.
 #   NATIVE_MALLOC       the allocator linked into the binary: mallocng (default,
 #                       the sysroot's libc.a) or oldmalloc: a libc.a from the
 #                       same musl tree and patches built with MALLOC_DIR=oldmalloc
@@ -57,7 +66,43 @@
 #                       instructions, but the C++ hello's anonymous peak grows 11%
 #                       (40 -> 45 MB), squeezing clang's text out of the page cache
 #                       (3x the major faults): not the default.
-# MinSizeRel, no assertions, only the KlaussCPU target, no zlib/zstd/
+#   NATIVE_PROFDATA     a PGO profile (LLVM_PROFDATA_FILE: every file compiled
+#                       with -fprofile-instr-use=...); "default" is the committed
+#                       linux/toolchain/clang.profdata.xz, decompressed into the
+#                       build directory.  PGO builds emit .cg_profile sections,
+#                       which need the klausscpu-llvm MC fix bd5e2a47 in the host
+#                       compiler.  Measured on the klausscc emulator (2026-11-16,
+#                       Release + NATIVE_ORDER=1 CDSX, this profile, deflate / C++
+#                       hello / held out bzip2 decompress.c / terminate.cpp -O2):
+#                       instructions -9 / -9 / -7 / -7%, timed L2 model cycles
+#                       -11 / -11 / -8 / -10%; text 90.7 -> 82.2 MB.
+#   NATIVE_LTO          Thin: LLVM_ENABLE_LTO=Thin.  With the profile (and a CDSX
+#                       order from the new binary): instructions -19 / -18 / -15 /
+#                       -14%, cycles -19 / -13 / -15 / -11% (adj. for TLB refills
+#                       -21 / -15 / -16 / -12%); text 95.5 MB (+5%), peak RSS +9 MB
+#                       (more text resident: check the board's major faults).
+#                       AddLLVM links every target outside
+#                       LLVM_DISTRIBUTION_COMPONENTS (llvm-driver) with
+#                       -Wl,--lto-O0, which turns off the LTO optimisation; so
+#                       with NATIVE_LTO the script appends -Wl,--lto-O2 through
+#                       CMAKE_{C,CXX}_STANDARD_LIBRARIES, the end of the link
+#                       line, where lld takes the last --lto-O.
+#                       Both are set on every run (like the link flags), so
+#                       changing them relinks/rebuilds an existing build dir.
+#                       Use the order of a binary from the SAME configuration:
+#                       the symbol names and the call graph change with PGO and
+#                       LTO (CDSX recipe: klausscc tools/tlbord/run.sh header).
+# The profile (linux/toolchain/pgo-profile.sh, 15 minutes on 24 cores) is taken
+# on the host with an instrumented x86 clang of this configuration compiling for
+# KlaussCPU, on the CDSX training workloads minus the two held-out ones.  It only
+# matches this checkout's source paths; regenerate it after big source changes
+# (the hash-mismatch warnings of the build show how stale it is).
+# The board recipe (the binary of 2026-11-16/17):
+#   NATIVE_MULTICALL=1 NATIVE_BUILD_TYPE=Release NATIVE_PROFDATA=default \
+#   NATIVE_LTO=Thin NATIVE_BUILD=.../klausscpu-llvm/build-native-klausscpu-pgo-lto \
+#   NATIVE_ORDER=1 linux/toolchain/build-native-llvm.sh
+#   NATIVE_BUILD=... linux/toolchain/build-toolchain-image.sh
+# MinSizeRel by default, no assertions, only the KlaussCPU target, no zlib/zstd/
 # libxml2/terminfo, no threads, no plugins.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -105,6 +150,22 @@ if [ ! -f "$BUILD/build.ninja" ]; then
     >"$BUILD/configure.log" 2>&1 || { tail -40 "$BUILD/configure.log"; exit 1; }
 fi
 LDFLAGS="-static"
+PGO=(-DLLVM_PROFDATA_FILE= -DLLVM_ENABLE_LTO=OFF -DCMAKE_C_STANDARD_LIBRARIES= -DCMAKE_CXX_STANDARD_LIBRARIES=)
+case ${NATIVE_PROFDATA:-} in
+"") ;;
+default)
+  [ "$BUILD/clang.profdata" -nt "$HERE/clang.profdata.xz" ] ||
+    xz -dc "$HERE/clang.profdata.xz" >"$BUILD/clang.profdata"
+  PGO[0]=-DLLVM_PROFDATA_FILE=$BUILD/clang.profdata ;;
+*) [ -f "$NATIVE_PROFDATA" ] || { echo "no profile $NATIVE_PROFDATA" >&2; exit 1; }
+  PGO[0]=-DLLVM_PROFDATA_FILE=$(realpath "$NATIVE_PROFDATA") ;;
+esac
+case ${NATIVE_LTO:-} in
+"") ;;
+Thin) PGO[1]=-DLLVM_ENABLE_LTO=Thin
+  PGO[2]=-DCMAKE_C_STANDARD_LIBRARIES=-Wl,--lto-O2 PGO[3]=-DCMAKE_CXX_STANDARD_LIBRARIES=-Wl,--lto-O2 ;;
+*) echo "NATIVE_LTO is Thin" >&2; exit 1 ;;
+esac
 if [ "${NATIVE_ORDER:-0}" = 1 ]; then
   gunzip -c "$HERE/clang-order.txt.gz" >"$BUILD/clang-order.txt"
   LDFLAGS="$LDFLAGS -Wl,--symbol-ordering-file=$BUILD/clang-order.txt -Wl,--no-warn-symbol-ordering"
@@ -118,6 +179,6 @@ oldmalloc)
   LDFLAGS="$LDFLAGS -L$MWS/sysroot/lib" ;;
 *) echo "NATIVE_MALLOC is mallocng or oldmalloc" >&2; exit 1 ;;
 esac
-cmake -S "$LLVM_SRC/llvm" -B "$BUILD" -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" >>"$BUILD/configure.log" 2>&1 ||
+cmake -S "$LLVM_SRC/llvm" -B "$BUILD" -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" "${PGO[@]}" >>"$BUILD/configure.log" 2>&1 ||
   { tail -5 "$BUILD/configure.log"; exit 1; }
 ninja -C "$BUILD" $TARGETS
