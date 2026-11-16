@@ -44,6 +44,14 @@
 #                    write busy that never ends, a bad read block, a
 #                    command timeout) on a fresh card, write and read back
 #                    a 2 MiB file, and check its hash and fsck.fat
+#                    LINUX_SD_DMA=1 (sd-native on the emulator) gives the
+#                    controller its DMA engine and the cache range ops
+#                    (klausscc --sd-dma --dcache-range-ops; =norange: no
+#                    range ops), and adds DMA fault boots: a command the
+#                    engine refuses (DMA_ERR, sent again by PIO), an engine
+#                    that stalls (the watchdog's DMA_EN abort), one that
+#                    only leaving SD mode stops, and one nothing stops
+#                    (the kernel must panic rather than unmap)
 #   ports            the ported programs (linux/userland/<pkg>.sh: lua, ...),
 #                    each built here if it isn't yet, in a system image that
 #                    sdinit boots from the initramfs with a data image at
@@ -67,6 +75,14 @@ case $MODE in shell|busybox|ssh|net|keystore|rootfs|sd-spi|sd-native|ports|build
 [ "$MODE" != net ] || [ "$WHERE" = board ] || die "net needs the board (the emulator has no Ethernet)"
 SD=0
 case $MODE in sd-*) SD=1 ;; esac
+SD_DMA_ARGS=()
+case ${LINUX_SD_DMA:-} in
+'' | 0) ;;
+norange) SD_DMA_ARGS=(--sd-dma) ;;
+*) SD_DMA_ARGS=(--sd-dma --dcache-range-ops) ;;
+esac
+[ ${#SD_DMA_ARGS[@]} = 0 ] || { [ "$MODE" = sd-native ] && [ "$WHERE" = emu ]; } ||
+  die "LINUX_SD_DMA is for sd-native on the emulator"
 [ $SD = 0 ] || [ "$WHERE" = emu ] || die "$MODE runs on the emulator (on the board the card holds real files)"
 [ $SD = 0 ] || "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--sd-native' ||
   die "$KLAUSSCC has no --sd-image/--sd-native: build klausscc's mmu branch"
@@ -185,7 +201,7 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       { echo "FAIL card image (see $OUT/card.log)"; exit 1; }
     cp "$CARD" "$OUT/card-empty.img"	# for the fault boots
     EMU_ARGS=(--sd-image "$CARD")
-    [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native)
+    [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}")
   fi
   export INITRAMFS_PROFILE=busybox
 elif [ "$MODE" = m3 ]; then
@@ -229,6 +245,67 @@ run_step() {
   local why
   why=$(expect_in_order "$OUT/$1.expect" "$OUT/$1.out") || bad "$1: $why"
   grep -aq 'Kernel panic\|Oops' "$OUT/$1.out" && bad "$1: kernel panic"
+}
+
+# dma_fault_boots: with LINUX_SD_DMA, the DMA engine's faults (klausscc
+# --sd-fault dmaerr/dmastall/dmahang/dmastuck, which count data commands
+# written with DMA_EN), each on a fresh card with the 2 MiB file session.
+# A clean boot first counts the DMA commands before the file is written
+# and before it is read back, so each fault lands in those transfers.
+dma_fault_boots() {
+  local P=/sys/module/klausscpu_sd/parameters n f kind e s t r w R d
+  {
+    echo "echo dmareq \$(cat $P/native_dma_requests)"
+    echo 'mount -t vfat /dev/mmcblk0p1 /mnt; head -c 2097152 /seed/rootfs.img > /mnt/t.bin; sync; echo wrote'
+    echo "echo dmareq \$(cat $P/native_dma_requests)"
+    echo 'echo 3 > /proc/sys/vm/drop_caches; sha256sum /mnt/t.bin | cut -c1-16'
+    echo 'umount /mnt; echo unmounted'
+    echo "echo dmastats \$(cat $P/native_dma_errors) \$(cat $P/native_dma_stop_failures) \$(cat $P/native_timeouts) \$(cat $P/native_data_errors) \$(cat $P/native_dma_requests) \$(cat $P/native_pio_requests)"
+  } >"$OUT/dmafault.in"
+  n=dmafault-base
+  cp "$OUT/card-empty.img" "$OUT/$n.img"
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}")
+  cp "$OUT/dmafault.in" "$OUT/$n.in"
+  printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
+  run_step "$n" 40000000000 2400 '$ '
+  read -r w r < <(grep -ao '^dmareq [0-9]*' "$OUT/$n.out" | awk '{print $2}' | tr '\n' ' ')
+  echo "$n: DMA commands before the write ${w:-?}, before the read-back ${r:-?}"
+  [ -n "${w:-}" ] && [ -n "${r:-}" ] && [ "$r" -gt $(( w + 4 )) ] || { bad "$n: no DMA counts"; return; }
+  W=$(( w + 2 )) R=$(( r + 3 ))
+  for f in dmaerr@$R dmaerr@$W dmastall@$W dmastall@$R dmahang@$R; do
+    n=dmafault-$(echo "$f" | tr ':@' '--')
+    kind=${f%@*}
+    cp "$OUT/card-empty.img" "$OUT/$n.img"
+    EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}")
+    cp "$OUT/dmafault.in" "$OUT/$n.in"
+    printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
+    run_step "$n" 60000000000 3600 '$ '
+    grep -aq 'klausscc sd: injected' "$OUT/$n.out" || bad "$n: the fault was never injected"
+    read -r e s t d < <(grep -ao '^dmastats [0-9]* [0-9]* [0-9]* [0-9]*' "$OUT/$n.out" | awk '{print $2, $3, $4, $5}')
+    echo "$n: dma_errors ${e:-?} dma_stop_failures ${s:-?} timeouts ${t:-?} data_errors ${d:-?}"
+    case $kind in
+    dmaerr) [ "${e:-0}" -ge 1 ] && [ "${t:-1}" = 0 ] && [ "${d:-1}" = 0 ] ||
+      bad "$n: expected a DMA error sent again by PIO, no timeout or data error" ;;
+    dmastall) [ "${t:-0}" -ge 1 ] && [ "${s:-1}" = 0 ] || bad "$n: expected the watchdog, DMA_EN = 0 stopping the engine" ;;
+    dmahang) [ "${t:-0}" -ge 1 ] && [ "${s:-0}" -ge 1 ] || bad "$n: expected the watchdog and a stop failure" ;;
+    esac
+    grep -aq 'DMA coherence problems: 0' "$OUT/$n.out" || bad "$n: DMA coherence problems"
+    dd if="$OUT/$n.img" of="$OUT/part.img" bs=512 skip=2048 status=none &&
+      fsck.fat -n "$OUT/part.img" >"$OUT/$n.fsck" 2>&1 || bad "$n: fsck.fat (see $OUT/$n.fsck)"
+    rm -f "$OUT/part.img" "$OUT/$n.img"
+  done
+  # An engine nothing stops: the kernel panics before it unmaps the
+  # buffer.  (The watchdog fires first; the panic stops the session.)
+  f=dmastuck@$R n=dmafault-dmastuck-$R
+  cp "$OUT/card-empty.img" "$OUT/$n.img"
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}")
+  cp "$OUT/dmafault.in" "$OUT/$n.in"
+  timeout 2400 "$KLAUSSCC" -i "$OUT/vmlinux" --emulate --max-instructions 20000000000 \
+    "${EMU_ARGS[@]}" --uart-in "$OUT/$n.in" --uart-prompt '$ ' </dev/null >"$OUT/$n.out" 2>&1
+  echo "$n: $(grep -ao 'Emulator finished: [0-9]* instructions, stop = [A-Za-z]*' "$OUT/$n.out")"
+  grep -aq 'Kernel panic - not syncing: klausscpu-sd: the SD DMA engine does not stop' "$OUT/$n.out" ||
+    bad "$n: no panic"
+  rm -f "$OUT/$n.img"
 }
 
 if [ "$MODE" = shell ]; then
@@ -526,7 +603,7 @@ EOF2
       n=fault-$(echo "$f" | tr ':@' '--')
       cp "$OUT/card-empty.img" "$OUT/$n.img"
       EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f")
-      [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native)
+      [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}")
       cp "$OUT/fault.in" "$OUT/$n.in"
       printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
       run_step "$n" 40000000000 2400 '$ '
@@ -546,6 +623,7 @@ EOF2
         fsck.fat -n "$OUT/part.img" >"$OUT/$n.fsck" 2>&1 || bad "$n: fsck.fat (see $OUT/$n.fsck)"
       rm -f "$OUT/part.img" "$OUT/$n.img"
     done
+    [ ${#SD_DMA_ARGS[@]} = 0 ] || dma_fault_boots
   else
     echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
   fi

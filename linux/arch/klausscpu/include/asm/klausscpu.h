@@ -83,10 +83,11 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define KL_CACHE_ICACHE_INV	0x8
 #define KL_CACHE_RANGE_CLEAN	0x10	/* the lines of [OP_ADDR, +OP_LEN) */
 #define KL_CACHE_RANGE_INV	0x20	/* alone: drop them, no writeback */
+#define KL_CACHE_RANGE_IINV	0x40	/* drop them from the I-cache */
 #define KL_CACHE_STATUS		0x10
 #define KL_CACHE_MNT_BUSY	0x1	/* a walk is pending or running */
-#define KL_CACHE_OP_ADDR	0x30	/* range op start (PA), [4:0] ignored */
-#define KL_CACHE_OP_LEN		0x38	/* range op length in bytes, 0 = no-op */
+#define KL_CACHE_OP_ADDR	0x30	/* range op start (PA), [4:0] read 0 */
+#define KL_CACHE_OP_LEN		0x38	/* range op length in bytes ([31:0]), 0 = no-op */
 #define KL_INTC_BASE		(MMIO_BASE + 0x000F0000UL)
 #define KL_INT_MASK		0x00
 #define KL_INT_PEND		0x08
@@ -111,7 +112,7 @@ void kl_uart_rx_poll(void);	/* hvc_uart.c: from the timer tick */
 #define CPU_FEAT_MAL64		(1UL << 23)	/* STATUS.MAL64 implemented */
 #define CPU_FEAT_TLBWALK	(1UL << 25)	/* the hardware TLB walker (SR_TLB_PTB...) */
 #define CPU_FEAT_L2		(1UL << 26)	/* the unified L2 (kernel/l2.c) */
-#define CPU_FEAT_DCACHE_RANGE	(1UL << 27)	/* D-cache range clean/invalidate */
+#define CPU_FEAT_DCACHE_RANGE	(1UL << 27)	/* cache range ops (D clean/inv, I inv) */
 /* The L2 (klaussCPU branch l2; offsets provisional until its release). */
 #define KL_L2_INFO		(KL_CACHE_BASE + 0x20)	/* CACHE_INFO format */
 #define KL_L2_CTRL		(KL_CACHE_BASE + 0x28)	/* [0] EN, [1] WBINV, [8] BUSY */

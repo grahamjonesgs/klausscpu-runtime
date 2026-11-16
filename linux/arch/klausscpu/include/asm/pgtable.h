@@ -201,6 +201,34 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
 	return __pte(pte_val(pte) & ~_PAGE_SWP_EXCLUSIVE);
 }
 
+struct page;
+#include <linux/page_table_check.h>
+
+/* mm/cacheflush.c: the folio of pte is about to be mapped executable. */
+void __sync_icache_dcache(pte_t pte);
+
+/*
+ * As the generic set_ptes(), and a page mapped executable into user space
+ * gets its I-cache lines dropped first if a device may have written it
+ * since (PG_dcache_clean, mm/cacheflush.c): the I-cache does not snoop
+ * DMA.  The pages are all of one folio.
+ */
+static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
+			    pte_t *ptep, pte_t pte, unsigned int nr)
+{
+	page_table_check_ptes_set(mm, addr, ptep, pte, nr);
+	if (pte_present(pte) && pte_exec(pte) && !pte_special(pte) && addr < TASK_SIZE)
+		__sync_icache_dcache(pte);
+	for (;;) {
+		set_pte(ptep, pte);
+		if (--nr == 0)
+			break;
+		ptep++;
+		pte = __pte(pte_val(pte) + (1UL << PFN_PTE_SHIFT));
+	}
+}
+#define set_ptes set_ptes
+
 extern void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
 				   unsigned long address, pte_t *ptep, unsigned int nr);
 #define update_mmu_cache(vma, addr, ptep) \
