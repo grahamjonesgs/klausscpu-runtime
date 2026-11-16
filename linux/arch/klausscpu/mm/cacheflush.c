@@ -71,12 +71,14 @@
 #include <linux/io.h>
 #include <linux/irqflags.h>
 #include <linux/mm.h>
+#include <linux/moduleparam.h>
 #include <linux/processor.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
 #include <asm/cache.h>
 #include <asm/klausscpu.h>
 #include <asm/setup.h>
+#include <asm/timex.h>
 
 /*
  * The longest walk is ~11,300 cycles (113 us at 100 MHz: a range of 2048
@@ -94,18 +96,35 @@
 #define KL_RANGE_OP_LINES	2048
 
 /*
- * The crossover between D-cache range walks and a whole-cache one, in
+ * The crossovers between D-cache range walks and a whole-cache one, in
  * lines (counted from the buffer's first line to its last, so an
- * unaligned buffer counts its partial lines).  A range walk of n lines
- * costs 1 + 2 x min(n, 1024) cycles clean, so up to 2048 lines (64 KiB)
- * one op takes at most 2049 and two ops up to 4096 lines (128 KiB) at most
- * 4098: the whole walk's 4,097.  Dirty lines cost a range walk ~6 each
- * (4.5 when both lines of a set are) and a whole walk 3, but a whole walk
- * also writes back every other dirty line, and a whole INVALIDATE drops
- * every other line too.  So up to 128 KiB a buffer's lines are walked,
- * above it the whole cache.  To be confirmed on the board.
+ * unaligned buffer counts its partial lines), measured on the board
+ * (sddma 3ae5ed6, the bench below, cycles from an emptied cache):
+ *
+ *   lines            1024           2048           4096           8192
+ *   clean, buffer    range  whole   range  whole   range  whole   range  whole
+ *     read            2193   4247    2200   4229    4386   4348    8724   4374
+ *     written         8341   9638   14489  10361   13656  10497   21071  10547
+ *   invalidate,
+ *     buffer read     2193   4329    2199   4246    4386   4354    8720   4337
+ *   reading 32 KiB of other data after the invalidate:
+ *                     2113  10169   11501  11006   17981  22341   26741  26850
+ *
+ * A range walk writes a dirty line back in ~6 cycles, a whole walk in ~3,
+ * so for a written buffer the whole walk wins from about 1.5k lines; for a
+ * clean one they meet at 4096.  A whole clean (FLUSH) leaves the rest of
+ * the cache in place, so a clean takes range ops up to one op's 2048 lines
+ * (64 KiB, a page) and the whole cache above.  A whole INVALIDATE also
+ * drops every other line, which the CPU then fetches again (8,000 cycles
+ * more to read 32 KiB back): an invalidate, whose buffer is clean (it was
+ * cleaned before the DMA), takes range ops up to 8192 lines (256 KiB),
+ * as up to four ops of 2048 (kl_range_op: the hardware would turn one
+ * larger op into a whole walk; the range columns above are 1, 1, 2, 4 ops).
+ * Either way the difference is tens of microseconds against a transfer of
+ * milliseconds.
  */
-#define KL_DCACHE_RANGE_MAX_LINES	(2 * KL_RANGE_OP_LINES)
+#define KL_DCACHE_CLEAN_MAX_LINES	KL_RANGE_OP_LINES
+#define KL_DCACHE_INV_MAX_LINES		(4 * KL_RANGE_OP_LINES)
 
 /*
  * The I-cache's lines (64 KiB of 32 B): a RANGE_IINV of this many or more
@@ -220,9 +239,9 @@ static bool kl_range_op(u64 ctrl, phys_addr_t paddr, size_t size)
 
 /*
  * The D-cache walks over [paddr, +size): with the range ops up to
- * KL_DCACHE_RANGE_MAX_LINES lines, else the whole cache (INVALIDATE writes
- * back before it drops, so it is a clean and invalidate).  False if one
- * timed out.
+ * KL_DCACHE_CLEAN_MAX_LINES lines for a clean, KL_DCACHE_INV_MAX_LINES
+ * for an invalidate, else the whole cache (INVALIDATE writes back before
+ * it drops, so it is a clean and invalidate).  False if one timed out.
  */
 static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 {
@@ -230,7 +249,8 @@ static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 
 	if (!size)
 		return true;
-	if (klausscpu_dcache_range_ops() && kl_cache_lines(paddr, size) <= KL_DCACHE_RANGE_MAX_LINES) {
+	if (klausscpu_dcache_range_ops() &&
+	    kl_cache_lines(paddr, size) <= (inv ? KL_DCACHE_INV_MAX_LINES : KL_DCACHE_CLEAN_MAX_LINES)) {
 		ctrl = (clean ? KL_CACHE_RANGE_CLEAN : 0) | (inv ? KL_CACHE_RANGE_INV : 0);
 		return kl_range_op(ctrl, paddr, size);
 	}
@@ -317,7 +337,9 @@ bool klausscpu_dma_inval(phys_addr_t paddr, size_t size)
 
 /*
  * Boot self-test, with the range ops: an unaligned 64 KiB buffer (2049
- * lines) is cleaned by range ops, two of them, and no whole-cache walk.
+ * lines) is invalidated (a clean one is past KL_DCACHE_CLEAN_MAX_LINES)
+ * by range ops, two of them, and no whole-cache walk.  RANGE_INV writes
+ * the buffer's dirty lines back first, so its contents are kept.
  */
 static int __init kl_cache_selftest(void)
 {
@@ -331,13 +353,150 @@ static int __init kl_cache_selftest(void)
 		return 0;
 	range = kl_range_ops;
 	whole = kl_whole_ops;
-	klausscpu_dma_clean(virt_to_phys(buf) + 8, SZ_64K);
-	pr_info("klausscpu: cache range ops: an unaligned 64 KiB clean took %lu range ops, %lu whole-cache walks\n",
+	kl_dcache_walk(virt_to_phys(buf) + 8, SZ_64K, false, true);
+	pr_info("klausscpu: cache range ops: an unaligned 64 KiB invalidate took %lu range ops, %lu whole-cache walks\n",
 		kl_range_ops - range, kl_whole_ops - whole);
 	kfree(buf);
 	return 0;
 }
 late_initcall(kl_cache_selftest);
+
+/*
+ * The range-vs-whole crossover, measured on demand: as root, write 1 to
+ * /sys/module/klausscpu_cache/parameters/bench; the results go to the
+ * kernel log.  For buffers of 1 to 16384 lines it times, in cycles (the
+ * least of KL_BENCH_RUNS, interrupts off, each from a cache emptied by a
+ * whole INVALIDATE), a clean and an invalidate of the buffer by range ops
+ * (kl_range_op) and by one whole-cache walk, with the buffer read (clean
+ * lines), written (dirty), and written after 32 KiB of other data was
+ * (dirty, and the rest of the cache dirty too: what a whole walk also
+ * writes back).  For the invalidates of that last case it also times
+ * reading the other data again afterwards: what a whole INVALIDATE costs
+ * the rest of the system.  Then RANGE_IINV against ICACHE_INV (the op
+ * alone; a whole sweep's refetches come on top).
+ */
+#undef MODULE_PARAM_PREFIX
+#define MODULE_PARAM_PREFIX "klausscpu_cache."
+#define KL_BENCH_RUNS		8
+#define KL_BENCH_ORDER		3	/* 512 KiB of 64 KiB pages: 16384 lines */
+#define KL_BENCH_OTHER		SZ_32K
+
+static void kl_bench_touch(void *p, size_t len, bool write)
+{
+	size_t i;
+
+	for (i = 0; i < len; i += L1_CACHE_BYTES) {
+		if (write)
+			WRITE_ONCE(*(u64 *)(p + i), i);
+		else
+			(void)READ_ONCE(*(u64 *)(p + i));
+	}
+}
+
+/* Cycles of one op on [buf, +len) from a fresh cache in state mode (0
+ * read, 1 written, 2 other then buffer written); *reread the cycles to read
+ * the other data afterwards. */
+static unsigned long kl_bench_one(void *buf, size_t len, void *other, int mode, u64 ctrl,
+				  bool range, unsigned long *reread)
+{
+	unsigned long flags, t0, t1, t2;
+
+	kl_cache_op(KL_CACHE_INVALIDATE, 0, 0);
+	if (mode == 2)
+		kl_bench_touch(other, KL_BENCH_OTHER, true);
+	kl_bench_touch(buf, len, mode != 0);
+	local_irq_save(flags);
+	t0 = get_cycles();
+	if (range)
+		kl_range_op(ctrl, virt_to_phys(buf), len);
+	else
+		kl_cache_op(ctrl, 0, 0);
+	t1 = get_cycles();
+	kl_bench_touch(other, KL_BENCH_OTHER, false);
+	t2 = get_cycles();
+	local_irq_restore(flags);
+	*reread = t2 - t1;
+	return t1 - t0;
+}
+
+static void kl_cache_bench(void)
+{
+	static const unsigned int lines[] = { 1, 4, 16, 64, 256, 1024, 2048, 3072, 4096,
+					      6144, 8192, 16384 };
+	/* clean (RANGE_CLEAN / FLUSH), invalidate (RANGE_INV / INVALIDATE) */
+	static const u64 rctrl[2] = { KL_CACHE_RANGE_CLEAN, KL_CACHE_RANGE_INV };
+	static const u64 wctrl[2] = { KL_CACHE_FLUSH, KL_CACHE_INVALIDATE };
+	unsigned long t[2][2][3], rr[2], v, r, flags, t0, t1, best;
+	struct page *pg;
+	void *buf, *other;
+	unsigned int i, n;
+	int op, w, mode, k;
+
+	pg = alloc_pages(GFP_KERNEL, KL_BENCH_ORDER);
+	other = kmalloc(KL_BENCH_OTHER, GFP_KERNEL);
+	if (!pg || !other)
+		goto out;
+	buf = page_address(pg);
+	pr_info("klausscpu cache bench: cycles, least of %d; columns read / written / written+32K other dirty\n",
+		KL_BENCH_RUNS);
+	for (i = 0; i < ARRAY_SIZE(lines); i++) {
+		size_t len = lines[i] * L1_CACHE_BYTES;
+
+		for (op = 0; op < 2; op++)
+			for (w = 0; w < 2; w++)
+				for (mode = 0; mode < 3; mode++) {
+					best = ULONG_MAX;
+					for (k = 0; k < KL_BENCH_RUNS; k++) {
+						v = kl_bench_one(buf, len, other, mode,
+								 w ? wctrl[op] : rctrl[op], !w, &r);
+						if (v < best) {
+							best = v;
+							if (op == 1 && mode == 2)
+								rr[w] = r;
+						}
+					}
+					t[op][w][mode] = best;
+				}
+		pr_info("klausscpu cache bench: %5u lines  clean range %5lu %5lu %5lu whole %5lu %5lu %5lu  inv range %5lu %5lu %5lu whole %5lu %5lu %5lu  reread %5lu / %5lu\n",
+			lines[i], t[0][0][0], t[0][0][1], t[0][0][2], t[0][1][0], t[0][1][1], t[0][1][2],
+			t[1][0][0], t[1][0][1], t[1][0][2], t[1][1][0], t[1][1][1], t[1][1][2], rr[0], rr[1]);
+	}
+	for (n = 1; n <= KL_ICACHE_LINES; n *= 4) {
+		unsigned long whole = ULONG_MAX;
+
+		best = ULONG_MAX;
+		for (k = 0; k < KL_BENCH_RUNS; k++) {
+			local_irq_save(flags);
+			t0 = get_cycles();
+			kl_cache_op(KL_CACHE_RANGE_IINV, virt_to_phys(buf), n * L1_CACHE_BYTES);
+			t1 = get_cycles();
+			best = min(best, t1 - t0);
+			t0 = get_cycles();
+			kl_icache_invalidate();
+			t1 = get_cycles();
+			whole = min(whole, t1 - t0);
+			local_irq_restore(flags);
+		}
+		pr_info("klausscpu cache bench: I-cache %5u lines  RANGE_IINV %5lu  ICACHE_INV %5lu\n",
+			n, best, whole);
+	}
+out:
+	kfree(other);
+	if (pg)
+		__free_pages(pg, KL_BENCH_ORDER);
+}
+
+static int kl_bench_set(const char *val, const struct kernel_param *kp)
+{
+	if (!klausscpu_dcache_range_ops())
+		return -ENODEV;
+	kl_cache_bench();
+	return 0;
+}
+
+static const struct kernel_param_ops kl_bench_ops = { .set = kl_bench_set };
+module_param_cb(bench, &kl_bench_ops, NULL, 0200);
+MODULE_PARM_DESC(bench, "Write 1: time range ops against whole-cache walks (kernel log)");
 
 /*
  * A DMA engine the kernel did not start (one a loader left running) has
