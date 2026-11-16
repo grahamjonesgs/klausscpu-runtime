@@ -51,7 +51,9 @@
 #                    engine refuses (DMA_ERR, sent again by PIO), an engine
 #                    that stalls (the watchdog's DMA_EN abort), one that
 #                    only leaving SD mode stops, and one nothing stops
-#                    (the kernel must panic rather than unmap)
+#                    (the kernel must panic rather than unmap); and
+#                    dmaexec, new code read by O_DIRECT into a mapped
+#                    executable page (the I-cache invalidate on DMA)
 #   ports            the ported programs (linux/userland/<pkg>.sh: lua, ...),
 #                    each built here if it isn't yet, in a system image that
 #                    sdinit boots from the initramfs with a data image at
@@ -192,6 +194,11 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
         "$RT/linux/userland/sdcmd.c" -o "$OUT/sdcmd" >"$OUT/sdcmd.log" 2>&1 ||
         { echo "FAIL sdcmd build (see $OUT/sdcmd.log)"; exit 1; }
       printf 'file /seed/sdcmd %s 0755 0 0\n' "$OUT/sdcmd" >>"$OUT/extra.list"
+      # dmaexec: new code by O_DIRECT (DMA) into a mapped executable page.
+      "$LLVM_BIN/clang" --target=klausscpu-unknown-linux-musl --sysroot="$RT/linux-ws/sysroot" -O2 -static \
+        "$RT/linux/userland/dmaexec.c" -o "$OUT/dmaexec" >>"$OUT/sdcmd.log" 2>&1 ||
+        { echo "FAIL dmaexec build (see $OUT/sdcmd.log)"; exit 1; }
+      printf 'file /seed/dmaexec %s 0755 0 0\n' "$OUT/dmaexec" >>"$OUT/extra.list"
     fi
     export INITRAMFS_EXTRA=$OUT/extra.list
     CARD=$OUT/card.img
@@ -294,6 +301,22 @@ dma_fault_boots() {
       fsck.fat -n "$OUT/part.img" >"$OUT/$n.fsck" 2>&1 || bad "$n: fsck.fat (see $OUT/$n.fsck)"
     rm -f "$OUT/part.img" "$OUT/$n.img"
   done
+  # New code read by O_DIRECT (DMA) into an executable page that has
+  # already run and stays mapped: the kernel must drop its I-cache lines
+  # when the DMA completes (linux/userland/dmaexec.c; the coherence
+  # checker, not the result, is the verdict on the emulator).
+  n=dmaexec
+  cp "$OUT/card-empty.img" "$OUT/$n.img"
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}")
+  {
+    echo 'mount -t vfat /dev/mmcblk0p1 /mnt && /seed/dmaexec -w /mnt/code.bin && umount /mnt && echo 3 > /proc/sys/vm/drop_caches && mount -t vfat /dev/mmcblk0p1 /mnt && echo ready'
+    echo 'r=$(cat /sys/module/klausscpu_sd/parameters/native_dma_requests); /seed/dmaexec /mnt/code.bin; echo dmaexec-dma $(( $(cat /sys/module/klausscpu_sd/parameters/native_dma_requests) - r ))'
+  } >"$OUT/$n.in"
+  printf 'ready\ndmaexec: 45 12 PASS\n' >"$OUT/$n.expect"
+  run_step "$n" 20000000000 1200 '$ '
+  grep -aq '^dmaexec-dma [1-9]' "$OUT/$n.out" || bad "$n: the O_DIRECT read was not a DMA"
+  grep -aq 'DMA coherence problems: 0' "$OUT/$n.out" || bad "$n: DMA coherence problems (the I-cache was not invalidated?)"
+  rm -f "$OUT/$n.img"
   # An engine nothing stops: the kernel panics before it unmaps the
   # buffer.  (The watchdog fires first; the panic stops the session.)
   f=dmastuck@$R n=dmafault-dmastuck-$R

@@ -29,22 +29,36 @@
  * runs with interrupts as the caller had them, and gives up after
  * KL_CACHE_WAIT_US, about four times the slowest walk.
  *
- * The I-cache snoops CPU stores but not DMA.  So a page whose contents
- * came from a device must be invalidated in the I-cache before it is
- * executed.  As arm64 does with PG_dcache_clean, that is done lazily:
- * the flag (PG_arch_1) on a folio says the I-cache holds nothing stale
- * of it; it is clear on a newly allocated folio, cleared when the kernel
- * writes one (flush_dcache_folio), and set by __sync_icache_dcache when
- * set_ptes() first maps it executable into user space, after an I-cache
- * invalidate of the folio.  A DMA into a folio that has the flag (it may
- * be mapped executable now) invalidates at once (mm/dma-noncoherent.c).
+ * The I-cache snoops CPU stores (by physical tag, so through any mapping)
+ * but not DMA.  So a page whose contents came from a device must be
+ * invalidated in the I-cache before it is executed.  As arm64 does with
+ * PG_dcache_clean, that is done lazily, but the flag (PG_arch_1) means
+ * something stronger here: "this folio may have been mapped executable
+ * since it was allocated".  It is clear on a newly allocated folio (the
+ * page allocator clears PG_arch_1 with PAGE_FLAGS_CHECK_AT_PREP when the
+ * folio is freed) and set by __sync_icache_dcache when set_ptes() first
+ * maps the folio executable into user space, after an I-cache invalidate
+ * of it.  Nothing else clears it: in particular not flush_dcache_folio(),
+ * which on arm64 clears it after the kernel writes a folio.  Here a CPU
+ * write never makes the I-cache stale, and clearing the flag there would
+ * lose the one fact the DMA side needs: GUP calls flush_dcache_page() on
+ * every page it pins (mm/gup.c, without HAVE_GUP_FAST), so an O_DIRECT
+ * read into an executable mapping that has already run would find the
+ * flag clear, skip the invalidate, and the still-mapped page (set_ptes()
+ * never runs for it again) would execute stale code.  So:
+ *
+ * - a DMA into a folio with the flag (it may be mapped executable, now or
+ *   by a mapping set up since) invalidates its I-cache lines at once;
+ * - a DMA into a folio without it (never mapped executable: the usual
+ *   page-cache read) leaves that to the folio's first executable mapping.
+ *
  * Until the first DMA from a device since boot, nothing has come from a
- * device and the invalidate is skipped (the flag is still kept).
+ * device and the invalidate at mapping time is skipped (the flag is still
+ * set).
  */
 #include <linux/bug.h>
 #include <linux/cacheflush.h>
 #include <linux/delay.h>
-#include <linux/export.h>
 #include <linux/io.h>
 #include <linux/irqflags.h>
 #include <linux/mm.h>
@@ -75,15 +89,14 @@
 #define KL_DCACHE_RANGE_MAX	(64 * 1024)
 
 /*
- * Above this an I-cache range invalidate is not worth its walk: ~8 + 2
- * cycles per line, 4100 cycles for a 64 KiB page, against ICACHE_INV's
- * 64-cycle sweep and the refetch of what the 16 KiB I-cache held.  One
- * page goes by range, a larger folio by the whole sweep.  To be measured
- * on the board (CLANG_ON_BOARD_PLAN.md n2).
+ * Up to this an I-cache invalidate is a RANGE_IINV of the lines, above it
+ * the whole ICACHE_INV (a 64-cycle sweep, but everything the I-cache held
+ * is fetched again).  One page goes by range, a larger folio by the sweep.
+ * The RTL session aims at >= 1 line per cycle for the range kill and will
+ * report the real figure; the crossover is to be measured on the board.
  */
 #define KL_IINV_RANGE_MAX	PAGE_SIZE
 
-static unsigned long kl_cache_timeouts;
 static bool kl_dma_wrote_memory __read_mostly;
 
 static void __iomem *kl_cache_reg(unsigned int off)
@@ -94,11 +107,6 @@ static void __iomem *kl_cache_reg(unsigned int off)
 bool klausscpu_dcache_range_ops(void)
 {
 	return klausscpu_cpu_features & CPU_FEAT_DCACHE_RANGE;
-}
-
-unsigned long klausscpu_cache_timeouts(void)
-{
-	return READ_ONCE(kl_cache_timeouts);
 }
 
 static bool kl_cache_busy(void)
@@ -126,7 +134,6 @@ static bool kl_cache_wait(void)
 
 static bool kl_cache_timeout(const char *what)
 {
-	kl_cache_timeouts++;
 	WARN_ONCE(1, "klausscpu: cache walk (%s) did not finish in %u us\n", what, KL_CACHE_WAIT_US);
 	return false;
 }
@@ -158,7 +165,12 @@ static bool kl_cache_op(u64 ctrl, phys_addr_t paddr, size_t size)
 	return kl_cache_wait() || kl_cache_timeout("after");
 }
 
-bool klausscpu_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
+/*
+ * One D-cache walk over [paddr, +size): with the range ops up to
+ * KL_DCACHE_RANGE_MAX, else the whole cache (INVALIDATE writes back before
+ * it drops, so it is a clean and invalidate).  False if it timed out.
+ */
+static bool kl_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 {
 	u64 ctrl;
 
@@ -168,36 +180,82 @@ bool klausscpu_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv)
 		ctrl = (clean ? KL_CACHE_RANGE_CLEAN : 0) | (inv ? KL_CACHE_RANGE_INV : 0);
 		return kl_cache_op(ctrl, paddr, size);
 	}
-	/* INVALIDATE writes back before it drops: a clean and invalidate. */
 	return kl_cache_op(inv ? KL_CACHE_INVALIDATE : KL_CACHE_FLUSH, 0, 0);
 }
 
-static void klausscpu_icache_inv_phys(phys_addr_t paddr, size_t size)
+/*
+ * Drop [paddr, +size) from the I-cache.  ICACHE_INV is a sweep, not a
+ * walk, so it can't time out: it is also the fallback when a RANGE_IINV
+ * walk does, since that may have invalidated nothing.
+ */
+static void kl_icache_inv(phys_addr_t paddr, size_t size)
 {
-	if (klausscpu_dcache_range_ops() && size <= KL_IINV_RANGE_MAX)
-		kl_cache_op(KL_CACHE_RANGE_IINV, paddr, size);
-	else
-		kl_icache_invalidate();
+	if (klausscpu_dcache_range_ops() && size <= KL_IINV_RANGE_MAX &&
+	    kl_cache_op(KL_CACHE_RANGE_IINV, paddr, size))
+		return;
+	kl_icache_invalidate();
 }
 
 /*
- * A device wrote [paddr, +size) (arch_sync_dma_for_cpu): a folio there that
- * may be mapped executable (PG_dcache_clean) has its I-cache lines dropped
- * now; the others are when they are next mapped executable.
+ * Before a device reads or writes [paddr, +size): its dirty lines go to
+ * DDR (for a device write too, so that none is written back over the
+ * device's data while it is in flight).  False if the walk timed out: the
+ * device may not see the CPU's data.
  */
-void klausscpu_icache_dma_written(phys_addr_t paddr, size_t size)
+bool klausscpu_dma_clean(phys_addr_t paddr, size_t size)
 {
-	unsigned long pfn = PHYS_PFN(paddr), last = PHYS_PFN(paddr + size - 1);
+	return kl_dcache_walk(paddr, size, true, false);
+}
+
+/*
+ * After a device wrote [paddr, +size): drop its D-cache lines, without a
+ * writeback (nothing of the buffer is dirty: it was cleaned before the DMA
+ * and the CPU kept off it during it), and see to the I-cache.
+ *
+ * Dropping is only safe for lines the buffer owns whole.  A line shared
+ * with other data that the CPU wrote during the DMA would lose that write
+ * if dropped, and clobber the device's bytes if written back: neither way
+ * is right, and only the buffer's alignment (ARCH_DMA_MINALIGN for
+ * kmalloc; the SD driver takes a read by DMA only when it owns whole
+ * lines) keeps it from happening.  So an unaligned buffer is a bug: warn,
+ * clean and invalidate its edge lines (right at least when the CPU did not
+ * touch them during the DMA), and drop only the whole lines between them,
+ * so that a neighbour's store made after the edge clean is not dropped.
+ *
+ * The I-cache: a folio that may be mapped executable (PG_dcache_clean,
+ * see above) has the buffer's I-cache lines dropped now; the others are
+ * dropped when they are first mapped executable.
+ *
+ * False if the D-cache walk timed out: the CPU may see stale data.  (An
+ * I-cache walk that times out falls back to ICACHE_INV.)
+ */
+bool klausscpu_dma_inval(phys_addr_t paddr, size_t size)
+{
+	phys_addr_t mask = L1_CACHE_BYTES - 1, start = paddr, end = paddr + size;
+	unsigned long pfn, last;
+	bool ok = true;
 
 	if (!size)
-		return;
+		return true;
+	if (WARN_ON_ONCE((paddr | size) & mask)) {
+		ok = kl_dcache_walk(start & ~mask, L1_CACHE_BYTES, true, true);
+		if ((end - 1) >> L1_CACHE_SHIFT != start >> L1_CACHE_SHIFT)
+			ok &= kl_dcache_walk((end - 1) & ~mask, L1_CACHE_BYTES, true, true);
+		start = ALIGN(start, L1_CACHE_BYTES);
+		end &= ~mask;
+	}
+	if (end > start)
+		ok &= kl_dcache_walk(start, end - start, false, true);
+
 	WRITE_ONCE(kl_dma_wrote_memory, true);
-	for (; pfn <= last; pfn++) {
+	last = PHYS_PFN(paddr + size - 1);
+	for (pfn = PHYS_PFN(paddr); pfn <= last; pfn++) {
 		if (!pfn_valid(pfn) || test_bit(PG_dcache_clean, &page_folio(pfn_to_page(pfn))->flags.f)) {
-			klausscpu_icache_inv_phys(paddr, size);
-			return;
+			kl_icache_inv(paddr, size);
+			break;
 		}
 	}
+	return ok;
 }
 
 /* set_ptes() maps the folio of pte executable into user space. */
@@ -214,20 +272,6 @@ void __sync_icache_dcache(pte_t pte)
 	if (test_bit(PG_dcache_clean, &folio->flags.f))
 		return;
 	if (READ_ONCE(kl_dma_wrote_memory))
-		klausscpu_icache_inv_phys(PFN_PHYS(folio_pfn(folio)), folio_size(folio));
+		kl_icache_inv(PFN_PHYS(folio_pfn(folio)), folio_size(folio));
 	set_bit(PG_dcache_clean, &folio->flags.f);
 }
-
-/* The kernel wrote the folio: its next executable mapping invalidates. */
-void flush_dcache_folio(struct folio *folio)
-{
-	if (test_bit(PG_dcache_clean, &folio->flags.f))
-		clear_bit(PG_dcache_clean, &folio->flags.f);
-}
-EXPORT_SYMBOL(flush_dcache_folio);
-
-void flush_dcache_page(struct page *page)
-{
-	flush_dcache_folio(page_folio(page));
-}
-EXPORT_SYMBOL(flush_dcache_page);

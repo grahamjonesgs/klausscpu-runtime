@@ -36,13 +36,10 @@ int klausscpu_proc_bool(const char __user *buf, size_t len, int *val);
 bool klausscpu_has_l2(void);
 /* mm/cacheflush.c: the cache range ops (CPU_FEATURES[27]) exist. */
 bool klausscpu_dcache_range_ops(void);
-/* Cache walks that did not finish in time, since boot. */
-unsigned long klausscpu_cache_timeouts(void);
-/* Clean and/or invalidate the D-cache over [paddr, +size); false on a
- * walk timeout. */
-bool klausscpu_dcache_walk(phys_addr_t paddr, size_t size, bool clean, bool inv);
-/* A device wrote [paddr, +size): the I-cache side (lazy, see cacheflush.c). */
-void klausscpu_icache_dma_written(phys_addr_t paddr, size_t size);
+/* Streaming DMA cache maintenance: before a device reads or writes the
+ * range, and after it wrote it; false if a D-cache walk timed out. */
+bool klausscpu_dma_clean(phys_addr_t paddr, size_t size);
+bool klausscpu_dma_inval(phys_addr_t paddr, size_t size);
 /* mm/tlbwalk.c: the hardware TLB walker, when CPU_FEATURES[25] says so. */
 void klausscpu_tlbwalk_init(void);
 unsigned long klausscpu_tlb_walks(void);	/* walker refills since boot */
