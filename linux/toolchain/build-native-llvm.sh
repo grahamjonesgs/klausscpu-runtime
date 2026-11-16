@@ -14,17 +14,35 @@
 #                       with the tools as symlinks to it, as busybox does:
 #                       the tools share one copy of LLVM (target llvm-driver)
 #   NATIVE_ORDER=1      link with lld --symbol-ordering-file from
-#                       linux/toolchain/clang-order.txt.gz: clang's functions
-#                       hottest first (a klausscc profile of clang compiling C
-#                       and C++).  On the board's 121 MB the 90 MB binary's
-#                       text pages are evicted and re-read from the SD card
-#                       during a compile (11-17% of the time); packed hot code
-#                       fits, so the re-reads go, at the cost of ~2x the TLB
-#                       refills (cheap with the hardware walker): -7..-11%
-#                       (deflate) and -6% (C++) wall on the walker + 64 KiB
-#                       I-cache image.  Without the walker it was slower
-#                       (CLANG_ON_BOARD_PLAN.md M6).  The link flags are set
-#                       on every run, so it also relinks an existing build.
+#                       linux/toolchain/clang-order.txt.gz: a call-graph
+#                       order.  It is lld's cdsort layout (the default
+#                       --call-graph-profile-sort) of the call edges klausscc's
+#                       profiler counted (KLAUSSCC_PROFILE .calls, klausscc
+#                       tools/tlbord), then the executed functions with no
+#                       recorded call edge, hottest first.  Edges from the
+#                       Release binary on 10 workloads, each normalised:
+#                       hello.i -O0/-O2, zlib deflate.c -O0/-O2, bzip2
+#                       compress.c -O2, the C++ hello -O0/-O2, tests/cxx eh.cpp
+#                       -std=c++23 -O2, the driver on hello.c with the
+#                       sysroot's headers, and a link (ld.lld).  23287
+#                       functions; the rest stay in link order after them.
+#                       On the board's 121 MB the 90 MB binary's text pages
+#                       are evicted and re-read from the SD card during a
+#                       compile (11-17% of the time) unless the code a compile
+#                       runs is packed.  The old order (hottest first) packed
+#                       it, but mixed clang's phases into one block and
+#                       doubled the TLB refills.  This one keeps callers next
+#                       to callees.  klausscc emulator, 32-entry TLB, unordered
+#                       / hottest-first / this order: main-TLB refills deflate
+#                       -O2 13.9 / 28.4 / 6.6 M, C++ hello -O2 31.1 / 51.3 /
+#                       14.9 M; not in the training set: bzip2 decompress.c
+#                       -O2 20.0 / 42.1 / 10.9 M, tests/cxx terminate.cpp -O2
+#                       1.05 / 2.00 / 0.48 M.  Micro-ITLB refills drop about
+#                       as much.  64 KiB text pages touched per compile, in
+#                       the same order: 828 / 474 / 303, 892 / 560 / 307,
+#                       818 / 495 / 378, 864 / 513 / 308
+#                       (CLANG_ON_BOARD_PLAN.md M6).  The link flags are set on
+#                       every run, so it also relinks an existing build.
 #   NATIVE_MALLOC       the allocator linked into the binary: mallocng (default,
 #                       the sysroot's libc.a) or oldmalloc: a libc.a from the
 #                       same musl tree and patches built with MALLOC_DIR=oldmalloc

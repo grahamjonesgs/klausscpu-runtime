@@ -633,8 +633,32 @@ over an hour, because the board swaps):
   | CDSX | 6.4 M | 15.1 M | 278 |
 
   The estimated TLB cost at today's 32 entries drops from 846/955 to
-  187/274 cycles per 1k instructions. The order is being re-profiled on a
-  broader training set before it replaces `clang-order.txt.gz`.
+  187/274 cycles per 1k instructions.
+
+  **Adopted (2026-11-16).** Re-profiled on 10 workloads (klausscc 051c0ec,
+  648e4d9; `build-native-llvm.sh` lists them), 23,287 functions, now in
+  `clang-order.txt.gz`. Emulator, unordered / hotness / CDSX:
+
+  | workload | main-TLB refills | text pages |
+  |---|---|---|
+  | deflate -O2 | 13.9 / 28.4 / 6.6 M | 828 / 474 / 303 |
+  | C++ hello -O2 | 31.1 / 51.3 / 14.9 M | 892 / 560 / 307 |
+  | bzip2 decompress.c -O2 (held out) | 20.0 / 42.1 / 10.9 M | 818 / 495 / 378 |
+  | terminate.cpp -O2 (held out) | 1.05 / 2.00 / 0.48 M | 864 / 513 / 308 |
+
+  On the board (L2 bitstream 87ac3bb, `perf.sh`, two runs each after a
+  warm-up, `-O2`), hotness → CDSX:
+
+  | | user+sys | main-TLB refills | micro-ITLB refills | I-cache misses | major faults |
+  |---|---|---|---|---|---|
+  | deflate | 46.8 / 46.7 → **37.6 / 37.6 s (−19.7%)** | 28.4 → 6.53 M | 65 → 12.1 M | 62 → 48 M | 81, 2 → 0, 0 |
+  | C++ hello | 108.2 / 107.8 → **88.7 / 88.8 s (−17.9%)** | 51.3 → 14.9 M | 128 → 28.1 M | 180 → 144 M | 1037, 976 → 3, 0 |
+
+  The emulator's main-TLB refill counts match the board's to within 1%. Peak
+  RSS for deflate fell from 52 to 37 MB (fewer text pages resident). M5
+  identity with the CDSX binary: 109 identical, 0 failing (`NC_SKIP=cxx-stdlib`,
+  1106 s). Wall time, deflate / C++ hello -O2, from the start of M6:
+  109 / 255 s (no walker) → 38 / 89 s.
 - **TLB size sweep** (for the RTL session). With CDSX, a 64-entry or
   128-entry 4-way TLB is worth only ~1.2–1.4%, and an 8-entry micro-ITLB
   ~0.2%. The RTL session has deferred both: L2 → SD DMA (+ range ops,
