@@ -37,13 +37,18 @@ scripts find each other relative to that.
 
 ## Hardware state
 
-- **Flash:** the QSPI flash holds klaussCPU master d7f3994 (btic-fix
-  079d686, written 2026-11-15), and power-up boots it. It is the 64 KiB
-  I-cache image f799182 plus fixes for the BTIC on code that rewrites
-  branches in place. `CPU_FEATURES` reads
-  0x03F0_200D: 32 TLB entries, LR/SC, DCBZ, misaligned 64-bit accesses trap
-  (emulated by the kernel), and the hardware TLB walker (bit 25, MMU_PLAN
-  §11.8).
+- **Flash:** the QSPI flash holds klaussCPU master 87ac3bb (l2_b3, written
+  2026-11-16), and power-up boots it. `CPU_FEATURES` reads 0x07F0_200D:
+  32 TLB entries, LR/SC, DCBZ, misaligned 64-bit accesses trap (emulated by
+  the kernel), the hardware TLB walker (bit 25, MMU_PLAN §11.8) and the L2
+  (bit 26).
+  - **The L2:** 128 KiB, 4-way, 64 B lines with two 32 B sectors, a 3-cycle
+    hit (HW_PERF_PLAN §6). It is coherent for every DDR master.
+    `/proc/klausscpu_l2` reads 0 or 1 and takes 0 or 1 to switch it. Its
+    counters are the `l2_*` lines in `/proc/klausscpu_perf`, and
+    `/proc/cpuinfo` shows its geometry.
+  - **Its effect on clang**, measured by the RTL session (L2 on against off,
+    process time): deflate −16.5%, C++ −18.2%.
   - **The data TLB lookup** sits in the first EX cycle (§11.9).
   - **The I-cache** is 64 KiB direct-mapped with 32 B lines (HW_PERF_PLAN
     §5; `ICACHE_INFO` at 0xF005_0018, shown in `/proc/cpuinfo`). It has a
@@ -55,7 +60,7 @@ scripts find each other relative to that.
     `/proc/klausscpu_tlbwalk` shows it and takes 0 or 1, and `notlbwalk` on
     the command line keeps it off.
   - **Rollback:** the RTL session's `~/.cache/kbuild/rollback/README.txt`
-    (the pre-btic-fix dump or the icache bitstream 823b5ea, and the older
+    (the pre-L2 dump or the btic-fix bitstream 079d686, and the older
     images).
 - **The emulator matches it:** klausscc defaults to 32 TLB entries and the
   walker. Whole-instruction restart after a walk is as in the RTL (klausscc
