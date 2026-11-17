@@ -75,7 +75,9 @@
 #include <linux/processor.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <linux/syscalls.h>
 #include <asm/cache.h>
+#include <asm/cachectl.h>
 #include <asm/klausscpu.h>
 #include <asm/setup.h>
 #include <asm/timex.h>
@@ -525,4 +527,39 @@ void __sync_icache_dcache(pte_t pte)
 	if (READ_ONCE(kl_dma_wrote_memory))
 		kl_icache_inv(PFN_PHYS(folio_pfn(folio)), folio_size(folio));
 	set_bit(PG_dcache_clean, &folio->flags.f);
+}
+
+/*
+ * cacheflush(addr, bytes, cache), syscall 244 (as on csky / nios2), for
+ * user code that writes instructions through one mapping and runs them
+ * through another: a JIT keeping W^X with two views of one page, libffi's
+ * double-mapped closures, compiler-rt's __clear_cache.  The architecture
+ * requires it (klaussCPU MMU_PLAN.md §11.3): the I-cache and BTIC snoop
+ * this core's stores by physical address, but the front end's copies of
+ * code already fetched (the fetch window, the next-line buffers) are
+ * checked by virtual address, so code written through another mapping may
+ * run stale once unless the I-cache is invalidated.  Today's core happens
+ * to refetch it correctly in every shape tried (a store that posts
+ * speculatively is checked against the I-cache by physical address;
+ * linux/userland/tests/icache/aliasjit.c finds no stale case on the
+ * board), but that is not promised.  Code written and run at the same
+ * address needs nothing.
+ *
+ * ICACHE: the whole-cache ICACHE_INV (a 64-cycle sweep that also empties
+ * the window, the next-line buffers and the BTIC), cheaper than turning
+ * the range into physical pages for RANGE_IINV.  DCACHE: nothing to do;
+ * the D-cache is coherent with this core and I-cache fills read through
+ * it.  addr and bytes are only checked for wrapping; as on csky, cache
+ * must name ICACHE, DCACHE or both.
+ */
+SYSCALL_DEFINE3(cacheflush, unsigned long, addr, unsigned long, bytes,
+		int, cache)
+{
+	if (!cache || (cache & ~BCACHE))
+		return -EINVAL;
+	if (addr + bytes < addr)
+		return -EFAULT;
+	if (cache & ICACHE)
+		kl_icache_invalidate();
+	return 0;
 }

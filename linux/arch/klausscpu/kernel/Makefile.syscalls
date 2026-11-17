@@ -1,2 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-syscall_abis_64 +=
+
+# cacheflush (244): the I-cache invalidate user code needs after writing
+# instructions through one mapping and running them through another.
+syscall_abis_64 += klausscpu

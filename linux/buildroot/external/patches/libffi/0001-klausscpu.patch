@@ -8,8 +8,9 @@ returned in R12/R11, larger ones by reference and through sret in R0,
 a 32-byte home area in variadic calls).  _Complex types are supported
 (aggregates); Go closures and static trampolines are not.  Closures
 use dynamic trampolines in libffi's W+X pages; the I-cache snoops the
-core's own stores, so no cache maintenance is needed (or available to
-user code).  configure.host and Makefile.am name the port; Buildroot
+core's own stores, so they need no cache maintenance.  A double-mapped
+closure (codeloc != closure) calls __clear_cache (cacheflush(2)).
+configure.host and Makefile.am name the port; Buildroot
 autoreconfs libffi (LIBFFI_AUTORECONF = YES).
 
 --- a/configure.host	2025-02-08 18:30:36.000000000 +0200
@@ -122,7 +123,7 @@ autoreconfs libffi (LIBFFI_AUTORECONF = YES).
 +#endif
 --- a/src/klausscpu/ffi.c	1970-01-01 00:00:00.000000000 +0000
 +++ b/src/klausscpu/ffi.c	2026-11-12 16:40:00.000000000 +0200
-@@ -0,0 +1,458 @@
+@@ -0,0 +1,462 @@
 +/* -----------------------------------------------------------------------
 +   ffi.c - Copyright (c) 2026 KlaussCPU Linux port
 +
@@ -553,16 +554,17 @@ autoreconfs libffi (LIBFFI_AUTORECONF = YES).
 +   stores (tag-checked against the physical address, with the fetch
 +   window and prefetch buffer checked by virtual address), so code written
 +   through the address it runs from needs no maintenance; that is the
-+   normal case, closures.c mapping its pages read/write/execute.  User
-+   mode has no instruction or system call to invalidate the I-cache
-+   (CACHE_CTRL.ICACHE_INV is supervisor MMIO), and __clear_cache is not in
-+   the compiler-rt builtins for this target, so nothing is called here.  */
++   normal case, closures.c mapping its pages read/write/execute
++   (codeloc == closure).  A double-mapped closure is written through one
++   address and run through another: __clear_cache (compiler-rt; the
++   kernel's cacheflush(2), syscall 244) then drops the I-cache, the
++   window and the prefetch buffers.  */
 +
 +ffi_status
 +ffi_prep_closure_loc (ffi_closure *closure, ffi_cif *cif,
 +		      void (*fun) (ffi_cif *, void *, void **, void *),
 +		      void *user_data,
-+		      void *codeloc __attribute__ ((unused)))
++		      void *codeloc)
 +{
 +  uint64_t target = (uintptr_t) ffi_closure_SYSV;
 +  uint64_t self = (uintptr_t) closure;
@@ -579,6 +581,9 @@ autoreconfs libffi (LIBFFI_AUTORECONF = YES).
 +  memcpy (&closure->tramp[16], &target, 8);
 +  memcpy (&closure->tramp[24], &self, 8);
 +  memcpy (&closure->tramp[0], ffi_klausscpu_trampoline, 16);
++  if (codeloc != (void *) closure)
++    __builtin___clear_cache ((char *) codeloc,
++			     (char *) codeloc + FFI_TRAMPOLINE_SIZE);
 +  return FFI_OK;
 +}
 --- a/src/klausscpu/sysv.S	1970-01-01 00:00:00.000000000 +0000

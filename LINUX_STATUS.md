@@ -169,6 +169,15 @@ scripts find each other relative to that.
   Linux triple, static and shared (`linux/cxx/build.sh`); `clang++ x.cpp`
   links them. Exceptions use R0/R1 at landing pads (ABI.md "Exceptions").
   Buildroot has C++ on, and the system image carries the shared libraries.
+- **Code written at run time (JITs):** code written and run at the same
+  address needs no maintenance; the I-cache snoops stores. Code written
+  through one mapping and run through another (W^X double mapping) needs
+  `__builtin___clear_cache`. compiler-rt's `__clear_cache` makes the
+  `cacheflush(addr, bytes, ICACHE)` system call (244, as on csky/nios2;
+  `arch/klausscpu/mm/cacheflush.c`), which runs ICACHE_INV. The architecture
+  requires it, though today's core showed no stale case on the board
+  (`linux/userland/tests/icache/aliasjit.c`). libffi's double-mapped closures
+  call it.
 
 ## Compiling on the board
 
@@ -270,6 +279,11 @@ time goes".
   P-256 and key shielding (`LINUX_PLAN.md`).
 - **`linux-ws/br-output`, the static Buildroot build,** has only OpenSSL and
   OpenSSH rebuilt with the fast P-256 code.
+- **musl `cacheflush()`:** add `#define __NR_cacheflush 244` to
+  `linux/musl/arch/klausscpu/bits/syscall.h.in` at the next system-image
+  rebuild; that gives `<sys/cachectl.h>`'s `cacheflush()`. It is held back
+  because a rebuilt libc.so must match the board's `/lib/libc.so`. Until
+  then use `__builtin___clear_cache` or `syscall(244, ...)`.
 - **Branch `gcm-fuse-driver`** in this repo is not ours: crypto bitstream 2,
   untested on hardware. Leave it.
 

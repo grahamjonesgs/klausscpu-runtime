@@ -14,6 +14,7 @@ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 }
 
 asmlinkage long sys_rt_sigreturn(void);
+asmlinkage long sys_cacheflush(unsigned long addr, unsigned long bytes, int cache);
 
 #undef __SYSCALL
 #define __SYSCALL(nr, call)	[nr] = (call),
