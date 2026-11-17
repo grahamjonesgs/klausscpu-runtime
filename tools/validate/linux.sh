@@ -510,12 +510,15 @@ elif [ $SD = 1 ]; then
     grep -aq '^ssr: ' "$OUT/sd1.out" || bad "sd1: sdcmd ssr (ACMD13, 64 bytes)"
   fi
 
-  # Boot 2: sdinit mounts system image A read-only and data.img at /data.
+  # Boot 2: sdinit mounts data.img at /data and system image A read-only
+  # at /rofs, under an overlay root whose changes go to
+  # /data/overlay/upper (so /usr is writable).
   cat >"$OUT/sd2.in" <<'EOF2'
 cut -d' ' -f1,6 /etc/klausscpu-rootfs
 grep ' / ' /proc/mounts | cut -d' ' -f1,3,4 | cut -d, -f1
+grep ' /rofs ' /proc/mounts | cut -d' ' -f1,3,4 | cut -d, -f1
 grep ' /data ' /proc/mounts | cut -d' ' -f1,3,4 | cut -d, -f1
-touch /usr/x 2>/dev/null && echo usr writable || echo usr read-only
+echo ovl > /usr/x 2>/dev/null && echo usr writable || echo usr read-only
 echo persist > /root/t; sync; cat /root/t
 ls /mnt/linux/rootfs.img
 /usr/bin/musltest | tail -1
@@ -524,11 +527,13 @@ install-rootfs -z - < /mnt/linux/rootfs-b.img.gz
 EOF2
   cat >"$OUT/sd2.expect" <<'EOF2'
 sdinit: data.img mounted read-write at /data
-sdinit: switching to the SD card's root file system (read-only)
+sdinit: root: overlay (the image at /rofs, changes in /data/overlay/upper)
+sdinit: switching to the SD card's root file system (overlay)
 klausscpu-rootfs A
+overlay overlay rw
 /dev/loop0 ext4 ro
 /dev/loop1 ext4 rw
-usr read-only
+usr writable
 persist
 /mnt/linux/rootfs.img
 musltest: PASS
@@ -537,7 +542,9 @@ EOF2
   run_step sd2 60000000000 2400 '$ '
 
   # Boot 3: sdinit swaps in system image B; /root and the settings in
-  # /data/etc survive.  Then a broken /data/etc/network for boot 4.
+  # /data/etc survive.  The overlay's changes made over image A (/usr/x)
+  # move to /data/overlay/upper.old so they never shadow image B.  Then a
+  # broken /data/etc/network for boot 4.
   # rc.local runs in the background (rcS), so its output would race the
   # shell's: it writes a file, read here once it has had time to run.
   cat >"$OUT/sd3.in" <<'EOF2'
@@ -545,19 +552,23 @@ sleep 2; cat /tmp/rc.local.out
 cut -d' ' -f1,6 /etc/klausscpu-rootfs
 cat /root/t
 hostname
-touch /usr/x 2>/dev/null && echo usr writable || echo usr read-only
+cat /usr/x 2>/dev/null || echo no usr/x
+cat /data/overlay/upper.old/usr/x
 printf 'IP="192.168\n' > /data/etc/network; sync; echo broken
 EOF2
   cat >"$OUT/sd3.expect" <<'EOF2'
 sdinit: installed the staged /linux/rootfs.img.next
 sdinit: data.img mounted read-write at /data
+sdinit: new system image: the overlay's old changes are in /data/overlay/upper.old
+sdinit: switching to the SD card's root file system (overlay)
 rcS: settings from /data/etc/network
 rcS: running /data/etc/rc.local
 rc.local ran
 klausscpu-rootfs B
 persist
 klaustest
-usr read-only
+no usr/x
+ovl
 broken
 EOF2
   run_step sd3 60000000000 2400 '$ '

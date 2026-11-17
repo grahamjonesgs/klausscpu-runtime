@@ -1,7 +1,7 @@
 --- Captured UART output ---
 
 === test_exc: MMU stage 1 ===
-CPU_FEATURES = 00c0200d
+CPU_FEATURES = 02c0200d
 F0 CPU_FEATURES: exceptions and LR/SC                PASS
 S1 STATUS: supervisor, interrupts enabled            PASS
 S1 STATUS.DI follows DI                              PASS

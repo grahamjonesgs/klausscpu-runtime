@@ -30,7 +30,7 @@ test_cache	1650750	13464
 test_diei	788770	12144
 test_divshadow	85125	18968
 test_eth	49447	13768
-test_exc	3077495	21496
+test_exc	3077508	21496
 test_fatfs_printf	38489	9824
 test_flags	486253	43552
 test_fp	232819	16792
@@ -38,7 +38,7 @@ test_hwcg	3912088	517888
 test_icall	3585045	633136
 test_leapc	29620	76952
 test_misalign	33233	10552
-test_mpu	69460	18344
+test_mpu	69473	18344
 test_printf	105084	10544
 test_rtos	nohalt	13824
 test_sd	2264223	34184
@@ -46,7 +46,7 @@ test_setjmp	118235	11264
 test_switch	78432	12664
 test_sync	nohalt	13624
 test_task_exit	2834017	12016
-test_tlb	422390	18424
+test_tlb	422403	18424
 test_unaligned	7165256	17376
 test_varargs	40305	10616
 vga_off	5033102	9600

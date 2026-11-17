@@ -1,7 +1,7 @@
 --- Captured UART output ---
 
 === test_tlb: MMU stage 3 (TLB) ===
-CPU_FEATURES = 00c0200d
+CPU_FEATURES = 02c0200d
 T0 TLB entry count                                       PASS
 T1 TLBR reads back a wired entry                         PASS
 T1 TE on, still running                                  PASS
