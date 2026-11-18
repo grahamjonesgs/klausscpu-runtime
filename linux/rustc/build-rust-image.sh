@@ -25,6 +25,9 @@ STD=$X/x86_64-unknown-linux-gnu/stage1-std/$T/dist/deps
 [ -x "$S2/bin/rustc" ] || { echo "no cross rustc in $S2 (RUST_ON_BOARD_PLAN.md R3)" >&2; exit 1; }
 ST=$(mktemp -d "${TMPDIR:-$HOME/.cache}/rust-img.XXXXXX")
 trap 'rm -rf "$ST" "$ST.tar"' EXIT
+# mktemp makes the directory 0700, and that mode becomes the image's root
+# (/opt/rust): only root could reach rustc and cargo.
+chmod 755 "$ST"
 mkdir -p "$ST/bin" "$ST/lib/rustlib/$T/lib"
 "$B/llvm-strip" --strip-all -o "$ST/bin/rustc" "$S2/bin/rustc"
 CARGO=$X/x86_64-unknown-linux-gnu/stage2-tools/$T/release/cargo
