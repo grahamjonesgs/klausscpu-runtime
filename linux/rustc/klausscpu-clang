@@ -1,0 +1,10 @@
+#!/bin/sh
+# clang for klausscpu-unknown-linux-musl with the board's musl + libc++ sysroot
+# (rustc's bootstrap uses it as the target's cc/cxx and linker;
+# RUST_ON_BOARD_PLAN.md R3).
+#   KLAUSSCPU_LLVM_BIN  default ../klausscpu-llvm/build/bin
+#   KLAUSSCPU_SYSROOT   default linux-ws/dyn/sysroot
+RT=$(cd "$(dirname "$0")/../.." && pwd)
+B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
+S=${KLAUSSCPU_SYSROOT:-$RT/linux-ws/dyn/sysroot}
+exec "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$S" "$@"

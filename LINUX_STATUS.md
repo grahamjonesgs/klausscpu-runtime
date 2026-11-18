@@ -111,11 +111,13 @@ scripts find each other relative to that.
 |---|---|
 | `rootfs.img` | the system image (ext4, 256 MiB, read-only at `/rofs`), built from runtime a1625fb |
 | `rootfs.img.next` | an image staged by `install-rootfs` while the old one was in use; sdinit swaps it in at boot |
-| `data.img` | `/data` (224 MiB, read-write): `/root`, `/home`, `/data/etc` (users, passwords, settings), `/data/overlay` |
+| `data.img` | `/data` (2 GiB since 2026-11-18, read-write): `/root`, `/home`, `/data/etc` (users, passwords, settings), `/data/overlay`; grown in place (truncate, `LOOP_SET_CAPACITY`, `resize2fs`; RUST_ON_BOARD_PLAN.md) |
+| `data.img.bak-2026-11-18` | the 256 MiB data image before that |
 | `swap.img` | 256 MiB swap, turned on by rcS |
 | `rootfs-static.img` | the previous, statically linked system, kept for going back |
 | `toolchain.img` | clang, lld and the sysroot (ext4, 156 MiB, read-only at `/opt/llvm`; `install-toolchain`, `linux/toolchain/build-toolchain-image.sh`) |
 | `toolchain.img.next` | a toolchain image staged by `install-toolchain` while `/opt/llvm` was mounted; rcS swaps it in at boot |
+| `rust.img` | rustc, cargo and std (ext4, read-only at `/opt/rust`; `install-rust`, `linux/rustc/build-rust-image.sh`; RUST_ON_BOARD_PLAN.md) |
 
 ## Kernels
 

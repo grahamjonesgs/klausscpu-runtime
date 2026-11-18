@@ -80,8 +80,8 @@ fi
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
 cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" \
-  "$RT/linux/userland/install-toolchain" "$ST/usr/bin/"
-mkdir -p "$ST/opt/llvm"	# the toolchain image's mount point (rcS)
+  "$RT/linux/userland/install-toolchain" "$RT/linux/userland/install-rust" "$ST/usr/bin/"
+mkdir -p "$ST/opt/llvm" "$ST/opt/rust"	# the toolchain and rustc images' mount points (rcS)
 install -D -m 755 "$RT/linux/userland/adduser-ssh" "$ST/usr/sbin/adduser-ssh"
 install -D -m 755 "$RT/linux/userland/overlay" "$ST/usr/sbin/overlay"
 if [ -x "$DB" ]; then

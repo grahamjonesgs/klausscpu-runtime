@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# linux/rustc/llvm-config — llvm-config for the board's LLVM build
+# (linux/rustc/build-llvm.sh), runnable on the host: rustc's bootstrap and
+# rustc_llvm/build.rs run llvm-config on the build machine, and the target
+# build's own llvm-config is a KlaussCPU binary.  It answers with the host
+# llvm-config of the same source tree (klausscpu-llvm/build, the same LLVM
+# version and component graph), with:
+#   - the target build's include and library directories;
+#   - only the components the target build has (KlaussCPU is its one target;
+#     the host's x86 and `native` components are left out);
+#   - -stdlib=libc++ in --cxxflags (the board has no libstdc++), and not the
+#     host's assertion defines (-D_DEBUG and the library hardening).
+# bootstrap.toml: [target.klausscpu-unknown-linux-musl] llvm-config = <this>.
+#   KLAUSSCPU_LLVM_BIN  host build/bin (default ../klausscpu-llvm/build/bin)
+#   RUSTC_LLVM_BUILD    the target build (default klausscpu-llvm/build-native-rustc-llvm)
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+RT=$(cd "$HERE/../.." && pwd)
+HB=${KLAUSSCPU_LLVM_BIN:-$(cd "$RT/../klausscpu-llvm/build/bin" && pwd)}
+HOSTB=$(cd "$HB/.." && pwd)
+SRC=$(cd "$HOSTB/.." && pwd)
+TB=${RUSTC_LLVM_BUILD:-$SRC/build-native-rustc-llvm}
+HC=$HB/llvm-config
+# A host component is kept when the target build has its libraries.
+have() {
+	local libs
+	libs=$("$HC" --libnames "$1" 2>/dev/null) || return 1
+	for l in $libs; do [ -f "$TB/lib/$l" ] || return 1; done
+}
+case " $* " in
+*" --components "*)
+	out=
+	for c in $("$HC" --components); do
+		case $c in all | all-targets | native | nativecodegen | engine) continue ;; esac
+		have "$c" && out="$out $c"
+	done
+	echo "${out# }"
+	;;
+*" --host-target "*) echo klausscpu-unknown-linux-musl ;;
+*" --targets-built "*) echo KlaussCPU ;;
+*" --system-libs "*) echo "" ;;
+*" --has-rtti "*) grep -q 'LLVM_ENABLE_RTTI:BOOL=ON' "$TB/CMakeCache.txt" && echo YES || echo NO ;;
+*" --bindir "*) echo "$TB/bin" ;;
+*)
+	# One pass: the target build's directory name starts with the host's.
+	out=$("$HC" "$@" | sed "s#$HOSTB\\([/ \"']\\|\$\\)#$TB\\1#g")
+	case " $* " in *" --cxxflags "*)
+		# The host build has assertions; the target build does not.
+		out=${out//-D_DEBUG /}
+		out=${out//-D_GLIBCXX_ASSERTIONS /}
+		out=${out//-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE /}
+		out="$out -stdlib=libc++" ;;
+	esac
+	printf '%s\n' "$out"
+	;;
+esac

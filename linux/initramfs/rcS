@@ -173,6 +173,21 @@ if [ -f /mnt/linux/toolchain.img ]; then
 	fi
 fi
 
+# rustc (RUST_ON_BOARD_PLAN.md): /linux/rust.img on the card (install-rust),
+# read-only at /opt/rust, as the toolchain.  It links with /opt/llvm's clang.
+if [ -f /mnt/linux/rust.img.next ]; then
+	rm -f /mnt/linux/rust.img && mv /mnt/linux/rust.img.next /mnt/linux/rust.img &&
+		sync && echo "rcS: rust: installed the staged rust.img.next"
+fi
+if [ -f /mnt/linux/rust.img ]; then
+	mkdir -p /opt/rust
+	if mount -t ext4 -o ro,loop /mnt/linux/rust.img /opt/rust 2>/tmp/rust.log; then
+		echo "rcS: rustc at /opt/rust"
+	else
+		echo "rcS: WARNING: mounting /linux/rust.img failed (see /tmp/rust.log)"
+	fi
+fi
+
 if [ -r /data/etc/rc.local ]; then
 	echo "rcS: running /data/etc/rc.local"
 	sh /data/etc/rc.local </dev/null &

@@ -1,0 +1,65 @@
+#!/bin/sh
+# install-rust [-z] <url>|- [sha256]: put the rustc image (rustc, its driver and
+# std; linux/rustc/build-rust-image.sh, RUST_ON_BOARD_PLAN.md) on the SD card
+# as /linux/rust.img, which rcS mounts read-only at /opt/rust.  As
+# install-rootfs: "-" reads the image from stdin, -z unpacks gzip (whose
+# CRC-32 and length check catch a damaged transfer):
+#   gzip -1c rust.img | ssh root@<board> install-rust -z -
+# The new image is written beside the old one.  When no image is mounted it
+# replaces rust.img and is mounted at once; otherwise it is staged as
+# rust.img.next, which rcS puts in place at the next boot.
+set -e
+gz=0
+if [ "${1:-}" = -z ]; then
+	gz=1
+	shift
+fi
+url=${1:-}
+want=${2:-}
+[ -n "$url" ] || { echo "usage: install-rust [-z] <url>|- [sha256]" >&2; exit 2; }
+[ -b /dev/mmcblk0p1 ] || { echo "install-rust: no SD card" >&2; exit 1; }
+mkdir -p /mnt
+grep -q " /mnt " /proc/mounts || mount -t vfat /dev/mmcblk0p1 /mnt
+mkdir -p /mnt/linux
+new=/mnt/linux/rust.img.new
+rm -f "$new"
+fail() {
+	echo "install-rust: $1, keeping the old image" >&2
+	rm -f "$new"
+	exit 1
+}
+if [ "$url" = - ]; then
+	echo "install-rust: reading the image from stdin"
+	if [ $gz = 1 ]; then
+		gunzip -c >"$new" || fail "gunzip failed (bad CRC or truncated input)"
+	else
+		cat >"$new" || fail "cannot write $new"
+	fi
+else
+	echo "install-rust: downloading $url"
+	if [ $gz = 1 ]; then
+		wget -O - "$url" | gunzip -c >"$new" || fail "download or gunzip failed"
+	else
+		wget -O "$new" "$url" || fail "download failed"
+	fi
+fi
+[ $gz = 1 ] && echo "install-rust: gzip CRC-32 and length OK"
+if [ -n "$want" ]; then
+	got=$(sha256sum "$new" | cut -d' ' -f1)
+	[ "$got" = "$want" ] || fail "SHA-256 mismatch ($got)"
+fi
+sync
+if grep -q " /opt/rust " /proc/mounts; then
+	# In use: replacing a FAT file that is mounted leaks its clusters.
+	rm -f /mnt/linux/rust.img.next
+	mv "$new" /mnt/linux/rust.img.next
+	sync
+	echo "install-rust: staged as /linux/rust.img.next; it replaces rust.img at the next boot"
+else
+	rm -f /mnt/linux/rust.img.next /mnt/linux/rust.img
+	mv "$new" /mnt/linux/rust.img
+	sync
+	mkdir -p /opt/rust
+	mount -t ext4 -o ro,loop /mnt/linux/rust.img /opt/rust &&
+		echo "install-rust: /linux/rust.img installed and mounted at /opt/rust"
+fi

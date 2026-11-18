@@ -130,10 +130,13 @@ Size (opt-level, strip, `share-generics`), start-up relocations, the
 
 ## Decisions for Graham
 
-- **R5:** a separate `rust.img` at `/opt/rust` (recommended: like
-  toolchain.img, installs alone), or rustc inside `toolchain.img`.
-- **R7:** whether cargo is worth porting after R4's numbers.
-- **R8:** how much speed work, after R4.
+Decided 2026-11-18:
+- **R5:** a separate `/linux/rust.img`, mounted read-only at `/opt/rust` at
+  boot (like toolchain.img), with its own install script.
+- **Scope:** go through R7, cargo included (offline), unattended.
+- **/data:** grow `/linux/data.img` to 2 GiB in place (backup first).
+
+Still open: how much speed work (R8), after R4's numbers.
 
 ## Risks
 
@@ -151,4 +154,59 @@ Size (opt-level, strip, `share-generics`), start-up relocations, the
 
 ## Results
 
-(none yet)
+### R1 (2026-11-18): done, klausscpu-llvm 8a5fc816 (rustc-patches/0005)
+
+- `Arch::KlaussCpu` and `targets/klausscpu_unknown_linux_musl.rs`: PIC by
+  default (rustc's rule for a target with dynamic linking), thread-locals on.
+  `klauss-linux-cargo` takes it when the rustc has it.
+- **Tests:** `library-tests.sh` 30/30 on the board (coretests 2768,
+  alloctests 333 + 1331, sync 337, thread_local 12), stdcheck static and
+  dynamic PASS; bare metal: `klauss-build all`, ffi_check 90/90, the ABI
+  test 960 runs.  Opus review: no blockers, minors fixed.
+
+### R2 (2026-11-18): done
+
+`linux/rustc/build-llvm.sh` (klausscpu-llvm/build-native-rustc-llvm:
+MinSizeRel, PIC, threads, 110 libraries, 485 MB, about 10 minutes) and
+`linux/rustc/llvm-config`, a host script answering for it.
+
+### R3 (2026-11-18): done
+
+`x.py build --config bootstrap-cross.toml --stage 2 compiler/rustc library`
+(klausscpu-llvm `rust/rustc-patches/bootstrap-cross.toml`).  Fixed on the way:
+- bootstrap's `cc` did not know the architecture (fork, `crate-patches/cc`);
+- bootstrap wanted musl self-contained objects and LLVM tools (excluded);
+- a dylib's metadata object and the linked-symbols object were not written
+  for KlaussCPU (rustc_codegen_ssa, patch 0005): the metadata went to the
+  linker raw, and `librustc_driver.so` came out at 4 MB without the
+  compiler's code;
+- the compiler's crates needed the `libc`, `linux-raw-sys` and `rustix`
+  forks (`setup-crate-forks.sh`).
+
+No backend bug showed.  `librustc_driver.so`: 152 MB stripped (111 MB of
+text), 268 000 relative relocations, needs libc++, libc++abi, libunwind and
+libc.so; STATIC_TLS (bootstrap builds rustc with initial-exec TLS).
+
+### R4 (2026-11-18): hello world compiles and runs on the board
+
+`linux/rustc/build-rust-image.sh` → `linux-ws/rust.img` (329 MiB: rustc,
+cargo, std's rlibs and their `.rmeta` files, which hold the full metadata),
+installed by hand as `/linux/rust.img` at `/opt/rust`.
+
+| | wall | user + sys |
+|---|---|---|
+| `rustc -vV` (first run) | 6.8 s | 1.4 s |
+| `rustc hello.rs` (static) | 76 s | 10.4 s |
+| the same again | 78 s | 10.6 s |
+| `rustc -O hello.rs` | 81 s | 11.5 s |
+| `rustc -C target-feature=-crt-static hello.rs` (PIE) | 77 s | 10.5 s |
+
+All three programs print their line.  Nearly all the time is waiting:
+the 152 MB driver does not fit in the 121 MB of RAM, so a second run reads
+it from the SD card again (R8).  `cargo -V` works (3 s).
+
+### /data (2026-11-18)
+
+`/linux/data.img` grown from 256 MiB to 2 GiB while mounted (Python
+`os.truncate`, `LOOP_SET_CAPACITY`, `resize2fs`): /data has 1.8 GB free.
+The old image is `/linux/data.img.bak-2026-11-18`.
