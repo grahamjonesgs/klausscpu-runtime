@@ -4,7 +4,22 @@
 # RUST_ON_BOARD_PLAN.md R3).
 #   KLAUSSCPU_LLVM_BIN  default ../klausscpu-llvm/build/bin
 #   KLAUSSCPU_SYSROOT   default linux-ws/dyn/sysroot
+#   RUSTC_DRIVER_LINK_ARGS  extra arguments (split on spaces) for the link of
+#                       librustc_driver-*.so only: R8 c's symbol order
+#                       (linux/rustc/order/), e.g.
+#                       "-Wl,--symbol-ordering-file=F -Wl,--no-warn-symbol-ordering".
+#                       Passing them here rather than in RUSTFLAGS leaves
+#                       every crate hash, and so every symbol name, unchanged.
 RT=$(cd "$(dirname "$0")/../.." && pwd)
 B=${KLAUSSCPU_LLVM_BIN:-$RT/../klausscpu-llvm/build/bin}
 S=${KLAUSSCPU_SYSROOT:-$RT/linux-ws/dyn/sysroot}
+if [ -n "${RUSTC_DRIVER_LINK_ARGS:-}" ]; then
+	for a in "$@"; do
+		case $a in
+		*/librustc_driver-*.so)
+			# shellcheck disable=SC2086 # split on purpose
+			exec "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$S" "$@" $RUSTC_DRIVER_LINK_ARGS ;;
+		esac
+	done
+fi
 exec "$B/clang" --target=klausscpu-unknown-linux-musl --sysroot="$S" "$@"
