@@ -154,6 +154,34 @@ clang cxx-hello cold was 82.1 s either way. board-check --boot passed 18/18.
 For clang hardware A/B runs the baseline label is now loops 1/1, readahead
 64/64.
 
+**R8 b: rustc built for size, measured and not adopted (2026-11-18).**
+`CARGO_PROFILE_RELEASE_OPT_LEVEL=s` for the compiler workspace, in its own
+build dir. Three findings:
+- **Shared generics.** opt-level s turns `-Zshare-generics` on, which made
+  `.dynstr` 37 MB (from 2.5) and `rustc -vV` 15.6 s (from 5.4). The build
+  needs `RUSTFLAGS_NOT_BOOTSTRAP=-Zshare-generics=no`.
+- **std's profile.** std's `dist` profile inherits `release`, so
+  `CARGO_PROFILE_DIST_OPT_LEVEL=3` is needed to keep std at -O3.
+- **Code size.** `.text` went from 111.5 to 98.6 MB; ThinLTO on top gave
+  96.8 MB.
+
+Cold, on the board, with DIO and readahead 64:
+
+| Compile | -O3 rustc (installed) | opt-level s, no shared generics |
+|---|---|---|
+| hello | 34.8 s, 226 MB | 33.3 s, 210 MB |
+| threads -O0 / -O2 | 77.7 / 109.3 s | 80.3 / 110.5 s |
+| stdcheck -O0 | 267 s, 833 MB | 274 s, 697 MB |
+| `rustc -vV` | 5.4 s | 5.5 s |
+
+The size build reads fewer bytes but runs slower, so it nets out about even.
+The -O3 build stays. Since this morning, DIO and readahead alone took threads
+-O2 from 271 to 109 s, and stdcheck -O0 from 900 to 267 s.
+
+**R8 c: call-graph order of librustc_driver (started 2026-11-18).** The card
+is still about 60% of hello (about 21 of 35 s). This step uses clang M6's
+tools (klausscc call-edge profile, cdsx.py, lld --symbol-ordering-file).
+
 ## Decisions for Graham
 
 Decided 2026-11-18:
