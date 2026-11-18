@@ -61,5 +61,6 @@ else
 	sync
 	mkdir -p /opt/llvm
 	mount -t ext4 -o ro,loop /mnt/linux/toolchain.img /opt/llvm &&
+		{ loopdio /opt/llvm >/dev/null || true; } &&
 		echo "install-toolchain: /linux/toolchain.img installed and mounted at /opt/llvm"
 fi

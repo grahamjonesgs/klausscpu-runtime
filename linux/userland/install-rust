@@ -61,5 +61,6 @@ else
 	sync
 	mkdir -p /opt/rust
 	mount -t ext4 -o ro,loop /mnt/linux/rust.img /opt/rust &&
+		{ loopdio /opt/rust >/dev/null || true; } &&
 		echo "install-rust: /linux/rust.img installed and mounted at /opt/rust"
 fi

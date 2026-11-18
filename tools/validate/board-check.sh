@@ -4,7 +4,9 @@
 # "board: taking it" to the other sessions first).  Run it after any
 # bitstream, kernel or system-image change.
 #   system    the kernel log (CPU_FEATURES, TLB entries, no Oops/BUG/panic/
-#             WARNING), the system image's stamp, /data mounted read-write
+#             WARNING), the system image's stamp, /data mounted read-write,
+#             device nodes usable by every user, /opt/llvm and /opt/rust
+#             loop devices in direct I/O
 #   net       ping, the httpd page, an SSH login on 22 (OpenSSH) and on 2222
 #             (Dropbear), both presenting the QSPI keystore's host key, and
 #             an 8 MiB scp round trip
@@ -86,6 +88,12 @@ grep -a -E 'CPU_FEATURES|TLB entries' "$OUT/system.txt" | head -2
 check "kernel log: no Oops, BUG, panic or WARNING" \
 	bash -c "! grep -a -E 'Oops|BUG:|Kernel panic|WARNING:|Call trace' '$OUT/system.txt'"
 check "/data is mounted read-write" rsh 'grep -q " /data ext4 rw" /proc/mounts'
+# Users other than root need these (no /etc/mdev.conf made them root-only).
+check "/dev/null, zero, urandom, tty are 0666" \
+	rsh 'for n in null zero urandom tty; do ls -l /dev/$n | grep -q "^crw-rw-rw- " || exit 1; done'
+# Buffered loop devices cache rustc and clang twice (linux/userland/loopdio.c).
+check "/opt/llvm and /opt/rust loop devices use direct I/O" \
+	rsh 'for d in /opt/llvm /opt/rust; do l=$(grep " $d " /proc/mounts | cut -d" " -f1); [ -n "$l" ] || continue; [ "$(cat /sys/block/${l#/dev/}/loop/dio)" = 1 ] || exit 1; done'
 
 echo "--- net"
 check "ping" bash -c "ping -c 3 -q -W 2 $IP >/dev/null"

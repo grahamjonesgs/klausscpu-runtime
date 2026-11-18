@@ -168,6 +168,7 @@ if [ -f /mnt/linux/toolchain.img ]; then
 	mkdir -p /opt/llvm
 	if mount -t ext4 -o ro,loop /mnt/linux/toolchain.img /opt/llvm 2>/tmp/toolchain.log; then
 		echo "rcS: toolchain at /opt/llvm"
+		loopdio /opt/llvm >/dev/null # no double page cache (loopdio.c)
 	else
 		echo "rcS: WARNING: mounting /linux/toolchain.img failed (see /tmp/toolchain.log)"
 	fi
@@ -183,6 +184,7 @@ if [ -f /mnt/linux/rust.img ]; then
 	mkdir -p /opt/rust
 	if mount -t ext4 -o ro,loop /mnt/linux/rust.img /opt/rust 2>/tmp/rust.log; then
 		echo "rcS: rustc at /opt/rust"
+		loopdio /opt/rust >/dev/null
 	else
 		echo "rcS: WARNING: mounting /linux/rust.img failed (see /tmp/rust.log)"
 	fi

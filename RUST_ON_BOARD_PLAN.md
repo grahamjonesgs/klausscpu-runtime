@@ -128,6 +128,24 @@ passes on the board.
 Size (opt-level, strip, `share-generics`), start-up relocations, the
 `psm` port, TLS. Decide how far to go from R4's numbers.
 
+**Done first (2026-11-18): direct I/O for the image loop devices.** busybox
+`mount -o loop` made `rust.img` and `toolchain.img` buffered loops, so every
+block was cached twice: by ext4 above and by the FAT file below. That halves
+the RAM left for rustc's pages. sdinit already used direct I/O for the root
+and /data. Now rcS and install-{toolchain,rust} call `loopdio`
+(linux/userland/loopdio.c, LOOP_SET_DIRECT_IO), and board-check checks it.
+Cold runs (drop_caches first), loop mode given as toolchain/rust:
+
+| Run | Buffered (0/0) | Direct I/O | Card reads |
+|---|---|---|---|
+| rustc hello, cold | 79.5 s | 42.7 s (live switch, 3 runs 42.5-42.8); 40.3-40.5 s after a reboot (1/1) | 549 → 278-295 MB |
+| clang zlib-deflate -O2, cold | 37.7 s | 36.5 s | 38 → 35 MB |
+| clang cxx-hello -O2, cold | 91.2 s | 88.4 s | 54 → 37 MB |
+| perf.sh -O2 (1 warm-up), user+sys: deflate / cxx-hello | 30.5 / 79.0 s (0/1) | 30.2 / 77.8 s (1/1, after the reboot) | |
+
+clang barely changes, because its ordered PGO build already fits in RAM. For
+hardware A/B runs from now on, the clang baselines are the 1/1 row.
+
 ## Decisions for Graham
 
 Decided 2026-11-18:

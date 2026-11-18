@@ -142,7 +142,7 @@ scripts find each other relative to that.
 | Add or update a package without an image (about 30 s) | `linux/buildroot/push.sh [-n] [-p] PKG`: builds it, rebuilds packages whose options it changes, and streams the files onto the overlay; `-p` adds it to the defconfig once it worked |
 | Put a hand-made file on the board | `scp` it: it lands in the overlay. To keep it, also put it in the repo (`linux/userland`, `linux/initramfs/etc`, `build-rootfs.sh`) |
 | See or clear the overlay | `overlay status`, `overlay files`, `overlay reset` (at the next boot) |
-| Check the whole board | `tools/validate/board-check.sh [--boot] [--quick]`: 16 checks, about 8 min, takes both locks |
+| Check the whole board | `tools/validate/board-check.sh [--boot] [--quick]`: 18 checks, about 8 min, takes both locks |
 | Emulator tests | `tools/validate/linux.sh <out> <mode>` (modes in its header); `linux/userland/tests/{dynlink,libffi,cxx}/run.sh` |
 | Build the C++ runtime (libunwind, libc++abi, libc++) | `linux/cxx/build.sh` (installs into `linux-ws/dyn/sysroot`) |
 | Build clang for the board | `NATIVE_MULTICALL=1 NATIVE_BUILD_TYPE=Release NATIVE_PROFDATA=default NATIVE_LTO=Thin NATIVE_ORDER=1 NATIVE_BUILD=../klausscpu-llvm/build-native-klausscpu-pgo-lto linux/toolchain/build-native-llvm.sh` (PGO + ThinLTO + call-graph order; about 8 min; the profile is `linux/toolchain/clang.profdata.xz`, remade by `linux/toolchain/pgo-profile.sh`) |

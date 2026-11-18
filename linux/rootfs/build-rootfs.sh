@@ -79,6 +79,7 @@ fi
 "${CC[@]}" "$RT/linux/userland/keystore/kskey.c" -o "$ST/usr/bin/kskey"
 "${CC[@]}" "$RT/linux/userland/musltest.c" -o "$ST/usr/bin/musltest"
 "${CC[@]}" "$RT/linux/userland/minish.c" -o "$ST/usr/bin/minish"
+"${CC[@]}" "$RT/linux/userland/loopdio.c" -o "$ST/usr/sbin/loopdio"
 cp "$RT/linux/userland/install-rootfs" "$RT/linux/userland/install-data" "$RT/linux/userland/install-swap" \
   "$RT/linux/userland/install-toolchain" "$RT/linux/userland/install-rust" "$ST/usr/bin/"
 mkdir -p "$ST/opt/llvm" "$ST/opt/rust"	# the toolchain and rustc images' mount points (rcS)
