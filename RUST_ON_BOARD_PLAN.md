@@ -146,6 +146,14 @@ Cold runs (drop_caches first), loop mode given as toolchain/rust:
 clang barely changes, because its ordered PGO build already fits in RAM. For
 hardware A/B runs from now on, the clang baselines are the 1/1 row.
 
+**R8 a: 64 KiB readahead on the image loops (2026-11-18, installed).**
+`loopdio` also sets read_ahead_kb to 64, one page; the default is 128. Over
+3 alternating cold runs, rustc hello took 38.5 s and read about 272 MB at
+128 KiB, against 34.8 s and 228 MB at 64 KiB; at 512 KiB it took 60 s.
+clang cxx-hello cold was 82.1 s either way. board-check --boot passed 18/18.
+For clang hardware A/B runs the baseline label is now loops 1/1, readahead
+64/64.
+
 ## Decisions for Graham
 
 Decided 2026-11-18:

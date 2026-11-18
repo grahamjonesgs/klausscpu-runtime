@@ -92,8 +92,8 @@ check "/data is mounted read-write" rsh 'grep -q " /data ext4 rw" /proc/mounts'
 check "/dev/null, zero, urandom, tty are 0666" \
 	rsh 'for n in null zero urandom tty; do ls -l /dev/$n | grep -q "^crw-rw-rw- " || exit 1; done'
 # Buffered loop devices cache rustc and clang twice (linux/userland/loopdio.c).
-check "/opt/llvm and /opt/rust loop devices use direct I/O" \
-	rsh 'for d in /opt/llvm /opt/rust; do l=$(grep " $d " /proc/mounts | cut -d" " -f1); [ -n "$l" ] || continue; [ "$(cat /sys/block/${l#/dev/}/loop/dio)" = 1 ] || exit 1; done'
+check "/opt/llvm and /opt/rust loops: direct I/O, 64 KiB readahead" \
+	rsh 'for d in /opt/llvm /opt/rust; do l=$(grep " $d " /proc/mounts | cut -d" " -f1); [ -n "$l" ] || continue; [ "$(cat /sys/block/${l#/dev/}/loop/dio)" = 1 ] && [ "$(cat /sys/block/${l#/dev/}/queue/read_ahead_kb)" = 64 ] || exit 1; done'
 
 echo "--- net"
 check "ping" bash -c "ping -c 3 -q -W 2 $IP >/dev/null"
