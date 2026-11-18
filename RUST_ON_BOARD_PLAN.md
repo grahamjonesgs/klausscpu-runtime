@@ -136,7 +136,14 @@ Decided 2026-11-18:
 - **Scope:** go through R7, cargo included (offline), unattended.
 - **/data:** grow `/linux/data.img` to 2 GiB in place (backup first).
 
-Still open: how much speed work (R8), after R4's numbers.
+Still open: how much speed work (R8).  The numbers (R4, R6, R7): a one-line
+program takes about a minute, a 163-line one 15-20 minutes, a small crate
+with a proc macro 12 minutes; most of it is paging the 152 MB driver from
+the SD card through 121 MB of RAM (hello world: 10 s of CPU in 77 s).  The
+candidates, roughly in order of effort: rustc and LLVM optimised for size
+(`opt-level = "s"`, MinSizeRel LLVM is already used), a call-graph order of
+the driver as for clang (CLANG_ON_BOARD M6: the text a compile touches,
+packed), and fewer relocations at start-up.
 
 ## Risks
 
@@ -204,6 +211,42 @@ installed by hand as `/linux/rust.img` at `/opt/rust`.
 All three programs print their line.  Nearly all the time is waiting:
 the 152 MB driver does not fit in the 121 MB of RAM, so a second run reads
 it from the SD card again (R8).  `cargo -V` works (3 s).
+
+### R5 (2026-11-18): done
+
+The system image of runtime 9b24293: rcS mounts `/linux/rust.img` read-only
+at `/opt/rust` (staged `rust.img.next` swapped in first, as toolchain.img),
+`/opt/rust/bin` on PATH, `install-rust`.  Installed, rebooted:
+board-check 16 PASS, 0 FAIL; `/opt/rust` mounted, `rustc` on PATH.
+
+### R6 (2026-11-18): byte-identical
+
+`linux/rustc/identity.sh`: three sources (hello, stdcheck, the threads demo)
+at -O0 and -O2, `--emit=obj -C codegen-units=1`, by the board's rustc and by
+the x86 stage1 rustc of the same tree (`build-cross`, the same std): all six
+objects identical.  Times on the board:
+
+| source | -O0 | -O2 |
+|---|---|---|
+| hello (1 line) | 64 s | 60 s |
+| stdcheck (26 checks, 163 lines) | 900 s | 1177 s |
+| threads demo (15 lines) | 240 s | 271 s |
+
+And stdcheck built on the board (`rustc --edition 2024 -O stdcheck.rs`,
+1931 s with the link) passes on the board: `stdcheck: PASS`, 26 checks.
+
+### R7 (2026-11-18): proc macros and cargo work, online too
+
+cargo is cross-built with rustc (`x.py build ... cargo`, cargo/0001 and the
+crate forks for its newer libc, rustix and linux-raw-sys; it links the
+board's OpenSSL from Buildroot's staging directory) and is in rust.img.
+`linux/rustc/board-cargo-test.sh` on the board:
+
+| test | build | result |
+|---|---|---|
+| `cargo new hello && cargo build --release` | 106 s | runs |
+| a workspace with a local proc-macro crate, `#[derive(Hello)]` | 722 s | runs: rustc built the macro as a shared library on the board and loaded it |
+| a crates.io dependency (`itoa`), fetched by cargo over HTTPS | 613 s | runs |
 
 ### /data (2026-11-18)
 
