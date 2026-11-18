@@ -39,7 +39,14 @@ done
 # none of the compiler's rlibs that bootstrap also puts in this directory).
 # The full metadata is in the .rmeta files (bootstrap builds std with
 # -Zembed-metadata=no: the .rlib holds only a stub).
-cp "$STD"/*.rlib "$STD"/*.rmeta "$STD"/libstd-*.so "$ST/lib/rustlib/$T/lib/"
+# Only the files of the latest std build, as listed in bootstrap's stamp
+# (NUL-separated, each path prefixed with a one-letter kind): deps/ keeps
+# older builds' files too, under other hashes, after a flags change.
+STAMP=$(dirname "$STD")/.libstd-stamp
+[ -f "$STAMP" ] || { echo "no std stamp at $STAMP" >&2; exit 1; }
+tr '\0' '\n' <"$STAMP" | sed 's/^.//' | grep -E '\.(rlib|rmeta|so)$' |
+	while read -r f; do cp "$f" "$ST/lib/rustlib/$T/lib/"; done
+[ "$(ls "$ST/lib/rustlib/$T/lib"/libstd-*.rlib | wc -l)" = 1 ] || { echo "not exactly one libstd rlib" >&2; exit 1; }
 du -sh "$ST/bin" "$ST/lib/rustlib" "$ST" | sed 's/^/rust: /'
 used=$(du -sm "$ST" | cut -f1)
 SIZE=${SIZE:-$(( (used * 110 / 100) + 8 ))}
