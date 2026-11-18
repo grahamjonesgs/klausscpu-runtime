@@ -90,6 +90,7 @@ file /etc/inittab $HERE/inittab 0644 0 0
 file /etc/init.d/rcS $HERE/rcS 0755 0 0
 file /etc/init.d/hostkey $HERE/hostkey 0755 0 0
 file /etc/profile $HERE/profile 0644 0 0
+file /etc/mdev.conf $HERE/etc/mdev.conf 0644 0 0
 file /etc/passwd $HERE/etc/passwd 0644 0 0
 file /etc/shadow $HERE/etc/shadow 0600 0 0
 file /etc/group $HERE/etc/group 0644 0 0

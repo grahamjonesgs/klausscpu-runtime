@@ -141,7 +141,7 @@ if [ -x "$WS/curl-build/curl" ]; then
   cp "$WS/mbedtls-build/mbedtls-selftest" "$ST/usr/libexec/"
   install -m 755 "$RT/linux/userland/tests/curl-test.sh" "$T/"
 fi
-cp "$INI/inittab" "$INI/profile" "$ST/etc/"
+cp "$INI/inittab" "$INI/profile" "$INI/etc/mdev.conf" "$ST/etc/"
 cp "$INI/rcS" "$INI/hostkey" "$INI/sshkeys" "$ST/etc/init.d/"
 # OpenSSH (Buildroot): our sshd_config, and privilege separation's empty
 # root-owned directory.
