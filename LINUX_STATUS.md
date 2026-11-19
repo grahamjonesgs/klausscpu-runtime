@@ -131,6 +131,11 @@ scripts find each other relative to that.
   The defconfig is `linux/arch/klausscpu/configs/defconfig`.
 - **Load:** `klausscc -i <vmlinux> -s -m` loads it over the UART and keeps the
   console. `board-check.sh --boot` does this and logs the console.
+- **SD high speed (2026-11-19):** with a bitstream that has SDM_CAPS[9]
+  (klaussCPU sdhs), the card runs at 50 MHz. The driver calibrates at boot,
+  and dmesg shows the "50 MHz high speed: phase …, tap …" line. Older
+  bitstreams stay at 25 MHz. The module parameters are hs, hs_calibrate,
+  hs_phase and hs_tap (sd_native.c).
 
 ## Building and changing the system
 
