@@ -36,6 +36,35 @@
  * is sent again by PIO; after KSD_DMA_TROUBLE_MAX DMA errors or stop
  * failures DMA is turned off.  klausscpu_sd.dma=0 (at boot, or at run time
  * in /sys/module/klausscpu_sd/parameters/dma) keeps PIO, for A/B runs.
+ *
+ * High speed (SDM_CAPS[9], SD_NATIVE_PLAN.md §9): the host offers
+ * MMC_CAP_SD_HIGHSPEED and 50 MHz, the mmc core switches the card with
+ * CMD6 at the identification clock (f_init, 400 kHz: mmc_sd_switch_hs
+ * comes before mmc_set_clock), and set_ios at MMC_TIMING_SD_HS and 50 MHz
+ * writes
+ * clk_div 0 and SDM_CFG's HS_SAMPLE with a sample phase and IDELAY tap
+ * (only while no command, data or DMA runs; every SDM_CFG write carries
+ * them, as each reloads the tap).  The sample point is calibrated in the
+ * core's SD high-speed tuning hooks (ksd_hs_calibrate): each phase at taps
+ * 0/8/16/24 reads the card's CMD6 status (R1 on CMD, 64 bytes on DAT,
+ * both CRC-checked) until a try fails, and the setting is the centre of
+ * the widest passing window of the sample instant modulo the 20 ns clock
+ * (klaussCPU tools/board/sd_hs_test.c's pick()), at phase p + 4 rather
+ * than p <= 2 when both pass: they sample the same instant, but at p0/p1 a
+ * slow card's eye can put the sample in the bit before, which loses the
+ * next start bit when CLK parks.  The first sweep runs on the 1-bit bus
+ * before ACMD6 goes out at 50 MHz, the second, which is logged, on the
+ * 4-bit bus, and its setting must then read 16 blocks with CLK parked
+ * before each, else the next candidates and the hs_phase/hs_tap default
+ * are tried the same way.  If nothing works high speed is given up for
+ * good (ksd_hs_give_up): the card is switched back to default speed (at
+ * 12.5 MHz, confirmed by its status) and the host runs at 25 MHz (12.5
+ * MHz if the switch can't be confirmed); on the card's first
+ * initialisation the core
+ * then initialises it again from scratch, on a re-initialisation it goes
+ * on at 25 MHz.  klausscpu_sd.hs=0 keeps 25 MHz; hs_calibrate=0 uses
+ * hs_phase/hs_tap without a sweep (still verified).  Without SDM_CAPS[9]
+ * nothing here changes.
  */
 #include <linux/bitfield.h>
 #include <linux/delay.h>
@@ -48,6 +77,7 @@
 #include <linux/mmc/core.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
+#include <linux/mmc/sd.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
@@ -67,6 +97,24 @@ MODULE_PARM_DESC(native, "Use the native SD controller when present (else SPI)")
 static bool ksd_dma_param = true;
 module_param_named(dma, ksd_dma_param, bool, 0644);
 MODULE_PARM_DESC(dma, "Move data by DMA where the controller can (else PIO through the FIFO)");
+
+static bool ksd_hs_param = true;
+module_param_named(hs, ksd_hs_param, bool, 0444);
+MODULE_PARM_DESC(hs, "Use 50 MHz high speed where the controller has it (SDM_CAPS[9]; else 25 MHz)");
+
+static bool ksd_hs_cal_param = true;
+module_param_named(hs_calibrate, ksd_hs_cal_param, bool, 0444);
+MODULE_PARM_DESC(hs_calibrate, "Calibrate the high-speed sample point (else use hs_phase and hs_tap)");
+
+/* The board's centre (SD_NATIVE_PLAN.md §9.7, sdhs_5a6b2aa: phase 2, tap
+ * 8) at the later of its two equivalent phases: SDM_CFG 0x863. */
+static unsigned int ksd_hs_phase_param = 6;
+module_param_named(hs_phase, ksd_hs_phase_param, uint, 0444);
+MODULE_PARM_DESC(hs_phase, "High-speed sample phase before calibration, and its fallback (0-6)");
+
+static unsigned int ksd_hs_tap_param = 8;
+module_param_named(hs_tap, ksd_hs_tap_param, uint, 0444);
+MODULE_PARM_DESC(hs_tap, "High-speed IDELAY tap before calibration, and its fallback (0-31)");
 
 /* Data requests whose data phase ran by DMA and by PIO since boot (a
  * command refused by the DMA engine and sent again counts as PIO). */
@@ -113,6 +161,7 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define  ST_CARD	BIT(3)
 #define  ST_THRESH	BIT(4)
 #define  ST_DMA_BUSY	BIT(5)
+#define  ST_IDELAY_RDY	BIT(6)		/* the delay line is calibrated */
 #define  ST_CMD_DONE	BIT(8)
 #define  ST_DATA_DONE	BIT(9)
 #define  ST_CMD_TIMEOUT	BIT(16)
@@ -134,9 +183,14 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define SDM_TIMEOUT	0x138		/* [31:0] data, [63:32] busy, in clocks */
 #define SDM_CFG		0x140
 #define  CFG_4BIT	BIT(0)
-#define  CFG_CLK_ON	BIT(2)		/* ([1] HS edge, [7:4] HS sample phase) */
+#define  CFG_HS_SAMPLE	BIT(1)		/* sample at HS_PHASE (plan §9.2) */
+#define  CFG_CLK_ON	BIT(2)
+#define  CFG_HS_PHASE	GENMASK(7, 4)	/* 0-6: 10 + 5p ns after CLK rises */
+#define  CFG_IDELAY_TAP	GENMASK(12, 8)	/* 0-31: 78 ps earlier each */
+#define  CFG_HS_BITS	(CFG_HS_SAMPLE | CFG_HS_PHASE | CFG_IDELAY_TAP)
 #define  CFG_DMA_EN	BIT(16)		/* sampled when SDM_CMD is written */
 #define SDM_FIFO	0x148
+#define  FIFO_LEVEL	GENMASK(9, 0)	/* words */
 #define  FIFO_RESET	BIT(31)		/* also aborts a DMA */
 #define SDM_DMA_ADDR	0x150		/* 64-bit PA, [2:0] read 0, advances;
 					 * ignored while DMA_BUSY */
@@ -147,11 +201,20 @@ module_param_named(native_timeouts, ksd_timeouts, ulong, 0444);
 #define  CAPS_4BIT	BIT(8)
 #define  CAPS_HS	BIT(9)
 #define  CAPS_DMA	BIT(10)
+#define  CAPS_IDELAY	BIT(11)		/* the input delay line */
 #define  CAPS_FIFO_BLKS	GENMASK(23, 16)
+#define  CAPS_HS_PHASES	GENMASK(27, 24)
 
 #define KSD_REF_HZ	100000000	/* CLK = 100 MHz / (2 (div + 1)) */
 #define KSD_DIV_INIT	124		/* 400 kHz */
-#define KSD_F_MAX	25000000	/* default speed; high speed is phase 3 */
+#define KSD_F_MAX	25000000	/* default speed */
+#define KSD_F_HS	50000000	/* high speed: clk_div 0 */
+/* clk_div 3: the default sample point (HS_SAMPLE = 0) is F, the fabric
+ * edge that drives CLK low (F - 20 + 5p with p = 4, plan §9.3): R + 20 ns at
+ * 25 MHz, before a late high-speed eye opens (plan §9.4: the worst case
+ * opens at 20.9 ns); at 12.5 MHz F is R + 40 ns, inside both a high-speed
+ * card's eye and a default-speed one's. */
+#define KSD_F_SAFE	12500000
 /* Slot power off before a power-up: >= 10 ms, to be measured (plan 4.1). */
 #define KSD_POWER_OFF_MS 20
 #define KSD_READ_TMO_MS	100		/* the reset values' 100 ms / 500 ms */
@@ -203,6 +266,15 @@ struct ksd_host {
 	u32 div;
 	unsigned long clk_hz;
 	u64 cfg;
+	/* High speed: SDM_CAPS[9] and hs=1; cleared if calibration fails. */
+	bool hs_cap;
+	bool hs_delay;			/* SDM_CAPS[11]: IDELAY taps */
+	unsigned int hs_phases;		/* SDM_CAPS[27:24] */
+	bool hs_on;			/* MMC_TIMING_SD_HS at clk_div 0 */
+	unsigned int hs_phase, hs_tap;	/* the sample point in use */
+	unsigned int fifo_blks;		/* SDM_CAPS[23:16], 512-byte blocks */
+	bool hs_tuning;			/* the prepare hook ran, the execute hook not yet */
+	unsigned int f_cap;		/* set_ios's highest clock */
 	bool powered, init_clocks;
 	unsigned long off_since;	/* jiffies when the slot was powered off */
 };
@@ -986,18 +1058,48 @@ static void ksd_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		mmc_request_done(mmc, done);
 }
 
+/* CLK = 100 MHz / (2 (div + 1)), the fastest not above hz. */
+static void ksd_set_clock(struct ksd_host *h, unsigned int hz)
+{
+	h->div = clamp_t(u32, DIV_ROUND_UP(KSD_REF_HZ, 2 * hz), 1, 0x10000) - 1;
+	h->clk_hz = KSD_REF_HZ / (2 * (h->div + 1));
+	h->mmc->actual_clock = h->clk_hz;
+	h->mmc->max_busy_timeout = div_u64((u64)U32_MAX * MSEC_PER_SEC, h->clk_hz);
+}
+
+/* SDM_CFG's sampling bits: HS_SAMPLE at the chosen phase and tap at 50 MHz
+ * high speed; 0 (the default-speed sample point, tap 0) otherwise. */
+static u64 ksd_hs_bits(struct ksd_host *h)
+{
+	if (!h->hs_on)
+		return 0;
+	return CFG_HS_SAMPLE | FIELD_PREP(CFG_HS_PHASE, h->hs_phase) |
+	       FIELD_PREP(CFG_IDELAY_TAP, h->hs_tap);
+}
+
+/* No command, data phase or DMA running: the only time SDM_CFG's sampling
+ * bits may change (plan §9.2: a change mid-frame can drop or repeat a
+ * sample, a tap change can glitch the delayed lines).  True if idle. */
+static bool ksd_wait_idle(struct ksd_host *h)
+{
+	u64 st;
+
+	return !readq_poll_timeout_atomic(h->base + SDM_STATUS, st,
+					  !(st & (ST_CMD_BUSY | ST_DATA_BUSY | ST_DMA_BUSY)),
+					  1, 1000);
+}
+
 static void ksd_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct ksd_host *h = mmc_priv(mmc);
 	long left;
 
 	mutex_lock(&h->lock);
-	if (ios->clock) {
-		h->div = clamp_t(u32, DIV_ROUND_UP(KSD_REF_HZ, 2 * ios->clock), 1, 0x10000) - 1;
-		h->clk_hz = KSD_REF_HZ / (2 * (h->div + 1));
-		mmc->actual_clock = h->clk_hz;
-		mmc->max_busy_timeout = div_u64((u64)U32_MAX * MSEC_PER_SEC, h->clk_hz);
-	}
+	/* At most f_cap: 50 MHz with high speed, else 25 MHz (12.5 MHz
+	 * after a switch back to default speed that could not be
+	 * confirmed); after ksd_hs_drop() the core may still ask for 50 MHz. */
+	if (ios->clock)
+		ksd_set_clock(h, min(ios->clock, h->f_cap));
 
 	switch (ios->power_mode) {
 	case MMC_POWER_OFF:
@@ -1015,6 +1117,11 @@ static void ksd_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 				msleep(jiffies_to_msecs(left));
 			h->powered = true;
 			h->init_clocks = true;
+			/* A power cycle returns the card to default speed, so a
+			 * 12.5 MHz cap from an unconfirmed switch back (ksd_hs_drop)
+			 * is no longer needed. */
+			if (!h->hs_cap && h->f_cap == KSD_F_SAFE)
+				h->f_cap = mmc->f_max = KSD_F_MAX;
 		}
 		break;
 	case MMC_POWER_ON:
@@ -1034,9 +1141,553 @@ static void ksd_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		h->cfg |= CFG_4BIT;
 	else
 		h->cfg &= ~CFG_4BIT;
+	/* High speed samples at the calibrated phase and tap once the clock
+	 * is 50 MHz (clk_div 0); legacy timing, or a slower clock, at the
+	 * default-speed point with tap 0, as without high speed.  The data
+	 * and busy timeouts are counted in clocks from clk_hz (ksd_request),
+	 * so at 50 MHz they double in clocks and stay the same in time. */
+	h->hs_on = h->hs_cap && ios->timing == MMC_TIMING_SD_HS && h->div == 0;
+	if ((h->cfg ^ ksd_hs_bits(h)) & CFG_HS_BITS) {
+		if (!ksd_wait_idle(h))
+			dev_warn(mmc_dev(mmc), "sampling changed while busy (STATUS %llx)\n",
+				 rd(h, SDM_STATUS));
+		h->cfg = (h->cfg & ~CFG_HS_BITS) | ksd_hs_bits(h);
+	}
 	ksd_write_ctrl(h);
 	wr(h, SDM_CFG, h->cfg);
 	mutex_unlock(&h->lock);
+}
+
+/* ---- high-speed calibration ---- */
+
+/* The IDELAY taps tried at each phase (the board test's, less 31). */
+static const u8 ksd_cal_taps[] = { 0, 8, 16, 24 };
+#define KSD_CAL_NTAPS	ARRAY_SIZE(ksd_cal_taps)
+#define KSD_CAL_PHASES	16		/* SDM_CAPS[27:24] at most */
+/* Good CMD6 reads that make a setting clean (a sweep stops at the first
+ * failure, so a bad setting costs one try). */
+#define KSD_CAL_TRIES	4
+/* Polls: CMD_DONE (an R1b's busy included, up to SDM_TIMEOUT's busy
+ * timeout), and DATA_DONE (up to its data timeout, the 100 ms read access
+ * limit the core also uses); each a margin above the hardware's. */
+#define KSD_CAL_CMD_US	((KSD_BUSY_TMO_MS + 100) * USEC_PER_MSEC)
+#define KSD_CAL_DATA_US	((KSD_READ_TMO_MS + 50) * USEC_PER_MSEC)
+/* A try's result besides SDM_STATUS's error bits. */
+#define KSD_CAL_HUNG	BIT_ULL(62)	/* no CMD_DONE / DATA_DONE in time */
+#define KSD_CAL_BAD	BIT_ULL(63)	/* a good CRC, the wrong content */
+#define KSD_HS_PERIOD_PS 20000		/* 50 MHz */
+/* Candidates a failed parked verify moves on to before the default. */
+#define KSD_CAL_MORE	3
+
+/* A command, polled (no interrupt during calibration): the error bits, 0
+ * if it went well. */
+static u64 ksd_cal_cmd(struct ksd_host *h, u32 opcode, u32 arg, u32 type, u64 flags)
+{
+	u64 st;
+
+	wr(h, SDM_STATUS, ST_STICKY);
+	wr(h, SDM_ARG, arg);
+	wr(h, SDM_CMD, FIELD_PREP(CMD_INDEX, opcode) | FIELD_PREP(CMD_RESP, type) | flags);
+	if (readq_poll_timeout(h->base + SDM_STATUS, st, st & ST_CMD_DONE, 2, KSD_CAL_CMD_US))
+		return KSD_CAL_HUNG;
+	return st & (ST_CMD_ERRS | ST_BUSY_TIMEOUT);
+}
+
+/* Wait for a data phase to end: 0 at DATA_DONE, else the error bits. */
+static u64 ksd_cal_data_end(struct ksd_host *h)
+{
+	u64 st;
+
+	if (readq_poll_timeout(h->base + SDM_STATUS, st, st & (ST_DATA_DONE | ST_DATA_ERRS),
+			       2, KSD_CAL_DATA_US))
+		return KSD_CAL_HUNG;
+	return st & ST_DATA_ERRS;
+}
+
+/* CMD6 with arg and its 64-byte status into b, by PIO: 0 if both came in
+ * good. */
+static u64 ksd_cal_switch(struct ksd_host *h, u32 arg, u8 b[64])
+{
+	u64 e;
+	int i;
+
+	wr(h, SDM_FIFO, FIFO_RESET);
+	wr(h, SDM_BLK, FIELD_PREP(BLK_SIZE, 64) | FIELD_PREP(BLK_COUNT, 1));
+	e = ksd_cal_cmd(h, SD_SWITCH, arg, RESP_48, CMD_DATA);
+	if (!e)
+		e = ksd_cal_data_end(h);
+	if (e)
+		return e;
+	if (FIELD_GET(FIFO_LEVEL, rd(h, SDM_FIFO)) < 64 / 8)
+		return KSD_CAL_BAD;
+	for (i = 0; i < 64 / 8; i++)
+		put_unaligned_le64(readq_relaxed(h->base + SDM_DATA), b + 8 * i);
+	return 0;
+}
+
+/*
+ * One try at the sample point in SDM_CFG: CMD6 in mode 0 with no change
+ * (0x00FFFFFF), whose R1 tests the CMD line and whose 64-byte status the
+ * DAT lines, both under CRC, read by PIO.  The status must say that high
+ * speed is supported (byte 13 [1]) and selected (byte 16 [3:0] = 1).
+ * CMD6 rather than CMD13 or a block read, so that the sweep leaves
+ * klausscc --sd-fault's command and block counts alone.  0 if good.
+ */
+static u64 ksd_cal_try(struct ksd_host *h)
+{
+	u8 b[64];
+	u64 e;
+
+	e = ksd_cal_switch(h, 0x00ffffff, b);
+	if (e)
+		return e;
+	if (!(b[13] & SD_MODE_HIGH_SPEED) || (b[16] & 0xf) != HIGH_SPEED_BUS_SPEED)
+		return KSD_CAL_BAD;
+	return 0;
+}
+
+/*
+ * A setting's check, as klaussCPU sd_hs_test.c's rd_parked(): CMD18 of
+ * twice the FIFO's blocks from block 0, each block drained only once the
+ * FIFO is full (or holds every block still to come).  So CLK parks after
+ * each of blocks fifo_blks .. 2 fifo_blks - 1 with the FIFO full, and each
+ * of the last fifo_blks blocks follows a restart (a sample point a bit
+ * early loses the next start bit then: DATA_CRC_ERR and DATA_END_ERR,
+ * BLKDONE short, while commands and single blocks pass).  Then CMD12.  0
+ * if good.
+ */
+static u64 ksd_cal_verify(struct ksd_host *h)
+{
+	unsigned int got, want, w, blks = 2 * h->fifo_blks;
+	u64 st, n, e;
+
+	wr(h, SDM_FIFO, FIFO_RESET);
+	wr(h, SDM_BLK, FIELD_PREP(BLK_SIZE, 512) | FIELD_PREP(BLK_COUNT, blks));
+	e = ksd_cal_cmd(h, MMC_READ_MULTIPLE_BLOCK, 0, RESP_48, CMD_DATA);
+	if (e)
+		return e;
+	for (got = 0; got < blks; got++) {
+		/* Let the FIFO fill (CLK parks), then take one block. */
+		want = min(blks - got, h->fifo_blks) * (512 / 8);
+		if (readq_poll_timeout(h->base + SDM_FIFO, n,
+				       FIELD_GET(FIFO_LEVEL, n) >= want ||
+				       (rd(h, SDM_STATUS) & ST_DATA_ERRS),
+				       2, KSD_CAL_DATA_US))
+			return KSD_CAL_HUNG;
+		st = rd(h, SDM_STATUS);
+		if (st & ST_DATA_ERRS)
+			return st & ST_DATA_ERRS;
+		for (w = 0; w < 512 / 8; w++)
+			readq_relaxed(h->base + SDM_DATA);
+	}
+	e = ksd_cal_data_end(h);
+	if (e)
+		return e;
+	if ((rd(h, SDM_BLKDONE) & 0xffff) != blks)
+		return KSD_CAL_BAD;
+	return ksd_cal_cmd(h, MMC_STOP_TRANSMISSION, 0, RESP_48B, CMD_STOP);
+}
+
+/* Free-running clock for a few us (a card finishing a block it was
+ * sending), then an engine still busy is reset by leaving SD mode, and the
+ * FIFO and the status are cleared. */
+static void ksd_cal_settle(struct ksd_host *h)
+{
+	wr(h, SDM_CFG, h->cfg | CFG_CLK_ON);
+	udelay(20);
+	wr(h, SDM_CFG, h->cfg);
+	if (!ksd_wait_idle(h)) {
+		wr(h, SD_CTRL, rd(h, SD_CTRL) & ~CTRL_SD_MODE);
+		ksd_write_ctrl(h);
+		wr(h, SDM_CFG, h->cfg);
+	}
+	wr(h, SDM_FIFO, FIFO_RESET);
+	wr(h, SDM_STATUS, ST_STICKY);
+}
+
+/*
+ * After a failed try: the card hears commands at any phase (the host's
+ * outputs do not depend on it), so CMD12 stops a block it may still be
+ * sending (a card already back in tran takes it as illegal, which the next
+ * R1 reports: see ksd_hs_calibrate), then ksd_cal_settle().
+ */
+static void ksd_cal_recover(struct ksd_host *h)
+{
+	ksd_cal_cmd(h, MMC_STOP_TRANSMISSION, 0, RESP_48B, CMD_STOP);
+	ksd_cal_settle(h);
+}
+
+/* Sample at phase p, tap t (idle). */
+static void ksd_hs_set(struct ksd_host *h, unsigned int p, unsigned int t)
+{
+	h->hs_phase = p;
+	h->hs_tap = t;
+	h->cfg = (h->cfg & ~CFG_HS_BITS) | ksd_hs_bits(h);
+	wr(h, SDM_CFG, h->cfg);
+}
+
+/* The sample instant of phase p and tap t, in ps after CLK's rising edge,
+ * modulo the 20 ns clock (plan §9.3): phase p and p + 4 are the same
+ * instant one bit apart. */
+static s32 ksd_hs_instant(unsigned int p, unsigned int t)
+{
+	s32 ps = 10000 + 5000 * (s32)min(p, 6U) - 78 * (s32)t;
+
+	return ((ps % KSD_HS_PERIOD_PS) + KSD_HS_PERIOD_PS) % KSD_HS_PERIOD_PS;
+}
+
+/* The distance of instant t from centre, modulo the clock. */
+static s32 ksd_hs_dist(s32 t, s32 centre)
+{
+	s32 d = (t - centre + KSD_HS_PERIOD_PS) % KSD_HS_PERIOD_PS;
+
+	return d > KSD_HS_PERIOD_PS / 2 ? KSD_HS_PERIOD_PS - d : d;
+}
+
+/* The sweep's results: clean[ti][p], every try passed. */
+struct ksd_cal {
+	bool clean[KSD_CAL_NTAPS][KSD_CAL_PHASES];
+	unsigned int ntap, nph;
+};
+
+/*
+ * The window, as klaussCPU tools/board/sd_hs_test.c's pick(): the widest
+ * gap between failing instants (modulo 20 ns) that holds passing ones.
+ * Its centre in ps (-1 if no setting is clean), and *width_o its width.
+ */
+static s32 ksd_hs_centre(const struct ksd_cal *c, s32 *width_o)
+{
+	s32 tps[KSD_CAL_NTAPS * KSD_CAL_PHASES], centre = -1, width = 0, d, nxt;
+	bool ok[KSD_CAL_NTAPS * KSD_CAL_PHASES], any, nok = false;
+	unsigned int i, j, ti, p, np = 0, nfail = 0;
+
+	for (ti = 0; ti < c->ntap; ti++) {
+		for (p = 0; p < c->nph; p++) {
+			tps[np] = ksd_hs_instant(p, ksd_cal_taps[ti]);
+			ok[np] = c->clean[ti][p];
+			nok |= ok[np];
+			nfail += !ok[np];
+			np++;
+		}
+	}
+	if (nfail == 0) {
+		*width_o = KSD_HS_PERIOD_PS;	/* everything passes */
+		return 15000;
+	}
+	for (i = 0; i < np && nok; i++) {
+		if (ok[i])
+			continue;
+		nxt = KSD_HS_PERIOD_PS;		/* to the next failing instant */
+		for (j = 0; j < np; j++) {
+			d = (tps[j] - tps[i] + KSD_HS_PERIOD_PS) % KSD_HS_PERIOD_PS;
+			if (!ok[j] && j != i && d > 0 && d < nxt)
+				nxt = d;
+		}
+		any = false;
+		for (j = 0; j < np; j++) {
+			d = (tps[j] - tps[i] + KSD_HS_PERIOD_PS) % KSD_HS_PERIOD_PS;
+			if (ok[j] && d > 0 && d < nxt)
+				any = true;
+		}
+		if (any && nxt > width) {
+			width = nxt;
+			centre = (tps[i] + nxt / 2) % KSD_HS_PERIOD_PS;
+		}
+	}
+	*width_o = width;
+	return centre;
+}
+
+/*
+ * The setting pick() takes: the clean instant nearest the centre (the
+ * smaller tap, then the lower phase, on a tie), moved from p <= 2 to p + 4
+ * where that is clean too: they sample the same instant, but at p0/p1 a
+ * slow card's eye can put the sample in the bit before, which loses the
+ * next start bit when CLK parks (p3 has no p7).  False if none.
+ */
+static bool ksd_hs_pick(const struct ksd_cal *c, s32 centre, unsigned int *bp, unsigned int *bt)
+{
+	unsigned int ti, p, bti = 0;
+	s32 d, bestd = S32_MAX;
+
+	for (ti = 0; ti < c->ntap && centre >= 0; ti++) {
+		for (p = 0; p < c->nph; p++) {
+			if (!c->clean[ti][p])
+				continue;
+			d = ksd_hs_dist(ksd_hs_instant(p, ksd_cal_taps[ti]), centre);
+			if (d < bestd) {
+				bestd = d;
+				*bp = p;
+				bti = ti;
+			}
+		}
+	}
+	if (bestd == S32_MAX)
+		return false;
+	*bt = ksd_cal_taps[bti];
+	if (*bp <= 2 && *bp + 4 < c->nph && c->clean[bti][*bp + 4])
+		*bp += 4;
+	return true;
+}
+
+/*
+ * After a failed parked verify: the next clean setting nearest the centre
+ * that is not a p <= 2 alone (p >= 3, or p <= 2 taken as its clean p + 4),
+ * other than the n already tried in (tp[], tt[]).  False if none.
+ */
+static bool ksd_hs_next(const struct ksd_cal *c, s32 centre, const unsigned int *tp,
+			const unsigned int *tt, unsigned int n, unsigned int *bp, unsigned int *bt)
+{
+	unsigned int ti, p, q, k;
+	s32 d, bestd = S32_MAX;
+
+	for (ti = 0; ti < c->ntap && centre >= 0; ti++) {
+		for (p = 0; p < c->nph; p++) {
+			if (!c->clean[ti][p])
+				continue;
+			q = p;
+			if (p <= 2) {
+				if (p + 4 >= c->nph || !c->clean[ti][p + 4])
+					continue;
+				q = p + 4;
+			}
+			for (k = 0; k < n && (tp[k] != q || tt[k] != ksd_cal_taps[ti]); k++)
+				;
+			if (k < n)
+				continue;
+			d = ksd_hs_dist(ksd_hs_instant(p, ksd_cal_taps[ti]), centre);
+			if (d < bestd) {
+				bestd = d;
+				*bp = q;
+				*bt = ksd_cal_taps[ti];
+			}
+		}
+	}
+	return bestd != S32_MAX;
+}
+
+/* SDM_TIMEOUT's 100 ms / 500 ms at the current clock. */
+static void ksd_cal_timeouts(struct ksd_host *h)
+{
+	wr(h, SDM_TIMEOUT, (u64)ksd_ms_clocks(h, KSD_BUSY_TMO_MS) << 32 |
+			   ksd_ms_clocks(h, KSD_READ_TMO_MS));
+}
+
+/*
+ * High speed does not work: default speed from now on (hs_cap and
+ * MMC_CAP_SD_HIGHSPEED cleared, so no later initialisation tries again).
+ * The card, which the core's CMD6 switched, goes back to default speed by
+ * CMD6 mode 1 function 0 (0x80FFFFF0), sent at 12.5 MHz (clk_div 3) with
+ * the default-speed sample point (SDM_CFG [1] and [12:4] = 0), which is
+ * inside both a high-speed and a default-speed card's eye: so its R1 and
+ * its 64-byte status are read, and the status must report function 0
+ * (byte 16 [3:0]).  One more try after a failure.  Confirmed: 25 MHz from
+ * then on; not (the card may still be in high speed): 12.5 MHz.  Then
+ * CMD13 takes the ILLEGAL_COMMAND a recovery's CMD12 may leave.  The core
+ * still has MMC_TIMING_SD_HS and 50 MHz in its ios: set_ios clamps the
+ * clock to f_cap and samples at the default point without hs_cap.  True if
+ * the card confirmed default speed.
+ */
+static bool ksd_hs_drop(struct ksd_host *h, struct mmc_card *card)
+{
+	struct mmc_host *mmc = h->mmc;
+	bool ok = false;
+	u8 b[64];
+	int i;
+
+	h->hs_cap = false;
+	mmc->caps &= ~MMC_CAP_SD_HIGHSPEED;
+	h->hs_on = false;
+	if (!ksd_wait_idle(h))
+		ksd_cal_recover(h);
+	h->cfg &= ~CFG_HS_BITS;
+	ksd_set_clock(h, KSD_F_SAFE);
+	ksd_write_ctrl(h);
+	wr(h, SDM_CFG, h->cfg);
+	ksd_cal_timeouts(h);
+	for (i = 0; i < 2 && !ok; i++) {
+		ok = !ksd_cal_switch(h, 0x80fffff0, b) && (b[16] & 0xf) == 0;
+		if (!ok)
+			ksd_cal_recover(h);
+	}
+	h->f_cap = ok ? KSD_F_MAX : KSD_F_SAFE;
+	mmc->f_max = h->f_cap;
+	ksd_set_clock(h, h->f_cap);
+	ksd_write_ctrl(h);
+	ksd_cal_timeouts(h);
+	ksd_cal_cmd(h, MMC_SEND_STATUS, card->rca << 16, RESP_48, 0);
+	wr(h, SDM_FIFO, FIFO_RESET);
+	wr(h, SDM_STATUS, ST_STICKY);
+	return ok;
+}
+
+/*
+ * Give up on high speed (ksd_hs_drop) and say so.  On the card's first
+ * initialisation (no mmc->card yet) -EIO: the core powers the slot off
+ * and initialises the card again from scratch, now without high speed, so
+ * its log says "new SDHC card".  On a re-initialisation (mmc_sd_hw_reset
+ * after a block error, or a resume), where nothing would retry, 0: this
+ * initialisation goes on at 25 MHz with the card at default speed.
+ */
+static int ksd_hs_give_up(struct ksd_host *h, struct mmc_card *card, const char *why)
+{
+	bool first = !h->mmc->card;
+
+	if (ksd_hs_drop(h, card))
+		dev_err(mmc_dev(h->mmc), "high speed: %s: 25 MHz default speed from now on%s\n",
+			why, first ? " (the card is initialised again)" : "");
+	else
+		dev_err(mmc_dev(h->mmc), "high speed: %s; the card did not confirm the switch back to default speed: 12.5 MHz from now on%s\n",
+			why, first ? " (the card is initialised again)" : "");
+	h->hs_tuning = false;
+	return first ? -EIO : 0;
+}
+
+/*
+ * Calibrate the high-speed sample point (the host is claimed, no request
+ * runs), in the core's prepare (final = false: 1-bit bus, before ACMD6 at
+ * 50 MHz) and execute (final: 4-bit) hooks.  Every phase at every tap
+ * (tap 0 only if the delay line is absent or not ready) until a try
+ * fails; then pick()'s setting.  final: that setting must pass the parked
+ * verify, else up to KSD_CAL_MORE more candidates (ksd_hs_next), else the
+ * hs_phase / hs_tap default (also when no setting is clean), verified the
+ * same way; if nothing passes, ksd_hs_give_up().  With hs_calibrate=0 no
+ * sweep: the default, verified in final.  The prepare hook sets
+ * hs_tuning and the execute hook clears it, so a prepare that finds it
+ * set follows an initialisation that failed between them (ACMD6 at the
+ * prepare's unverified setting): high speed is given up then.
+ */
+static int ksd_hs_calibrate(struct mmc_host *mmc, struct mmc_card *card, bool final)
+{
+	struct ksd_host *h = mmc_priv(mmc);
+	struct ksd_cal c = { };
+	unsigned int ti, p, r, bp = 0, bt = 0, def_p, def_t, n = 0;
+	unsigned int tp[KSD_CAL_MORE + 2], tt[KSD_CAL_MORE + 2];
+	char map[KSD_CAL_NTAPS * (KSD_CAL_PHASES + 1)] = "-", *m = map;
+	const char *how = "";
+	bool failed = false, passed = false, idelay;
+	s32 centre = -1, width = 0;
+	int ret = 0;
+	u64 e;
+
+	mutex_lock(&h->lock);
+	if (!h->hs_on) {
+		if (final)
+			h->hs_tuning = false;
+		goto out;
+	}
+	if (!final && h->hs_tuning) {
+		ret = ksd_hs_give_up(h, card, "the last initialisation failed after calibration");
+		goto out;
+	}
+	h->hs_tuning = !final;
+	idelay = h->hs_delay && (rd(h, SDM_STATUS) & ST_IDELAY_RDY);
+	if (h->hs_delay && !idelay)
+		dev_warn(mmc_dev(mmc), "high speed: IDELAY_RDY is 0 (the delay line is not calibrated): tap 0 only\n");
+	c.ntap = idelay ? KSD_CAL_NTAPS : 1;
+	c.nph = h->hs_phases;
+	def_p = min(ksd_hs_phase_param, c.nph - 1);
+	def_t = idelay ? min(ksd_hs_tap_param, 31U) : 0;
+	wr(h, SDM_IRQ_EN, 0);
+	ksd_cal_timeouts(h);
+
+	if (ksd_hs_cal_param) {
+		for (ti = 0; ti < c.ntap; ti++) {
+			for (p = 0; p < c.nph; p++) {
+				ksd_hs_set(h, p, ksd_cal_taps[ti]);
+				for (r = 0; r < KSD_CAL_TRIES; r++) {
+					e = ksd_cal_try(h);
+					if (e) {
+						dev_dbg(mmc_dev(mmc), "phase %u tap %u: try %u failed (%llx)\n",
+							p, ksd_cal_taps[ti], r, e);
+						failed = true;
+						ksd_cal_recover(h);
+						break;
+					}
+				}
+				c.clean[ti][p] = r == KSD_CAL_TRIES;
+				passed |= r > 0;
+				*m++ = c.clean[ti][p] ? 'P' : r ? '0' + r : '.';
+			}
+			*m++ = ti + 1 < c.ntap ? ' ' : '\0';
+		}
+		centre = ksd_hs_centre(&c, &width);
+		if (!ksd_hs_pick(&c, centre, &bp, &bt)) {
+			if (!passed) {
+				ret = ksd_hs_give_up(h, card, "no sample point reads the card at 50 MHz");
+				goto out;
+			}
+			dev_warn(mmc_dev(mmc), "high speed: no clean sample point (map %s, P = %u good reads): trying phase %u, tap %u\n",
+				 map, KSD_CAL_TRIES, def_p, def_t);
+			bp = def_p;
+			bt = def_t;
+			how = " (the default point)";
+		}
+	} else {
+		bp = def_p;
+		bt = def_t;
+		how = " (hs_calibrate=0)";
+	}
+	ksd_hs_set(h, bp, bt);
+
+	/* The 4-bit setting must also read across a CLK park; else the next
+	 * candidates, then the default. */
+	while (final) {
+		e = ksd_cal_verify(h);
+		if (!e)
+			break;
+		failed = true;
+		ksd_cal_recover(h);
+		tp[n] = bp;
+		tt[n] = bt;
+		n++;
+		dev_warn(mmc_dev(mmc), "high speed: phase %u, tap %u fails a %u-block read across CLK parks (%llx)\n",
+			 bp, bt, 2 * h->fifo_blks, e);
+		for (r = 0; r < n && (tp[r] != def_p || tt[r] != def_t); r++)
+			;
+		if (n <= KSD_CAL_MORE && ksd_hs_next(&c, centre, tp, tt, n, &bp, &bt)) {
+			how = " (a later candidate)";
+		} else if (r == n) {
+			bp = def_p;		/* the default, not tried yet */
+			bt = def_t;
+			how = " (the default point)";
+		} else {
+			ret = ksd_hs_give_up(h, card, "no sample point reads the card across a CLK park");
+			goto out;
+		}
+		ksd_hs_set(h, bp, bt);
+	}
+
+	/* A CMD12 to a card already in tran latched ILLEGAL_COMMAND for the
+	 * next R1: take it here, at the chosen setting. */
+	if (failed)
+		ksd_cal_cmd(h, MMC_SEND_STATUS, card->rca << 16, RESP_48, 0);
+	wr(h, SDM_STATUS, ST_STICKY);
+	if (final) {
+		h->hs_tuning = false;
+		dev_info(mmc_dev(mmc), "50 MHz high speed: phase %u, tap %u (SDM_CFG %#llx)%s, window %d.%d ns; map (phases 0-%u at taps %s): %s\n",
+			 h->hs_phase, h->hs_tap, h->cfg & (CFG_4BIT | CFG_HS_BITS), how,
+			 width / 1000, width % 1000 / 100, c.nph - 1,
+			 idelay ? "0/8/16/24" : "0", map);
+	} else {
+		dev_dbg(mmc_dev(mmc), "1-bit calibration: phase %u, tap %u%s, map %s\n",
+			h->hs_phase, h->hs_tap, how, map);
+	}
+out:
+	mutex_unlock(&h->lock);
+	return ret;
+}
+
+/* At 50 MHz on the 1-bit bus, before ACMD6 goes out at that speed. */
+static int ksd_prepare_sd_hs_tuning(struct mmc_host *mmc, struct mmc_card *card)
+{
+	return ksd_hs_calibrate(mmc, card, false);
+}
+
+/* On the 4-bit bus: the setting kept, verified across a CLK park. */
+static int ksd_execute_sd_hs_tuning(struct mmc_host *mmc, struct mmc_card *card)
+{
+	return ksd_hs_calibrate(mmc, card, true);
 }
 
 static int ksd_get_cd(struct mmc_host *mmc)
@@ -1047,9 +1698,11 @@ static int ksd_get_cd(struct mmc_host *mmc)
 }
 
 static const struct mmc_host_ops ksd_ops = {
-	.request	= ksd_request,
-	.set_ios	= ksd_set_ios,
-	.get_cd		= ksd_get_cd,
+	.request		= ksd_request,
+	.set_ios		= ksd_set_ios,
+	.get_cd			= ksd_get_cd,
+	.prepare_sd_hs_tuning	= ksd_prepare_sd_hs_tuning,
+	.execute_sd_hs_tuning	= ksd_execute_sd_hs_tuning,
 };
 
 /* ---- probe ---- */
@@ -1089,11 +1742,13 @@ static int ksd_probe(struct platform_device *pdev)
 	h->clk_hz = KSD_REF_HZ / (2 * (h->div + 1));
 	h->powered = false;
 	h->off_since = jiffies;
+	h->cfg = 0;
+	h->fifo_blks = max_t(unsigned int, FIELD_GET(CAPS_FIFO_BLKS, caps), 1);
 	ksd_write_ctrl(h);
 	wr(h, SDM_IRQ_EN, 0);
 	wr(h, SDM_STATUS, ST_STICKY);
 	wr(h, SDM_FIFO, FIFO_RESET);
-	wr(h, SDM_CFG, 0);
+	wr(h, SDM_CFG, h->cfg);
 	/* A DMA a loader left running may still be writing memory the kernel
 	 * now owns: DMA_EN = 0 above aborts it; make sure it stopped. */
 	if (rd(h, SDM_STATUS) & ST_DMA_BUSY) {
@@ -1114,6 +1769,16 @@ static int ksd_probe(struct platform_device *pdev)
 	mmc->caps = MMC_CAP_WAIT_WHILE_BUSY | MMC_CAP_CMD23 | MMC_CAP_NONREMOVABLE;
 	if (caps & CAPS_4BIT)
 		mmc->caps |= MMC_CAP_4_BIT_DATA;
+	h->hs_cap = (caps & CAPS_HS) && ksd_hs_param;
+	h->f_cap = h->hs_cap ? KSD_F_HS : KSD_F_MAX;
+	if (h->hs_cap) {
+		h->hs_phases = clamp_t(unsigned int, FIELD_GET(CAPS_HS_PHASES, caps), 1, KSD_CAL_PHASES);
+		h->hs_delay = caps & CAPS_IDELAY;
+		h->hs_phase = min(ksd_hs_phase_param, h->hs_phases - 1);
+		h->hs_tap = h->hs_delay ? min(ksd_hs_tap_param, 31U) : 0;
+		mmc->caps |= MMC_CAP_SD_HIGHSPEED;
+		mmc->f_max = KSD_F_HS;
+	}
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;
 	mmc->max_busy_timeout = div_u64((u64)U32_MAX * MSEC_PER_SEC, h->clk_hz);
 	mmc->max_blk_size = 2048;
@@ -1142,6 +1807,11 @@ static int ksd_probe(struct platform_device *pdev)
 	if (h->dma_cap)
 		dev_info(&pdev->dev, "DMA %s, D-cache %s\n", ksd_dma_param ? "on" : "off (dma=0)",
 			 klausscpu_dcache_range_ops() ? "range ops" : "whole-cache flushes");
+	if (caps & CAPS_HS)
+		dev_info(&pdev->dev, "high speed %s: %u sample phases, %s, IDELAY_RDY %llu\n",
+			 h->hs_cap ? "on" : "off (hs=0)", (unsigned int)FIELD_GET(CAPS_HS_PHASES, caps),
+			 (caps & CAPS_IDELAY) ? "IDELAY taps" : "no delay line",
+			 (rd(h, SDM_STATUS) & ST_IDELAY_RDY) >> 6);
 	return 0;
 }
 

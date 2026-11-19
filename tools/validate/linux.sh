@@ -54,6 +54,14 @@
 #                    (the kernel must panic rather than unmap); and
 #                    dmaexec, new code read by O_DIRECT into a mapped
 #                    executable page (the I-cache invalidate on DMA)
+#                    The controller has high speed (SD_NATIVE_PLAN §9) when
+#                    klausscc models it (--sd-no-hs absent): the card runs
+#                    at 50 MHz after the driver's calibration, whose dmesg
+#                    line is checked.  LINUX_SD_HS=0 models a bitstream
+#                    before it (klausscc --sd-no-hs: 25 MHz, as before);
+#                    LINUX_SD_HS_WINDOW=LO..HI (ns) gives klausscc
+#                    --sd-hs-window and checks that the calibration picks
+#                    a sample point inside the window
 #   ports            the ported programs (linux/userland/<pkg>.sh: lua, ...),
 #                    each built here if it isn't yet, in a system image that
 #                    sdinit boots from the initramfs with a data image at
@@ -85,6 +93,17 @@ norange) SD_DMA_ARGS=(--sd-dma) ;;
 esac
 [ ${#SD_DMA_ARGS[@]} = 0 ] || { [ "$MODE" = sd-native ] && [ "$WHERE" = emu ]; } ||
   die "LINUX_SD_DMA is for sd-native on the emulator"
+# High speed: klausscc's --sd-native has it unless --sd-no-hs (a klausscc
+# without the option has none).
+SD_HS_ARGS=()
+SD_HS=0
+if [ "$MODE" = sd-native ] && "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--sd-no-hs'; then
+  SD_HS=1
+  [ "${LINUX_SD_HS:-1}" != 0 ] || { SD_HS=0; SD_HS_ARGS=(--sd-no-hs); }
+  [ -z "${LINUX_SD_HS_WINDOW:-}" ] || [ $SD_HS = 0 ] || SD_HS_ARGS=(--sd-hs-window "$LINUX_SD_HS_WINDOW")
+fi
+[ -z "${LINUX_SD_HS_WINDOW:-}" ] || [ $SD_HS = 1 ] ||
+  die "LINUX_SD_HS_WINDOW needs sd-native and a klausscc with high speed (and not LINUX_SD_HS=0)"
 [ $SD = 0 ] || [ "$WHERE" = emu ] || die "$MODE runs on the emulator (on the board the card holds real files)"
 [ $SD = 0 ] || "$KLAUSSCC" --help 2>/dev/null | grep -q -- '--sd-native' ||
   die "$KLAUSSCC has no --sd-image/--sd-native: build klausscc's mmu branch"
@@ -208,7 +227,7 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       { echo "FAIL card image (see $OUT/card.log)"; exit 1; }
     cp "$CARD" "$OUT/card-empty.img"	# for the fault boots
     EMU_ARGS=(--sd-image "$CARD")
-    [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}")
+    [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
   fi
   export INITRAMFS_PROFILE=busybox
 elif [ "$MODE" = m3 ]; then
@@ -252,6 +271,10 @@ run_step() {
   local why
   why=$(expect_in_order "$OUT/$1.expect" "$OUT/$1.out") || bad "$1: $why"
   grep -aq 'Kernel panic\|Oops' "$OUT/$1.out" && bad "$1: kernel panic"
+  # klausscc's notes of high-speed misuse (50 MHz to a card at default
+  # speed or without HS_SAMPLE, sampling changed while busy).
+  ! grep -aq 'klausscc sd: CMD[0-9]* at 50 MHz\|klausscc sd: SDM_CFG.s sampling bits' "$OUT/$1.out" ||
+    bad "$1: high-speed misuse: $(grep -ao 'klausscc sd: [^:]*' "$OUT/$1.out" | grep -v injected | sort -u | head -3 | tr '\n' ';')"
 }
 
 # dma_fault_boots: with LINUX_SD_DMA, the DMA engine's faults (klausscc
@@ -271,7 +294,7 @@ dma_fault_boots() {
   } >"$OUT/dmafault.in"
   n=dmafault-base
   cp "$OUT/card-empty.img" "$OUT/$n.img"
-  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}")
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
   cp "$OUT/dmafault.in" "$OUT/$n.in"
   printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
   run_step "$n" 40000000000 2400 '$ '
@@ -291,7 +314,7 @@ dma_fault_boots() {
     n=dmafault-$(echo "$f" | tr ':@' '--')
     kind=${f%@*}
     cp "$OUT/card-empty.img" "$OUT/$n.img"
-    EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}")
+    EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
     cp "$OUT/dmafault.in" "$OUT/$n.in"
     printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
     run_step "$n" 60000000000 3600 '$ '
@@ -316,7 +339,7 @@ dma_fault_boots() {
   # checker, not the result, is the verdict on the emulator).
   n=dmaexec
   cp "$OUT/card-empty.img" "$OUT/$n.img"
-  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}")
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
   {
     echo 'mount -t vfat /dev/mmcblk0p1 /mnt && /seed/dmaexec -w /mnt/code.bin && umount /mnt && echo 3 > /proc/sys/vm/drop_caches && mount -t vfat /dev/mmcblk0p1 /mnt && echo ready'
     echo 'r=$(cat /sys/module/klausscpu_sd/parameters/native_dma_requests); /seed/dmaexec /mnt/code.bin; echo dmaexec-dma $(( $(cat /sys/module/klausscpu_sd/parameters/native_dma_requests) - r ))'
@@ -332,7 +355,7 @@ dma_fault_boots() {
   # buffer.  (The watchdog fires first; the panic stops the session.)
   f=dmastuck@$R n=dmafault-dmastuck-$R
   cp "$OUT/card-empty.img" "$OUT/$n.img"
-  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}")
+  EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f" --sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
   cp "$OUT/dmafault.in" "$OUT/$n.in"
   timeout 2400 "$KLAUSSCC" -i "$OUT/vmlinux" --emulate --max-instructions 20000000000 \
     "${EMU_ARGS[@]}" --uart-in "$OUT/$n.in" --uart-prompt '$ ' </dev/null >"$OUT/$n.out" 2>&1
@@ -473,7 +496,12 @@ elif [ $SD = 1 ]; then
       echo 'klausscpu-intc: source 2 cascades Ethernet and SD'
       echo 'klausscpu-sd: the native SD controller has the card'
       echo 'klausscpu-sdnative klausscpu-sdnative: native SD controller v1, 8-block FIFO, 4-bit, IRQ 3'
-      echo 'mmc0: new SDHC card at address 1234'
+      if [ $SD_HS = 1 ]; then
+        echo 'klausscpu-sdnative klausscpu-sdnative: high speed on: 7 sample phases, IDELAY taps, IDELAY_RDY 1'
+        echo 'mmc0: new high speed SDHC card at address 1234'
+      else
+        echo 'mmc0: new SDHC card at address 1234'
+      fi
     fi
     echo 'Run /init as init process'
     echo 'sdinit: no usable /linux/rootfs.img on the SD card'
@@ -508,6 +536,24 @@ elif [ $SD = 1 ]; then
   if [ "$MODE" = sd-native ]; then
     grep -aq '^scr: ' "$OUT/sd1.out" || bad "sd1: sdcmd scr (ACMD51, 8 bytes)"
     grep -aq '^ssr: ' "$OUT/sd1.out" || bad "sd1: sdcmd ssr (ACMD13, 64 bytes)"
+    # High speed: the calibration's line, and (with a window) its sample
+    # instant, 10 + 5p - 0.078t ns modulo 20, inside the window.
+    CAL=$(grep -ao 'klausscpu-sdnative: 50 MHz high speed: phase [0-9]*, tap [0-9]*.*' "$OUT/sd1.out" | head -1)
+    if [ $SD_HS = 1 ]; then
+      echo "sd1: ${CAL:-no calibration line}"
+      [ -n "$CAL" ] || bad "sd1: no high-speed calibration line"
+      if [ -n "$CAL" ] && [ -n "${LINUX_SD_HS_WINDOW:-}" ]; then
+        read -r CP CT < <(echo "$CAL" | sed 's/.*phase \([0-9]*\), tap \([0-9]*\).*/\1 \2/')
+        awk -v p="$CP" -v t="$CT" -v w="$LINUX_SD_HS_WINDOW" 'BEGIN {
+              split(w, a, /\.\./); lo = a[1] * 1000; hi = a[2] * 1000
+              if (p > 6) p = 6; x = 10000 + 5000 * p - 78 * t
+              d = (x - lo) % 20000; if (d < 0) d += 20000
+              exit !(hi - lo >= 20000 || d <= hi - lo) }' ||
+          bad "sd1: the calibration chose phase $CP tap $CT, outside --sd-hs-window $LINUX_SD_HS_WINDOW"
+      fi
+    else
+      [ -z "$CAL" ] || bad "sd1: a high-speed calibration without high speed"
+    fi
   fi
 
   # Boot 2: sdinit mounts data.img at /data and system image A read-only
@@ -651,7 +697,7 @@ EOF2
       n=fault-$(echo "$f" | tr ':@' '--')
       cp "$OUT/card-empty.img" "$OUT/$n.img"
       EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault "$f")
-      [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}")
+      [ "$MODE" = sd-native ] && EMU_ARGS+=(--sd-native "${SD_DMA_ARGS[@]}" "${SD_HS_ARGS[@]}")
       cp "$OUT/fault.in" "$OUT/$n.in"
       printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
       run_step "$n" 40000000000 2400 '$ '
@@ -672,6 +718,42 @@ EOF2
         fsck.fat -n "$OUT/part.img" >"$OUT/$n.fsck" 2>&1 || bad "$n: fsck.fat (see $OUT/$n.fsck)"
       rm -f "$OUT/part.img" "$OUT/$n.img"
     done
+    # High speed lost on a re-initialisation: --sd-hs-window 0.1..0.2@2
+    # admits no sample point from the card's second switch to high speed
+    # on, and three bad reads make the mmc core reset the card
+    # (mmc_blk_reset); the reset's calibration finds nothing, so the driver
+    # switches the card back to default speed at 12.5 MHz, confirms it from
+    # the CMD6 status and goes on at 25 MHz (no power cycle or retry comes
+    # on that path): the file still reads back.  hsreinit-lost: that CMD6
+    # and its retry get no response (cmdto:6@258x2: CMD6s 1-2 and 116-227
+    # are the first initialisation's switch reads and sweeps (2 x 28 cells
+    # x 4 tries), 115 its ACMD6, 228-229 the reset's switch reads, 230-257
+    # its sweep, every cell failing at once): the card stays in high speed
+    # and the driver at 12.5 MHz.
+    if [ "$MODE" = sd-native ] && [ $SD_HS = 1 ] && [ -z "${LINUX_SD_HS_WINDOW:-}" ]; then
+      for v in hsreinit:25 hsreinit-lost:12.5; do
+        n=fault-${v%%:*}
+        cp "$OUT/card-empty.img" "$OUT/$n.img"
+        EMU_ARGS=(--sd-image "$OUT/$n.img" --sd-fault rerr@3000x3 --sd-native "${SD_DMA_ARGS[@]}" --sd-hs-window 0.1..0.2@2)
+        [ "${v#*:}" = 25 ] || EMU_ARGS+=(--sd-fault cmdto:6@258x2)
+        cp "$OUT/fault.in" "$OUT/$n.in"
+        printf 'wrote\n%s\nunmounted\n' "$H2" >"$OUT/$n.expect"
+        run_step "$n" 40000000000 2400 '$ '
+        if [ "${v#*:}" = 25 ]; then
+          want='no sample point reads the card at 50 MHz: 25 MHz default speed from now on'
+        else
+          want='no sample point reads the card at 50 MHz; the card did not confirm the switch back to default speed: 12.5 MHz from now on'
+          [ "$(grep -ac 'klausscc sd: injected cmdto at command 2[0-9]* (CMD6)' "$OUT/$n.out")" = 2 ] ||
+            bad "$n: the CMD6 faults did not land (the count of CMD6s before the drop changed?)"
+        fi
+        grep -aq "sdnative: high speed: $want.\\?\$" "$OUT/$n.out" || bad "$n: no '$want'"
+        ! grep -aq 'I/O error' "$OUT/$n.out" || bad "$n: I/O errors"
+        read -r a b c < <(grep -ao '^stats [0-9]* [0-9]* [0-9]*' "$OUT/$n.out" | awk '{print $2, $3, $4}')
+        echo "$n: stats ${a:-?} ${b:-?} ${c:-?} (data_errors cmd_errors timeouts)"
+        [ "${c:-1}" = 0 ] || bad "$n: the watchdog fired"
+        rm -f "$OUT/$n.img"
+      done
+    fi
     [ ${#SD_DMA_ARGS[@]} = 0 ] || dma_fault_boots
   else
     echo "sd faults: skipped ($KLAUSSCC has no --sd-fault)"
