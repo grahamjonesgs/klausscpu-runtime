@@ -178,9 +178,46 @@ The size build reads fewer bytes but runs slower, so it nets out about even.
 The -O3 build stays. Since this morning, DIO and readahead alone took threads
 -O2 from 271 to 109 s, and stdcheck -O0 from 900 to 267 s.
 
-**R8 c: call-graph order of librustc_driver (started 2026-11-18).** The card
-is still about 60% of hello (about 21 of 35 s). This step uses clang M6's
-tools (klausscc call-edge profile, cdsx.py, lld --symbol-ordering-file).
+**R8 c: call-graph order of librustc_driver (2026-11-19).** The card was
+still about 60% of hello (about 21 of 35 s), so Graham's rule said go ahead.
+- **Profile.** linux/rustc/order/run.sh profiles rustc in the klausscc
+  emulator (hello -O0, threads -O2, stdcheck -O0; about 6 minutes).
+- **Order.** symbolize-so.py maps the profile onto the shared driver (it
+  finds the load base from the call targets). klausscc tlbord's
+  gen-orders.py and cdsx.py give the order, which is
+  order/driver-order.txt.gz.
+- **Relink.** order/relink.sh relinks only the driver: the order goes in
+  through klausscpu-clang's RUSTC_DRIVER_LINK_ARGS, so no symbol name
+  changes. A relink takes 9 s.
+- **Layout.** The three workloads run 23.8 MB of the 108.7 MB of code.
+  Hello's code went from 1368 to 381 64 KiB pages.
+
+Cold, on the board, with DIO and readahead 64:
+
+| Compile | -O3 | ordered, 25 MHz | ordered, SD 50 MHz |
+|---|---|---|---|
+| hello | 35.0 s, 225 MB | 20.1 s, 111 MB | 15.9 s, 113 MB |
+| `rustc -vV` | 5.4 s | 3.9 s | 2.9 s |
+| threads -O0 / -O2 | 77.7 / 109.3 s | 53.7 / 79.1 s | 46.4 / 73.2 s |
+| stdcheck -O0 | 267 s, 833 MB | 192 s, 278 MB | 182 s, 268 MB |
+
+The 50 MHz column runs on SD high speed: bitstream sdhs_5a6b2aa with the new
+sd_native.c driver, calibrated to phase 6, tap 8 (window 18.7 ns). clang
+cold at 50 MHz: deflate 33.0 s, cxx-hello 80.8 s. At 25 MHz they were 36.5
+s (readahead 128) and 82.1 s (readahead 64).
+
+The ordered rustc is the installed rust.img (built from build-cross after
+order/relink.sh). Checked at 50 MHz: identity.sh 6/6 SAME, and
+board-cargo-test.sh all PASS. cargo hello took 106 s before and 24 s now,
+the derive proc macro 722 → 139 s, and the crates.io itoa build 613 → 94 s.
+
+From the first measurement (79.5 s) to now (15.9 s), hello is 5x faster:
+direct I/O, readahead, the call-graph order and SD high speed.
+
+Not done:
+- **Size build (R8 b):** no net gain (above).
+- **Start-up relocations (step d):** about 3/4 of hello's instructions run
+  outside the driver, mostly in the dynamic loader. `rustc -vV` is 2.9 s now.
 
 ## Decisions for Graham
 
