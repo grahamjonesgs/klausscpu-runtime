@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/init.h>
 #include <linux/memblock.h>
+#include <linux/io.h>
 #include <linux/mm.h>
 #include <asm/pgtable.h>
 
@@ -35,3 +36,21 @@ static const pgprot_t protection_map[16] = {
 	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= PAGE_SHARED_EXEC,
 };
 DECLARE_VM_GET_PAGE_PROT
+
+/*
+ * /dev/mem's range checks (asm/io.h): RAM only, for read/write and for
+ * mmap.  The limits are tested so that a huge user offset cannot wrap.
+ */
+int valid_phys_addr_range(phys_addr_t addr, size_t size)
+{
+	phys_addr_t end = __pa(high_memory);
+
+	return addr <= end && size <= end - addr;
+}
+
+int valid_mmap_phys_addr_range(unsigned long pfn, size_t size)
+{
+	unsigned long end = PHYS_PFN(__pa(high_memory));
+
+	return pfn < end && size <= (end - pfn) << PAGE_SHIFT;
+}
