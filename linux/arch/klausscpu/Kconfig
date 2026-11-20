@@ -158,6 +158,17 @@ config KLAUSSCPU_FB
 	  nothing on an emulator or bitstream without the controller;
 	  klausscpu_fb.force=1 registers it there anyway, for tests.
 
+config KLAUSSCPU_MMIO_DEV
+	bool "/dev/klausscpu-mmio: root access to whitelisted board registers"
+	default y
+	help
+	  A misc device (root only) whose ioctls read and write a fixed
+	  whitelist of registers for user programs: the LEDs and switches,
+	  the 7-segment display, the RGB LEDs, and the timer block's
+	  counters and feature word, read-only.  User space cannot map
+	  MMIO on this CPU, so the kernel does each access.  The interface
+	  is <asm/klausscpu-mmio.h>.
+
 config KLAUSSCPU_EARLY_UART
 	bool "Early console on the polled UART"
 	default y

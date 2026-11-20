@@ -68,6 +68,10 @@ if [ $BOOT = 1 ]; then
 	K=${KERNEL:-$RT/linux-ws/build-board/vmlinux}
 	[ -f "$K" ] || K=$RT/linux-ws/build-perf/vmlinux
 	KLAUSSCC=${KLAUSSCC:-$RT/../klausscc/target/release/klausscc}
+	# The UART load resets the CPU with no shutdown: flush what the running
+	# system has written (files copied to the overlay or /data just before)
+	# so it reaches the card.  Harmless if the board isn't up.
+	timeout 30 "${SSH[@]}" sync </dev/null 2>/dev/null || true
 	echo "booting $K"
 	"$KLAUSSCC" -i "$K" -s -m </dev/null >"$OUT/console.log" 2>&1 &
 	CONSOLE=$!
@@ -92,6 +96,9 @@ check "/data is mounted read-write" rsh 'grep -q " /data ext4 rw" /proc/mounts'
 check "/dev/null, zero, urandom, tty are 0666" \
 	rsh 'for n in null zero urandom tty; do ls -l /dev/$n | grep -q "^crw-rw-rw- " || exit 1; done'
 # Buffered loop devices cache rustc and clang twice (linux/userland/loopdio.c).
+# The board-register driver (klausscpu_mmio.c) is root-only (mdev.conf).
+check "/dev/klausscpu-mmio is a root-only char device" \
+	rsh '[ ! -e /dev/klausscpu-mmio ] || ls -l /dev/klausscpu-mmio | grep -q "^crw------- "'
 check "/opt/llvm and /opt/rust loops: direct I/O, 64 KiB readahead" \
 	rsh 'for d in /opt/llvm /opt/rust; do l=$(grep " $d " /proc/mounts | cut -d" " -f1); [ -n "$l" ] || continue; [ "$(cat /sys/block/${l#/dev/}/loop/dio)" = 1 ] && [ "$(cat /sys/block/${l#/dev/}/queue/read_ahead_kb)" = 64 ] || exit 1; done'
 

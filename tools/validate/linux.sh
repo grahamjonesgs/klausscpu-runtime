@@ -11,7 +11,8 @@
 #                    /proc, tmpfs, fork+execve of the musl test program, and
 #                    unaligntest (misaligned access emulation)
 #   busybox          initramfs "busybox": busybox init and ash (musl,
-#                    linux/userland/busybox.sh), a scripted session
+#                    linux/userland/busybox.sh), a scripted session, and
+#                    mmio-test (/dev/klausscpu-mmio, linux/userland/tests/mmio)
 #   ssh              initramfs "busybox" with Dropbear (linux/userland/
 #                    dropbear.sh): key, server and an SSH login over loopback
 #   net              (board only) the busybox profile with Dropbear: boots,
@@ -139,6 +140,13 @@ if [ "$MODE" = busybox ] || [ "$MODE" = ssh ] || [ "$MODE" = net ] || [ "$MODE" 
       { echo "FAIL keystore test image"; exit 1; }
     KEY_FP=$(ssh-keygen -y -f "$OUT/key.pem" | ssh-keygen -lf - | awk '{print $2}')
     printf 'dir /test 0755 0 0\nfile /test/storage.img %s 0644 0 0\n' "$OUT/storage.img" >"$OUT/extra.list"
+    export INITRAMFS_EXTRA=$OUT/extra.list
+  fi
+  if [ "$MODE" = busybox ]; then
+    # mmio-test: /dev/klausscpu-mmio's whitelist (linux/userland/tests/mmio).
+    KLAUSSCPU_SYSROOT=$RT/linux-ws/sysroot "$RT/linux/userland/tests/mmio/run.sh" "$OUT" >"$OUT/mmio-test.log" 2>&1 ||
+      { echo "FAIL mmio-test build (see $OUT/mmio-test.log)"; exit 1; }
+    printf 'file /bin/mmio-test %s 0755 0 0\n' "$OUT/mmio-test" >"$OUT/extra.list"
     export INITRAMFS_EXTRA=$OUT/extra.list
   fi
   if [ "$MODE" = rootfs ]; then
@@ -419,6 +427,7 @@ echo 1 2 3 | wc -w
 mkdir /tmp/t && echo hi > /tmp/t/f && cat /tmp/t/f
 cat /proc/self/comm
 sh -c 'exit 3'; echo status $?
+mmio-test
 EOF2
   cat >"$OUT/busybox.expect" <<'EOF2'
 Run /init as init process
@@ -438,6 +447,20 @@ cat /proc/self/comm
 cat
 sh -c 'exit 3'; echo status $?
 status 3
+mmio-test
+PASS node
+PASS cpu-features
+PASS leds-restore
+PASS switches
+PASS clock-ms
+PASS write-switches
+PASS read-uart-status
+PASS read-misaligned
+PASS rdonly-write
+PASS wronly-read
+PASS nonroot-open
+PASS nocap-open
+mmio-test: PASS
 EOF2
   run_step busybox 20000000000 900 '$ '
 elif [ "$MODE" = rootfs ]; then
