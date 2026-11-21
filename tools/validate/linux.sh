@@ -450,6 +450,7 @@ status 3
 mmio-test
 PASS node
 PASS cpu-features
+PASS leds-readback
 PASS leds-restore
 PASS switches
 PASS clock-ms

@@ -5,9 +5,8 @@
  * per check and ends with "mmio-test: PASS" or "mmio-test: FAIL (n)".
  *
  * On the board the LED bar shows 0x5A5A briefly and is then restored.  The
- * klausscc emulator does not model the LEDs (they read 0): there, with
- * CPU_FEATURES[20] clear (no TRNG: the emulator; every board bitstream has
- * it), a LEDS read-back of 0 is a SKIP rather than a FAIL.
+ * klausscc emulator models the LEDs too (klausscc board-io), so the
+ * read-back must be 0x5A5A on both.
  */
 #include <errno.h>
 #include <grp.h>
@@ -25,7 +24,6 @@
 #include <asm/klausscpu-mmio.h>
 
 #define DEV "/dev/klausscpu-mmio"
-#define CPU_FEAT_TRNG (1ULL << 20)
 
 static int fails;
 
@@ -88,7 +86,7 @@ int main(void)
 	uint64_t v, feat = 0, leds, back, t0, t1;
 	int64_t m0, m1, dc, dm;
 	struct stat st;
-	int fd, rc, emu;
+	int fd, rc;
 
 	if (stat(DEV, &st) < 0) {
 		printf("FAIL node: " DEV ": %s\nmmio-test: FAIL (1)\n", strerror(errno));
@@ -107,7 +105,7 @@ int main(void)
 		return 1;
 	}
 
-	/* CPU_FEATURES: also tells the emulator from the board. */
+	/* CPU_FEATURES. */
 	rc = rd(fd, KLMMIO_CPU_FEATURES, &feat);
 	if (rc)
 		fail("cpu-features", strerror(-rc));
@@ -117,7 +115,6 @@ int main(void)
 		printf("INFO CPU_FEATURES 0x%llx\n", (unsigned long long)feat);
 		pass("cpu-features");
 	}
-	emu = !(feat & CPU_FEAT_TRNG);
 
 	/* LEDS: write 0x5A5A, read it back, restore. */
 	rc = rd(fd, KLMMIO_LEDS, &leds);
@@ -128,10 +125,8 @@ int main(void)
 	else {
 		if ((rc = rd(fd, KLMMIO_LEDS, &back)))
 			fail("leds-readback", strerror(-rc));
-		else if ((back & 0xFFFF) == 0x5A5A)
+		else if (back == 0x5A5A)
 			pass("leds-readback");
-		else if (emu && back == 0)
-			printf("SKIP leds-readback: read 0 (the emulator does not model the LEDs)\n");
 		else {
 			snprintf(why, sizeof(why), "read 0x%llx, want 0x5a5a", (unsigned long long)back);
 			fail("leds-readback", why);
